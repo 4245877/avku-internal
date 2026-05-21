@@ -1,0 +1,293 @@
+/* ============================================================
+   ESDEATH DESIGN SYSTEM — variables.css
+   "Power is beauty. Order is grace. Ice never lies."
+   ============================================================ */
+
+:root {
+
+  /* ── CORE PALETTE ─────────────────────────────────────── */
+  --ice-whisper:    #A8DDF7;   /* frozen breath, pale sky     */
+  --ice-deep:       #2C5F8A;   /* glacial depths, authority   */
+  --frost-surface:  #F4F7FB;   /* cold marble, clean canvas   */
+  --ash-mist:       #6E8599;   /* shadow on ice, secondary    */
+  --abyss-steel:    #1B2F4A;   /* commander's coat, dark tone */
+  --void:           #0B111C;   /* absolute command, darkest   */
+  --blood-crest:    #A63E4C;   /* the only warmth she allows  */
+
+  /* ── SEMANTIC ALIASES ────────────────────────────────── */
+  --color-bg-primary:    var(--frost-surface);
+  --color-bg-secondary:  #EBF3FA;
+  --color-bg-tertiary:   #DCE9F2;
+  --color-bg-dark:       var(--abyss-steel);
+  --color-bg-darkest:    var(--void);
+  --color-bg-sidebar:    #162539;
+
+  --color-text-primary:   var(--void);
+  --color-text-secondary: var(--ash-mist);
+  --color-text-inverse:   var(--frost-surface);
+  --color-text-muted:     #8AA3B5;
+  --color-text-accent:    var(--ice-deep);
+
+  --color-accent-primary: var(--ice-deep);
+  --color-accent-light:   var(--ice-whisper);
+  --color-accent-blood:   var(--blood-crest);
+  --color-accent-hover:   #3A75A8;
+
+  --color-border-light:   rgba(168, 221, 247, 0.35);
+  --color-border-medium:  rgba(44, 95, 138, 0.25);
+  --color-border-strong:  rgba(44, 95, 138, 0.5);
+  --color-border-dark:    rgba(168, 221, 247, 0.12);
+
+  --color-success:        #3A9E74;
+  --color-success-bg:     #E6F5F0;
+  --color-warning:        #C9862A;
+  --color-warning-bg:     #FDF4E5;
+  --color-danger:         var(--blood-crest);
+  --color-danger-bg:      #F8EAEC;
+  --color-info:           var(--ice-deep);
+  --color-info-bg:        #E6EFF7;
+
+  /* ── TYPOGRAPHY ──────────────────────────────────────── */
+  --font-display:  'Cormorant Garamond', 'Playfair Display', Georgia, serif;
+  --font-sans:     'DM Sans', 'Outfit', system-ui, sans-serif;
+  --font-mono:     'JetBrains Mono', 'Fira Code', monospace;
+
+  --text-xs:    0.72rem;   /* 11.5px */
+  --text-sm:    0.825rem;  /* 13px   */
+  --text-base:  0.9375rem; /* 15px   */
+  --text-md:    1.0625rem; /* 17px   */
+  --text-lg:    1.1875rem; /* 19px   */
+  --text-xl:    1.375rem;  /* 22px   */
+  --text-2xl:   1.75rem;   /* 28px   */
+  --text-3xl:   2.25rem;   /* 36px   */
+  --text-4xl:   3rem;      /* 48px   */
+
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-semibold:600;
+
+  --leading-tight:  1.25;
+  --leading-snug:   1.45;
+  --leading-normal: 1.65;
+  --leading-loose:  1.85;
+
+  --tracking-tight:  -0.03em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.06em;
+  --tracking-widest:  0.15em;
+
+  /* ── SPACING ─────────────────────────────────────────── */
+  --space-1:   0.25rem;
+  --space-2:   0.5rem;
+  --space-3:   0.75rem;
+  --space-4:   1rem;
+  --space-5:   1.25rem;
+  --space-6:   1.5rem;
+  --space-8:   2rem;
+  --space-10:  2.5rem;
+  --space-12:  3rem;
+  --space-16:  4rem;
+  --space-20:  5rem;
+  --space-24:  6rem;
+
+  /* ── BORDER RADIUS ───────────────────────────────────── */
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-xl:   18px;
+  --radius-2xl:  24px;
+  --radius-full: 9999px;
+
+  /* ── SHADOWS (glacial depth, not warm) ───────────────── */
+  --shadow-xs:  0 1px 3px rgba(11, 17, 28, 0.06);
+  --shadow-sm:  0 2px 8px rgba(11, 17, 28, 0.08), 0 0 0 0.5px rgba(44,95,138,0.1);
+  --shadow-md:  0 4px 16px rgba(11, 17, 28, 0.1),  0 0 0 0.5px rgba(44,95,138,0.12);
+  --shadow-lg:  0 8px 28px rgba(11, 17, 28, 0.13), 0 0 0 0.5px rgba(44,95,138,0.15);
+  --shadow-xl:  0 16px 48px rgba(11, 17, 28, 0.18);
+  --shadow-ice: 0 0 0 3px rgba(168, 221, 247, 0.25);   /* focus ring */
+
+  --focus-outline: 2px solid var(--ice-whisper);
+  --focus-outline-offset: 2px;
+
+  /* ── SIDEBAR ─────────────────────────────────────────── */
+  --sidebar-width:        240px;
+  --sidebar-width-collapsed: 64px;
+  --sidebar-bg:           var(--color-bg-sidebar);
+  --sidebar-text:         #B8CEDF;
+  --sidebar-text-active:  var(--ice-whisper);
+  --sidebar-item-hover:   rgba(168, 221, 247, 0.08);
+  --sidebar-item-active:  rgba(168, 221, 247, 0.15);
+  --sidebar-border:       rgba(168, 221, 247, 0.08);
+  --sidebar-icon:         #617D92;
+  --sidebar-icon-active:  var(--ice-whisper);
+
+  /* ── TOPBAR ──────────────────────────────────────────── */
+  --topbar-height:     56px;
+  --topbar-bg:         rgba(244, 247, 251, 0.88);
+  --topbar-backdrop:   blur(12px) saturate(1.4);
+  --topbar-border:     rgba(168, 221, 247, 0.3);
+
+  /* ── CARDS ───────────────────────────────────────────── */
+  --card-bg:       var(--frost-surface);
+  --card-border:   var(--color-border-light);
+  --card-radius:   var(--radius-xl);
+  --card-padding:  var(--space-6);
+  --card-shadow:   var(--shadow-md);
+
+  /* ── FORM ELEMENTS ───────────────────────────────────── */
+  --input-bg:           #FFFFFF;
+  --input-border:       rgba(44, 95, 138, 0.22);
+  --input-border-focus: var(--ice-deep);
+  --input-border-error: var(--blood-crest);
+  --input-text:         var(--void);
+  --input-placeholder:  var(--color-text-muted);
+  --input-radius:       var(--radius-md);
+  --input-height:       42px;
+  --input-padding-x:    var(--space-4);
+  --input-shadow-focus: var(--shadow-ice);
+
+  /* ── BUTTONS ─────────────────────────────────────────── */
+  --btn-primary-bg:      var(--ice-deep);
+  --btn-primary-text:    var(--frost-surface);
+  --btn-primary-hover:   #3A75A8;
+  --btn-primary-active:  #245278;
+
+  --btn-ghost-bg:        transparent;
+  --btn-ghost-border:    var(--color-border-medium);
+  --btn-ghost-text:      var(--color-text-accent);
+  --btn-ghost-hover-bg:  rgba(44, 95, 138, 0.07);
+
+  --btn-danger-bg:       var(--blood-crest);
+  --btn-danger-hover:    #BF4D5C;
+
+  --btn-height-sm:  32px;
+  --btn-height-md:  40px;
+  --btn-height-lg:  48px;
+  --btn-radius:     var(--radius-md);
+  --btn-font-size:  var(--text-sm);
+  --btn-tracking:   var(--tracking-wide);
+
+  /* ── BADGE / STATUS ──────────────────────────────────── */
+  --badge-radius:  var(--radius-full);
+  --badge-padding: 3px 10px;
+  --badge-size:    var(--text-xs);
+
+  /* ── TABLES ──────────────────────────────────────────── */
+  --table-header-bg:     #EBF3FA;
+  --table-row-hover:     rgba(168, 221, 247, 0.12);
+  --table-border:        rgba(168, 221, 247, 0.28);
+  --table-stripe:        rgba(168, 221, 247, 0.06);
+
+  /* ── TRANSITIONS & MOTION ────────────────────────────── */
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:   cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-sharp:    cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  --duration-fast:   120ms;
+  --duration-base:   220ms;
+  --duration-slow:   380ms;
+  --duration-reveal: 600ms;
+
+  --transition-base:    color var(--duration-base) var(--ease-out),
+                        background-color var(--duration-base) var(--ease-out),
+                        border-color var(--duration-base) var(--ease-out),
+                        box-shadow var(--duration-base) var(--ease-out),
+                        transform var(--duration-base) var(--ease-out);
+
+  --transition-fast:    color var(--duration-fast) var(--ease-sharp),
+                        background-color var(--duration-fast) var(--ease-sharp),
+                        border-color var(--duration-fast) var(--ease-sharp),
+                        opacity var(--duration-fast) var(--ease-sharp);
+
+  --transition-color:   color var(--duration-base) var(--ease-out),
+                        background-color var(--duration-base) var(--ease-out),
+                        border-color var(--duration-base) var(--ease-out);
+  --transition-shadow:  box-shadow var(--duration-base) var(--ease-out);
+
+  /* ── OVERLAYS & MODALS ───────────────────────────────── */
+  --overlay-bg:     rgba(11, 17, 28, 0.55);
+  --modal-bg:       var(--frost-surface);
+  --modal-radius:   var(--radius-2xl);
+  --modal-shadow:   var(--shadow-xl);
+
+  /* ── Z-INDEX SCALE ───────────────────────────────────── */
+  --z-base:      1;
+  --z-raised:    10;
+  --z-dropdown:  100;
+  --z-sticky:    200;
+  --z-sidebar:   300;
+  --z-topbar:    400;
+  --z-modal:     500;
+  --z-toast:     600;
+  --z-tooltip:   700;
+
+  /* ── LAYOUT ──────────────────────────────────────────── */
+  --content-max-width: 1280px;
+  --content-padding:   var(--space-6);
+  --grid-gap:          var(--space-6);
+
+  /* ── SCROLLBAR (chromium) ────────────────────────────── */
+  --scrollbar-track:  transparent;
+  --scrollbar-thumb:  rgba(44, 95, 138, 0.22);
+  --scrollbar-thumb-hover: rgba(44, 95, 138, 0.4);
+
+}
+
+/* ── DARK THEME ──────────────────────────────────────────── */
+[data-theme="dark"] {
+
+  --color-bg-primary:    #111C2B;
+  --color-bg-secondary:  #152031;
+  --color-bg-tertiary:   #0F1826;
+  --color-bg-sidebar:    #0C1520;
+
+  --color-text-primary:  #DCE9F5;
+  --color-text-secondary:#7A9CB5;
+  --color-text-muted:    #4D6E84;
+  --color-text-accent:   var(--ice-whisper);
+
+  --color-success:        #62C99A;
+  --color-success-bg:     rgba(58, 158, 116, 0.16);
+
+  --color-warning:        #E4A84A;
+  --color-warning-bg:     rgba(201, 134, 42, 0.16);
+
+  --color-danger:         #D96573;
+  --color-danger-bg:      rgba(166, 62, 76, 0.18);
+
+  --color-info:           var(--ice-whisper);
+  --color-info-bg:        rgba(168, 221, 247, 0.12);
+
+  --color-border-light:  rgba(168, 221, 247, 0.08);
+  --color-border-medium: rgba(168, 221, 247, 0.14);
+  --color-border-strong: rgba(168, 221, 247, 0.28);
+
+  --card-bg:        #132030;
+  --card-border:    rgba(168, 221, 247, 0.08);
+  --card-shadow:    0 4px 24px rgba(0, 0, 0, 0.35);
+
+  --input-bg:           #0F1D2E;
+  --input-border:       rgba(168, 221, 247, 0.14);
+  --input-text:         #D4E8F5;
+  --input-placeholder:  #3E5E74;
+
+  --topbar-bg:          rgba(11, 17, 28, 0.88);
+  --topbar-border:      rgba(168, 221, 247, 0.08);
+
+  --table-header-bg:    #0F1D2E;
+  --table-row-hover:    rgba(168, 221, 247, 0.06);
+  --table-border:       rgba(168, 221, 247, 0.1);
+
+  --sidebar-bg:          #08111D;
+  --sidebar-text:        #5E8097;
+  --sidebar-text-active: var(--ice-whisper);
+  --sidebar-border:      rgba(168, 221, 247, 0.06);
+  --sidebar-icon:        #3D5C72;
+
+  --shadow-md:  0 4px 20px rgba(0, 0, 0, 0.4);
+  --shadow-lg:  0 8px 32px rgba(0, 0, 0, 0.5);
+
+  --scrollbar-thumb: rgba(168, 221, 247, 0.12);
+
+}
