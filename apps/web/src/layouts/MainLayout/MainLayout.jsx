@@ -18,7 +18,7 @@ const navigationItems = [
   {
     path: '/smm',
     label: 'SMM',
-    description: 'Соціальні мережі',
+    description: 'Instagram та YouTube',
     icon: 'S',
   },
 ];
