@@ -3,8 +3,23 @@
   --smm-instagram-soft: #f8eaf4;
   --smm-youtube: #d2454a;
   --smm-youtube-soft: #fbeaec;
+  --smm-hero-start: #f7fbfe;
+  --smm-hero-end: #eaf3fa;
+  --smm-surface: rgba(255, 255, 255, 0.75);
+  --smm-surface-subtle: rgba(255, 255, 255, 0.42);
+  --smm-surface-border: rgba(255, 255, 255, 0.9);
 
   min-height: 100%;
+}
+
+:global([data-theme='dark']) .smmShell {
+  --smm-instagram-soft: rgba(166, 66, 135, 0.18);
+  --smm-youtube-soft: rgba(210, 69, 74, 0.18);
+  --smm-hero-start: #17283a;
+  --smm-hero-end: #101d2c;
+  --smm-surface: rgba(19, 32, 48, 0.82);
+  --smm-surface-subtle: rgba(19, 32, 48, 0.58);
+  --smm-surface-border: rgba(168, 221, 247, 0.1);
 }
 
 .sectionHeader {
@@ -20,7 +35,7 @@
   min-height: 68px;
   padding: 0 var(--space-12);
 
-  background: rgba(244, 247, 251, 0.9);
+  background: var(--topbar-bg);
   border-bottom: 1px solid var(--color-border-light);
   backdrop-filter: blur(16px) saturate(1.2);
 }
@@ -106,7 +121,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
+  width: 100%;
+  max-width: calc(var(--content-max-width) + var(--space-24));
   min-height: 100%;
+  margin-inline: auto;
   padding: var(--space-10) var(--space-12) var(--space-12);
   animation: pageReveal var(--duration-reveal) var(--ease-out) both;
 }
@@ -133,7 +151,7 @@
   padding: var(--space-10);
   background:
     radial-gradient(circle at 70% 0%, rgba(168, 221, 247, 0.22), transparent 38%),
-    linear-gradient(135deg, #f7fbfe, #eaf3fa);
+    linear-gradient(135deg, var(--smm-hero-start), var(--smm-hero-end));
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-2xl);
   box-shadow: var(--shadow-sm);
@@ -213,6 +231,7 @@
   border: 1px solid transparent;
   border-radius: var(--btn-radius);
   white-space: nowrap;
+  transition: var(--transition-base);
 }
 
 .primaryButton {
@@ -229,13 +248,13 @@
 
 .secondaryButton {
   color: var(--color-text-accent);
-  background: rgba(255, 255, 255, 0.58);
+  background: var(--smm-surface-subtle);
   border-color: var(--color-border-medium);
 }
 
 .secondaryButton:hover {
   color: var(--color-text-accent);
-  background: white;
+  background: var(--card-bg);
   border-color: var(--color-border-strong);
 }
 
@@ -250,8 +269,8 @@
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-5);
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: var(--smm-surface);
+  border: 1px solid var(--smm-surface-border);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-sm);
   transition: transform var(--duration-base) var(--ease-out);
@@ -746,7 +765,7 @@
   display: grid;
   grid-template-columns: 130px minmax(0, 1fr);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.42);
+  background: var(--smm-surface-subtle);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-xl);
   transition:
@@ -1128,8 +1147,8 @@
   flex-shrink: 0;
   width: 20px;
   height: 20px;
-  color: white;
-  background: white;
+  color: var(--color-text-inverse);
+  background: var(--input-bg);
   border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-sm);
 }
@@ -1383,13 +1402,14 @@
 }
 
 .calendarWrap {
-  min-width: 760px;
+  overflow-x: auto;
 }
 
 .weekHeader,
 .calendarGrid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 760px;
 }
 
 .weekHeader {
@@ -1480,6 +1500,7 @@
 }
 
 .calendarList {
+  overflow-x: auto;
   padding: 0 var(--space-6);
 }
 
@@ -1489,6 +1510,7 @@
   grid-template-columns: 90px minmax(220px, 1fr) 140px 110px 130px;
   align-items: center;
   gap: var(--space-4);
+  min-width: 760px;
 }
 
 .calendarListHeader {
@@ -1633,20 +1655,6 @@
     max-height: 300px;
   }
 
-  .calendarPanel {
-    overflow-x: auto;
-  }
-
-  .calendarToolbar,
-  .calendarLegend {
-    position: sticky;
-    left: 0;
-    min-width: 760px;
-  }
-
-  .calendarList {
-    min-width: 840px;
-  }
 }
 
 @media (max-width: 900px) {
@@ -1793,6 +1801,16 @@
 
   .viewSwitch button {
     flex: 1;
+  }
+
+  .calendarLegend {
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .calendarLegend span:last-child {
+    width: 100%;
+    margin-left: 0;
   }
 
   .formFooter {

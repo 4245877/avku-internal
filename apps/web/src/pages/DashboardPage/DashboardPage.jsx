@@ -41,6 +41,7 @@ const recentRecords = [
     status: 'У роботі',
     responsible: 'Богдан Колодій',
     date: '2026-05-21',
+    statusTone: 'progress',
   },
   {
     id: 'DEL-2026-0041',
@@ -49,6 +50,7 @@ const recentRecords = [
     status: 'Готово до звіту',
     responsible: 'Команда Київ',
     date: '2026-05-20',
+    statusTone: 'ready',
   },
   {
     id: 'REP-2026-0018',
@@ -57,6 +59,7 @@ const recentRecords = [
     status: 'Опубліковано',
     responsible: 'Адміністратор',
     date: '2026-05-19',
+    statusTone: 'published',
   },
   {
     id: 'PUB-2026-0024',
@@ -65,6 +68,7 @@ const recentRecords = [
     status: 'Чернетка',
     responsible: 'Редактор',
     date: '2026-05-18',
+    statusTone: 'draft',
   },
 ];
 
@@ -161,6 +165,7 @@ function DashboardPage() {
             <input
               className={styles.searchInput}
               type="search"
+              aria-label="Пошук записів"
               placeholder="Пошук за назвою, статусом або ID"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -186,12 +191,25 @@ function DashboardPage() {
                     <td>{record.type}</td>
                     <td>{record.title}</td>
                     <td>
-                      <span className={styles.statusBadge}>{record.status}</span>
+                      <span
+                        className={`${styles.statusBadge} ${
+                          styles[`statusBadge-${record.statusTone}`]
+                        }`}
+                      >
+                        {record.status}
+                      </span>
                     </td>
                     <td>{record.responsible}</td>
                     <td>{record.date}</td>
                   </tr>
                 ))}
+                {filteredRecords.length === 0 && (
+                  <tr>
+                    <td className={styles.emptyTableCell} colSpan={6}>
+                      За вашим запитом записів не знайдено.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

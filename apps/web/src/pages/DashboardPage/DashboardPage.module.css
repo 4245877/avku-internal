@@ -8,6 +8,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-10);
+  width: 100%;
+  max-width: calc(var(--content-max-width) + var(--space-24));
+  margin-inline: auto;
   padding: var(--space-10) var(--space-12);
   min-height: 100%;
   position: relative;
@@ -87,9 +90,9 @@
   /* Clip effect: text reveals left-to-right */
   background-image: linear-gradient(
     90deg,
-    var(--void) 0%,
-    var(--ice-deep) 60%,
-    var(--void) 100%
+    var(--color-text-primary) 0%,
+    var(--color-text-accent) 60%,
+    var(--color-text-primary) 100%
   );
   background-size: 200%;
   -webkit-background-clip: text;
@@ -206,7 +209,7 @@
 /* ── SUMMARY GRID ────────────────────────────────────────── */
 .summaryGrid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-5);
 }
 
@@ -339,10 +342,6 @@
   animation: cardRise var(--duration-reveal) var(--ease-spring) 0.2s both;
 }
 
-.panel + .panel {
-  margin-top: var(--space-5);
-}
-
 .panelHeader {
   display: flex;
   align-items: flex-start;
@@ -410,9 +409,10 @@
 
 .table {
   width: 100%;
+  min-width: 860px;
   border-collapse: collapse;
   font-size: var(--text-sm);
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .table thead {
@@ -433,6 +433,30 @@
   color: var(--color-text-primary);
   border-bottom: 2px solid var(--table-border);
   white-space: nowrap;
+}
+
+.table th:nth-child(1) {
+  width: 128px;
+}
+
+.table th:nth-child(2) {
+  width: 110px;
+}
+
+.table th:nth-child(3) {
+  min-width: 260px;
+}
+
+.table th:nth-child(4) {
+  width: 160px;
+}
+
+.table th:nth-child(5) {
+  width: 170px;
+}
+
+.table th:nth-child(6) {
+  width: 112px;
 }
 
 .table td {
@@ -480,16 +504,42 @@
   border-radius: var(--radius-full);
   border: 1px solid transparent;
   white-space: nowrap;
+  color: var(--color-info);
   background: var(--color-info-bg);
-  color: var(--ice-deep);
-  border-color: rgba(44, 95, 138, 0.2);
+  border-color: var(--color-border-medium);
   transition: background-color var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
 }
 
-/* Status-specific coloring by text content via :has() — fallback is primary blue */
-tr:hover .statusBadge {
-  background: rgba(44, 95, 138, 0.12);
+.statusBadge-progress {
+  color: var(--color-info);
+  background: var(--color-info-bg);
+  border-color: color-mix(in srgb, var(--color-info) 22%, transparent);
+}
+
+.statusBadge-ready {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border-color: color-mix(in srgb, var(--color-warning) 24%, transparent);
+}
+
+.statusBadge-published {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+  border-color: color-mix(in srgb, var(--color-success) 24%, transparent);
+}
+
+.statusBadge-draft {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-medium);
+}
+
+.table td.emptyTableCell {
+  height: 120px;
+  color: var(--color-text-muted);
+  text-align: center;
+  white-space: normal;
 }
 
 /* ── SIDE COLUMN ─────────────────────────────────────────── */
@@ -511,8 +561,10 @@ tr:hover .statusBadge {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-3) 0;
+  margin-inline: calc(-1 * var(--space-2));
+  padding: var(--space-3) var(--space-2);
   border-bottom: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
   transition: color var(--duration-fast) var(--ease-out),
@@ -526,12 +578,7 @@ tr:hover .statusBadge {
 
 .statusItem:hover {
   color: var(--color-text-primary);
-  padding-left: var(--space-2);
-  padding-right: var(--space-2);
-  margin-left: calc(-1 * var(--space-2));
-  margin-right: calc(-1 * var(--space-2));
   background: rgba(168, 221, 247, 0.06);
-  border-radius: var(--radius-sm);
 }
 
 .statusItem strong {
@@ -720,9 +767,6 @@ tr:hover .statusBadge {
     gap: var(--space-5);
   }
 
-  .panel + .panel {
-    margin-top: 0;
-  }
 }
 
 @media (max-width: 768px) {
@@ -780,10 +824,6 @@ tr:hover .statusBadge {
   .tableWrap {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-  }
-
-  .table {
-    min-width: 640px;
   }
 
   /* Prevent iOS zoom on input */

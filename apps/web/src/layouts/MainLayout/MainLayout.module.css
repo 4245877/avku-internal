@@ -2,6 +2,7 @@
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
+  min-height: 100svh;
   background: var(--color-bg-primary);
 }
 
@@ -15,6 +16,7 @@
 
   width: var(--sidebar-width);
   height: 100vh;
+  height: 100svh;
   padding: var(--space-6) var(--space-4);
 
   background:
@@ -268,6 +270,7 @@
 .content {
   min-width: 0;
   min-height: 100vh;
+  min-height: 100svh;
 }
 
 @media (max-width: 900px) {
@@ -308,6 +311,11 @@
 
   .navigation {
     overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .navigation::-webkit-scrollbar {
+    display: none;
   }
 
   .navigationLabel,
