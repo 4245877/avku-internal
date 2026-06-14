@@ -5,14 +5,13 @@ function CertificatesPage() {
     <main className={styles.page}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Документы</p>
+          <p className={styles.eyebrow}>Документи</p>
 
-          <h1 className={styles.title}>Удостоверения</h1>
+          <h1 className={styles.title}>Посвідчення</h1>
 
           <p className={styles.description}>
-            Хранение, добавление и управление удостоверениями.
-            Документы можно будет создавать вручную или загружать
-            в формате PDF.
+            Зберігання, додавання та керування посвідченнями. Документи
+            можна буде створювати вручну або завантажувати у форматі PDF.
           </p>
         </div>
 
@@ -21,47 +20,47 @@ function CertificatesPage() {
             className={styles.primaryButton}
             type="button"
             disabled
-            title="Функция будет добавлена позднее"
+            title="Функцію буде додано пізніше"
           >
-            Добавить вручную
+            Додати вручну
           </button>
 
           <button
             className={styles.secondaryButton}
             type="button"
             disabled
-            title="Функция будет добавлена позднее"
+            title="Функцію буде додано пізніше"
           >
-            Загрузить PDF
+            Завантажити PDF
           </button>
         </div>
       </header>
 
       <section className={styles.grid}>
         <article className={styles.panel}>
-          <h2 className={styles.panelTitle}>Реестр</h2>
+          <h2 className={styles.panelTitle}>Реєстр</h2>
 
           <p className={styles.panelText}>
-            Здесь появится таблица удостоверений с поиском,
-            фильтрацией и сортировкой.
+            Тут з&apos;явиться таблиця посвідчень із пошуком, фільтрацією
+            та сортуванням.
           </p>
         </article>
 
         <article className={styles.panel}>
-          <h2 className={styles.panelTitle}>Загрузка PDF</h2>
+          <h2 className={styles.panelTitle}>Завантаження PDF</h2>
 
           <p className={styles.panelText}>
-            Документы можно будет загружать, просматривать
-            и связывать с записью удостоверения.
+            Документи можна буде завантажувати, переглядати та
+            пов&apos;язувати із записом посвідчення.
           </p>
         </article>
 
         <article className={styles.panel}>
-          <h2 className={styles.panelTitle}>Управление</h2>
+          <h2 className={styles.panelTitle}>Керування</h2>
 
           <p className={styles.panelText}>
-            Для каждой записи будут доступны просмотр,
-            редактирование и удаление.
+            Для кожного запису будуть доступні перегляд, редагування та
+            видалення.
           </p>
         </article>
       </section>

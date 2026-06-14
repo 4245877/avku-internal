@@ -7,14 +7,14 @@ function NotFoundPage() {
       <section className={styles.emptyState}>
         <p className={styles.emptyCode}>ERROR 404</p>
 
-        <h1 className={styles.title}>Страница не найдена</h1>
+        <h1 className={styles.title}>Сторінку не знайдено</h1>
 
         <p className={styles.panelText}>
-          Такой страницы не существует или её адрес был изменён.
+          Такої сторінки не існує або її адресу було змінено.
         </p>
 
         <Link className={styles.homeLink} to="/">
-          Вернуться на Dashboard
+          Повернутися на Dashboard
         </Link>
       </section>
     </main>

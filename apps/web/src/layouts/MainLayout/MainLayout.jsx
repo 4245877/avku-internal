@@ -5,20 +5,20 @@ const navigationItems = [
   {
     path: '/',
     label: 'Dashboard',
-    description: 'Общая информация',
+    description: 'Загальна інформація',
     icon: 'D',
     end: true,
   },
   {
     path: '/certificates',
-    label: 'Удостоверения',
-    description: 'Документы и записи',
-    icon: 'У',
+    label: 'Посвідчення',
+    description: 'Документи та записи',
+    icon: 'П',
   },
   {
     path: '/smm',
     label: 'SMM',
-    description: 'Социальные сети',
+    description: 'Соціальні мережі',
     icon: 'S',
   },
 ];
@@ -30,21 +30,21 @@ function MainLayout() {
         <Link
           className={styles.brand}
           to="/"
-          aria-label="Перейти на главную страницу"
+          aria-label="Перейти на головну сторінку"
         >
           <span className={styles.brandMark}>А</span>
 
           <span className={styles.brandText}>
             <strong>АВКУ</strong>
-            <small>Внутренняя система</small>
+            <small>Внутрішня система</small>
           </span>
         </Link>
 
         <nav
           className={styles.navigation}
-          aria-label="Основная навигация"
+          aria-label="Основна навігація"
         >
-          <p className={styles.navigationLabel}>Разделы</p>
+          <p className={styles.navigationLabel}>Розділи</p>
 
           <ul className={styles.navigationList}>
             {navigationItems.map((item) => (
@@ -82,7 +82,7 @@ function MainLayout() {
           <span className={styles.statusIndicator} />
 
           <span>
-            <strong>Система работает</strong>
+            <strong>Система працює</strong>
             <small>AVKU Internal</small>
           </span>
         </div>

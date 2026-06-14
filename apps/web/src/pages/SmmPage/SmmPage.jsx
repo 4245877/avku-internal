@@ -5,13 +5,13 @@ function SmmPage() {
     <main className={styles.page}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Социальные сети</p>
+          <p className={styles.eyebrow}>Соціальні мережі</p>
 
           <h1 className={styles.title}>SMM</h1>
 
           <p className={styles.description}>
-            Раздел для подготовки публикаций, контроля контент-плана
-            и работы с материалами для социальных сетей.
+            Розділ для підготовки публікацій, контролю контент-плану та
+            роботи з матеріалами для соціальних мереж.
           </p>
         </div>
       </header>
@@ -20,11 +20,11 @@ function SmmPage() {
         <p className={styles.emptyCode}>SMM MODULE</p>
 
         <h2 className={styles.panelTitle}>
-          Раздел находится в разработке
+          Розділ перебуває у розробці
         </h2>
 
         <p className={styles.panelText}>
-          Функциональность будет добавлена после уточнения требований.
+          Функціональність буде додано після уточнення вимог.
         </p>
       </section>
     </main>
