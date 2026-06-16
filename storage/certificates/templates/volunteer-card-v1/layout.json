@@ -1,0 +1,52 @@
+{
+  "id": "volunteer-card-v1",
+  "canvas": {
+    "width": 1004,
+    "height": 1358
+  },
+  "photo": {
+    "x": 566,
+    "y": 397,
+    "width": 377,
+    "height": 519,
+    "radius": 62
+  },
+  "fields": {
+    "lastName": {
+      "x": 80,
+      "y": 414,
+      "width": 380,
+      "height": 64,
+      "font": "sans",
+      "fontSize": 54,
+      "align": "left"
+    },
+    "fullName": {
+      "x": 80,
+      "y": 538,
+      "width": 380,
+      "height": 58,
+      "font": "sans",
+      "fontSize": 38,
+      "align": "left"
+    },
+    "certificateNumber": {
+      "x": 190,
+      "y": 720,
+      "width": 270,
+      "height": 47,
+      "font": "sans",
+      "fontSize": 50,
+      "align": "right"
+    },
+    "validUntil": {
+      "x": 110,
+      "y": 770,
+      "width": 350,
+      "height": 48,
+      "font": "sans",
+      "fontSize": 48,
+      "align": "right"
+    }
+  }
+}
