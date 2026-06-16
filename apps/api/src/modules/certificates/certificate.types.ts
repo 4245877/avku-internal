@@ -17,6 +17,13 @@ export interface CertificatePhotoLayout {
   radius: number;
 }
 
+export interface CertificateImageOverlayLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface CertificateTextFieldLayout {
   x: number;
   y: number;
@@ -34,24 +41,35 @@ export interface CertificateLayout {
 
   photo: CertificatePhotoLayout;
 
+  stampOverlay?: CertificateImageOverlayLayout;
+
   fields: {
     lastName: CertificateTextFieldLayout;
     fullName: CertificateTextFieldLayout;
     certificateNumber: CertificateTextFieldLayout;
+    issuedAt?: CertificateTextFieldLayout;
     validUntil: CertificateTextFieldLayout;
   };
+}
+
+export interface CertificatePhotoCrop {
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
 }
 
 export interface RenderCertificateInput {
   templateDirectory: string;
   outputPath: string;
   photoPath: string;
+  photoCrop?: Partial<CertificatePhotoCrop>;
 
   lastName: string;
   firstName: string;
   middleName?: string;
 
   certificateNumber: string;
+  issuedAt?: string;
 
   /**
    * Допустимые варианты:

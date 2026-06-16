@@ -11,12 +11,6 @@
     "height": 519,
     "radius": 62
   },
-  "stampOverlay": {
-    "x": 545,
-    "y": 880,
-    "width": 423,
-    "height": 423
-  },
   "fields": {
     "lastName": {
       "x": 80,
