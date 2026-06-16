@@ -117,11 +117,11 @@ function CertificatePreview({
   );
 
   return (
-    <aside className={styles.previewPane} aria-label="Предварительный результат">
+    <aside className={styles.previewPane} aria-label="Попередній результат">
       <div className={styles.paneHeader}>
         <div>
-          <p className={styles.paneEyebrow}>Предпросмотр</p>
-          <h2 className={styles.paneTitle}>Готовый макет</h2>
+          <p className={styles.paneEyebrow}>Попередній перегляд</p>
+          <h2 className={styles.paneTitle}>Готовий макет</h2>
         </div>
       </div>
 
@@ -193,7 +193,7 @@ function CertificatePreview({
             ) : null}
           </div>
         ) : (
-          <div className={styles.previewLoading}>Загрузка шаблона...</div>
+          <div className={styles.previewLoading}>Завантаження шаблону…</div>
         )}
       </div>
 

@@ -109,15 +109,15 @@ const PhotoCropper = forwardRef(function PhotoCropper({
   }, []);
 
   return (
-    <section className={styles.photoPane} aria-label="Фотография">
+    <section className={styles.photoPane} aria-label="Фотографія">
       <div className={styles.paneHeader}>
         <div>
           <p className={styles.paneEyebrow}>Фото</p>
-          <h2 className={styles.paneTitle}>Кадрирование</h2>
+          <h2 className={styles.paneTitle}>Кадрування</h2>
         </div>
 
         <label className={styles.fileButton}>
-          Заменить
+          Замінити
           <input ref={inputRef} className={styles.fileInputHidden} type="file" accept="image/*" onChange={onPhotoChange} />
         </label>
       </div>
@@ -135,7 +135,7 @@ const PhotoCropper = forwardRef(function PhotoCropper({
           {imageUrl && photoPlacement ? (
             <img className={styles.cropImage} src={imageUrl} alt="" style={photoPlacement} draggable="false" />
           ) : (
-            <span className={styles.cropPlaceholder}>Фото не выбрано</span>
+            <span className={styles.cropPlaceholder}>Фото не вибрано</span>
           )}
         </div>
 

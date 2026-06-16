@@ -11,38 +11,38 @@ function CertificateForm({
   onReset,
 }) {
   return (
-    <section className={styles.editorPane} aria-label="Редактор удостоверения">
+    <section className={styles.editorPane} aria-label="Редактор посвідчення">
       <div className={styles.paneHeader}>
         <div>
           <p className={styles.paneEyebrow}>Редактор</p>
-          <h2 className={styles.paneTitle}>{form.id ? 'Редактирование записи' : 'Новая запись'}</h2>
+          <h2 className={styles.paneTitle}>{form.id ? 'Редагування запису' : 'Новий запис'}</h2>
         </div>
 
         <div className={styles.inlineActions}>
           <button className={styles.secondaryButtonCompact} type="button" onClick={onRenew}>
-            +1 год
+            +1 рік
           </button>
           <button className={styles.secondaryButtonCompact} type="button" onClick={onReset}>
-            Новая
+            Нова
           </button>
         </div>
       </div>
 
       <div className={styles.formGrid}>
         <label className={styles.field}>
-          <span>ФИО</span>
+          <span>ПІБ</span>
           <input
             className={`${styles.input} ${errors.fullName ? styles.inputError : ''}`}
             value={form.fullName}
             onChange={(event) => onChange('fullName', event.target.value)}
-            placeholder="Фамилия Имя Отчество"
+            placeholder="Прізвище Ім'я По батькові"
             aria-invalid={Boolean(errors.fullName)}
           />
           {errors.fullName ? <small className={styles.fieldError}>{errors.fullName}</small> : null}
         </label>
 
         <label className={styles.field}>
-          <span>Номер удостоверения</span>
+          <span>Номер посвідчення</span>
           <input
             className={`${styles.input} ${errors.certificateNumber ? styles.inputError : ''}`}
             value={form.certificateNumber}
@@ -56,7 +56,7 @@ function CertificateForm({
         </label>
 
         <label className={styles.field}>
-          <span>Дата выдачи</span>
+          <span>Дата видачі</span>
           <input
             className={`${styles.input} ${errors.issuedAt ? styles.inputError : ''}`}
             type="date"
@@ -68,7 +68,7 @@ function CertificateForm({
         </label>
 
         <label className={styles.field}>
-          <span>Действительно до</span>
+          <span>Дійсне до</span>
           <input
             className={`${styles.input} ${errors.validUntil ? styles.inputError : ''}`}
             type="date"
@@ -82,10 +82,10 @@ function CertificateForm({
 
       <div className={styles.formActions}>
         <button className={styles.primaryButton} type="button" onClick={onSave} disabled={isSaving}>
-          {isSaving ? 'Сохранение...' : form.id ? 'Сохранить изменения' : 'Сохранить удостоверение'}
+          {isSaving ? 'Збереження…' : form.id ? 'Зберегти зміни' : 'Зберегти посвідчення'}
         </button>
 
-        {isDirty ? <span className={styles.unsavedState}>Есть несохранённые изменения</span> : null}
+        {isDirty ? <span className={styles.unsavedState}>Є незбережені зміни</span> : null}
       </div>
     </section>
   );

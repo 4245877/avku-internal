@@ -37,14 +37,14 @@ async function parseResponse(response) {
     const payload = await response.json();
 
     if (!response.ok) {
-      throw new Error(payload.error || 'Ошибка API.');
+      throw new Error(payload.error || 'Помилка API.');
     }
 
     return payload;
   }
 
   if (!response.ok) {
-    throw new Error('Ошибка API.');
+    throw new Error('Помилка API.');
   }
 
   return response.blob();
@@ -126,10 +126,10 @@ export async function downloadCertificate(record, format) {
 
     if (contentType.includes('application/json')) {
       const payload = await response.json();
-      throw new Error(payload.error || 'Не удалось сформировать файл.');
+      throw new Error(payload.error || 'Не вдалося сформувати файл.');
     }
 
-    throw new Error('Не удалось сформировать файл.');
+    throw new Error('Не вдалося сформувати файл.');
   }
 
   return response.blob();

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  addOneYear,
   buildCertificatePayload,
   buildDownloadFileName,
   createFormFromRecord,
-  addOneYear,
   getCertificateStatus,
   getEmptyCertificateForm,
   hasValidationErrors,
@@ -14,8 +14,8 @@ import {
   createCertificate,
   downloadBlob,
   downloadCertificate,
-  fetchCertificateTemplate,
   fetchCertificates,
+  fetchCertificateTemplate,
   renewCertificate,
   updateCertificate,
 } from '../../features/certificates/certificateApi.js';
@@ -25,52 +25,130 @@ import CertificateRegistry from './components/CertificateRegistry.jsx';
 import PhotoCropper from './components/PhotoCropper.jsx';
 import styles from './CertificatesPage.module.css';
 
+const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
+const ALLOWED_PHOTO_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+const NOTICE_STYLE_BY_TYPE = {
+  error: 'noticeError',
+  info: 'noticeInfo',
+  success: 'noticeSuccess',
+  warning: 'noticeWarning',
+};
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
     reader.onload = () => resolve(String(reader.result));
-    reader.onerror = reject;
+    reader.onerror = () => reject(reader.error ?? new Error('Не вдалося прочитати файл.'));
     reader.readAsDataURL(file);
+  });
+}
+
+function getErrorMessage(error, fallbackMessage) {
+  return error instanceof Error && error.message
+    ? error.message
+    : fallbackMessage;
+}
+
+function getRecordTimestamp(record) {
+  const timestamp = Date.parse(record?.updatedAt ?? '');
+
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function sortRecordsByUpdatedAt(records) {
+  return [...records].sort((first, second) => {
+    const timestampDifference = getRecordTimestamp(second) - getRecordTimestamp(first);
+
+    if (timestampDifference !== 0) {
+      return timestampDifference;
+    }
+
+    return String(second?.id ?? '').localeCompare(String(first?.id ?? ''));
   });
 }
 
 function upsertRecord(records, nextRecord) {
   const otherRecords = records.filter((record) => record.id !== nextRecord.id);
 
-  return [nextRecord, ...otherRecords].sort((first, second) =>
-    second.updatedAt.localeCompare(first.updatedAt),
-  );
+  return sortRecordsByUpdatedAt([nextRecord, ...otherRecords]);
+}
+
+function validatePhotoFile(file) {
+  if (!ALLOWED_PHOTO_TYPES.has(file.type)) {
+    return 'Підтримуються фотографії у форматах JPG, PNG та WebP.';
+  }
+
+  if (file.size > MAX_PHOTO_SIZE_BYTES) {
+    return 'Розмір фотографії не повинен перевищувати 10 МБ.';
+  }
+
+  return '';
 }
 
 function CertificatesPage() {
   const photoInputRef = useRef(null);
+
   const [template, setTemplate] = useState(null);
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(getEmptyCertificateForm);
   const [savedSnapshot, setSavedSnapshot] = useState('');
   const [errors, setErrors] = useState({});
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [exportingFormat, setExportingFormat] = useState('');
   const [registryAction, setRegistryAction] = useState(null);
+  const [shouldOpenPhotoPicker, setShouldOpenPhotoPicker] = useState(false);
 
-  const activeCount = useMemo(
-    () => records.filter((record) => getCertificateStatus(record.validUntil).tone === 'active').length,
-    [records],
-  );
-  const expiredCount = useMemo(
-    () => records.filter((record) => getCertificateStatus(record.validUntil).tone === 'expired').length,
-    [records],
-  );
+  const statusSummary = useMemo(() => {
+    return records.reduce(
+      (summary, record) => {
+        const { tone } = getCertificateStatus(record.validUntil);
+
+        if (tone === 'active') {
+          summary.active += 1;
+        } else if (tone === 'soon') {
+          summary.soon += 1;
+        } else if (tone === 'expired') {
+          summary.expired += 1;
+        } else {
+          summary.muted += 1;
+        }
+
+        return summary;
+      },
+      { active: 0, soon: 0, expired: 0, muted: 0 },
+    );
+  }, [records]);
+
   const currentSnapshot = useMemo(
     () => JSON.stringify(buildCertificatePayload(form)),
     [form],
   );
+
   const isDirty = currentSnapshot !== savedSnapshot;
-  const selectedRecord = records.find((record) => record.id === form.id) ?? null;
+  const selectedRecord = useMemo(
+    () => records.find((record) => record.id === form.id) ?? null,
+    [form.id, records],
+  );
   const previewImageUrl = form.photoDataUrl || form.photoUrl;
+  const isAnyActionRunning = Boolean(
+    loading || isSaving || exportingFormat || registryAction,
+  );
+
+  const showNotice = useCallback((type, text) => {
+    setNotice({ type, text });
+  }, []);
+
+  const clearNotice = useCallback(() => {
+    setNotice(null);
+  }, []);
 
   const setCleanForm = useCallback((nextForm) => {
     setForm(nextForm);
@@ -83,43 +161,79 @@ function CertificatesPage() {
       return true;
     }
 
-    return window.confirm('Есть несохранённые изменения. Продолжить без сохранения?');
+    return window.confirm(
+      'Є незбережені зміни. Продовжити без збереження?',
+    );
   }, [isDirty]);
 
   useEffect(() => {
     let isMounted = true;
 
-    Promise.all([
-      fetchCertificateTemplate(),
-      fetchCertificates(),
-    ])
-      .then(([nextTemplate, nextRecords]) => {
-        if (!isMounted) {
-          return;
-        }
+    async function loadCertificatesModule() {
+      const [templateResult, recordsResult] = await Promise.allSettled([
+        fetchCertificateTemplate(),
+        fetchCertificates(),
+      ]);
 
-        const nextForm = getEmptyCertificateForm();
+      if (!isMounted) {
+        return;
+      }
 
-        setTemplate(nextTemplate);
-        setRecords(nextRecords);
-        setCleanForm(nextForm);
-        setNotice('');
-      })
-      .catch((error) => {
-        if (isMounted) {
-          setNotice(error instanceof Error ? error.message : 'Не удалось загрузить модуль удостоверений.');
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setLoading(false);
-        }
-      });
+      const loadingErrors = [];
+
+      if (templateResult.status === 'fulfilled') {
+        setTemplate(templateResult.value);
+      } else {
+        loadingErrors.push(
+          getErrorMessage(
+            templateResult.reason,
+            'Не вдалося завантажити шаблон посвідчення.',
+          ),
+        );
+      }
+
+      if (recordsResult.status === 'fulfilled') {
+        setRecords(sortRecordsByUpdatedAt(recordsResult.value));
+      } else {
+        loadingErrors.push(
+          getErrorMessage(
+            recordsResult.reason,
+            'Не вдалося завантажити реєстр посвідчень.',
+          ),
+        );
+      }
+
+      setCleanForm(getEmptyCertificateForm());
+
+      if (loadingErrors.length === 0) {
+        clearNotice();
+      } else {
+        showNotice(
+          loadingErrors.length === 2 ? 'error' : 'warning',
+          loadingErrors.join(' '),
+        );
+      }
+
+      setLoading(false);
+    }
+
+    loadCertificatesModule().catch((error) => {
+      if (!isMounted) {
+        return;
+      }
+
+      showNotice(
+        'error',
+        getErrorMessage(error, 'Не вдалося завантажити модуль посвідчень.'),
+      );
+      setCleanForm(getEmptyCertificateForm());
+      setLoading(false);
+    });
 
     return () => {
       isMounted = false;
     };
-  }, [setCleanForm]);
+  }, [clearNotice, setCleanForm, showNotice]);
 
   useEffect(() => {
     const handleBeforeUnload = (event) => {
@@ -137,6 +251,20 @@ function CertificatesPage() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isDirty]);
+
+  useEffect(() => {
+    if (!shouldOpenPhotoPicker) {
+      return;
+    }
+
+    const photoInput = photoInputRef.current;
+
+    if (photoInput) {
+      photoInput.click();
+    }
+
+    setShouldOpenPhotoPicker(false);
+  }, [form.id, shouldOpenPhotoPicker]);
 
   const updateField = useCallback((field, value) => {
     setForm((currentForm) => ({
@@ -157,57 +285,91 @@ function CertificatesPage() {
   }, []);
 
   const startNewRecord = useCallback(() => {
-    if (!confirmUnsavedChanges()) {
+    if (isAnyActionRunning || !confirmUnsavedChanges()) {
       return;
     }
 
     setCleanForm(getEmptyCertificateForm());
-    setNotice('');
-  }, [confirmUnsavedChanges, setCleanForm]);
+    clearNotice();
+  }, [clearNotice, confirmUnsavedChanges, isAnyActionRunning, setCleanForm]);
 
   const openRecord = useCallback((record) => {
-    if (!confirmUnsavedChanges()) {
+    if (isAnyActionRunning || !confirmUnsavedChanges()) {
       return false;
     }
 
     setCleanForm(createFormFromRecord(record));
-    setNotice('');
+    clearNotice();
     return true;
-  }, [confirmUnsavedChanges, setCleanForm]);
+  }, [clearNotice, confirmUnsavedChanges, isAnyActionRunning, setCleanForm]);
 
   const handlePhotoChange = useCallback(async (event) => {
-    const [file] = event.target.files;
+    const input = event.currentTarget;
+    const [file] = input.files ?? [];
 
     if (!file) {
       return;
     }
 
+    const validationMessage = validatePhotoFile(file);
+
+    if (validationMessage) {
+      setErrors((currentErrors) => ({
+        ...currentErrors,
+        photo: validationMessage,
+      }));
+      showNotice('error', validationMessage);
+      input.value = '';
+      return;
+    }
+
     try {
       const photoDataUrl = await readFileAsDataUrl(file);
+      const defaultPhotoCrop = getEmptyCertificateForm().photoCrop;
 
       setForm((currentForm) => ({
         ...currentForm,
         photoDataUrl,
+        photoUrl: '',
+        photoCrop: defaultPhotoCrop,
       }));
       setErrors((currentErrors) => ({
         ...currentErrors,
         photo: '',
       }));
-      setNotice('');
-    } catch {
-      setNotice('Не удалось прочитать фотографию.');
+      clearNotice();
+    } catch (error) {
+      const message = getErrorMessage(error, 'Не вдалося прочитати фотографію.');
+
+      setErrors((currentErrors) => ({
+        ...currentErrors,
+        photo: message,
+      }));
+      showNotice('error', message);
     } finally {
-      event.target.value = '';
+      input.value = '';
     }
-  }, []);
+  }, [clearNotice, showNotice]);
 
   const saveForm = useCallback(async () => {
+    if (loading || isSaving || registryAction || exportingFormat) {
+      return;
+    }
+
+    if (!isDirty) {
+      showNotice('info', 'Усі зміни вже збережено.');
+      return;
+    }
+
     const nextErrors = validateCertificateForm(form);
 
     setErrors(nextErrors);
 
     if (hasValidationErrors(nextErrors)) {
-      setNotice('Заполните обязательные поля и загрузите фотографию.');
+      showNotice(
+        'error',
+        "Заповніть обов'язкові поля та завантажте фотографію.",
+      );
       return;
     }
 
@@ -222,22 +384,47 @@ function CertificatesPage() {
 
       setRecords((currentRecords) => upsertRecord(currentRecords, savedRecord));
       setCleanForm(nextForm);
-      setNotice('Удостоверение сохранено.');
+      showNotice('success', 'Посвідчення збережено.');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Не удалось сохранить удостоверение.');
+      showNotice(
+        'error',
+        getErrorMessage(error, 'Не вдалося зберегти посвідчення.'),
+      );
     } finally {
       setIsSaving(false);
     }
-  }, [form, setCleanForm]);
+  }, [
+    exportingFormat,
+    form,
+    isDirty,
+    isSaving,
+    loading,
+    registryAction,
+    setCleanForm,
+    showNotice,
+  ]);
 
   const renewCurrentForm = useCallback(() => {
+    if (isAnyActionRunning) {
+      return;
+    }
+
     setForm((currentForm) => ({
       ...currentForm,
       validUntil: addOneYear(currentForm.validUntil),
     }));
-  }, []);
+    showNotice('info', 'Дату подовжено на один рік. Збережіть зміни.');
+  }, [isAnyActionRunning, showNotice]);
 
   const renewRecord = useCallback(async (record) => {
+    if (isAnyActionRunning) {
+      return;
+    }
+
+    if (form.id === record.id && !confirmUnsavedChanges()) {
+      return;
+    }
+
     setRegistryAction({
       id: record.id,
       type: 'renew',
@@ -252,25 +439,41 @@ function CertificatesPage() {
         setCleanForm(createFormFromRecord(renewedRecord));
       }
 
-      setNotice('Срок действия продлён.');
+      showNotice('success', 'Термін дії подовжено.');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Не удалось продлить удостоверение.');
+      showNotice(
+        'error',
+        getErrorMessage(error, 'Не вдалося подовжити посвідчення.'),
+      );
     } finally {
       setRegistryAction(null);
     }
-  }, [form.id, setCleanForm]);
+  }, [
+    confirmUnsavedChanges,
+    form.id,
+    isAnyActionRunning,
+    setCleanForm,
+    showNotice,
+  ]);
 
   const replacePhotoFromRegistry = useCallback((record) => {
     if (!openRecord(record)) {
       return;
     }
 
-    window.setTimeout(() => {
-      photoInputRef.current?.click();
-    }, 0);
+    setShouldOpenPhotoPicker(true);
   }, [openRecord]);
 
   const exportRecord = useCallback(async (record, format) => {
+    if (isAnyActionRunning) {
+      return;
+    }
+
+    if (form.id === record.id && isDirty) {
+      showNotice('warning', 'Збережіть зміни перед експортом.');
+      return;
+    }
+
     setRegistryAction({
       id: record.id,
       type: format,
@@ -280,22 +483,32 @@ function CertificatesPage() {
       const blob = await downloadCertificate(record, format);
 
       downloadBlob(blob, buildDownloadFileName(record, format));
-      setNotice(`${format.toUpperCase()} сформирован.`);
+      showNotice('success', `${format.toUpperCase()} сформовано.`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : `Не удалось сформировать ${format.toUpperCase()}.`);
+      showNotice(
+        'error',
+        getErrorMessage(
+          error,
+          `Не вдалося сформувати ${format.toUpperCase()}.`,
+        ),
+      );
     } finally {
       setRegistryAction(null);
     }
-  }, []);
+  }, [form.id, isAnyActionRunning, isDirty, showNotice]);
 
   const exportCurrentRecord = useCallback(async (format) => {
+    if (loading || isSaving || registryAction || exportingFormat) {
+      return;
+    }
+
     if (!selectedRecord) {
-      setNotice('Сначала сохраните удостоверение.');
+      showNotice('warning', 'Спочатку збережіть посвідчення.');
       return;
     }
 
     if (isDirty) {
-      setNotice('Сохраните изменения перед экспортом.');
+      showNotice('warning', 'Збережіть зміни перед експортом.');
       return;
     }
 
@@ -305,51 +518,113 @@ function CertificatesPage() {
       const blob = await downloadCertificate(selectedRecord, format);
 
       downloadBlob(blob, buildDownloadFileName(selectedRecord, format));
-      setNotice(`${format.toUpperCase()} сформирован.`);
+      showNotice('success', `${format.toUpperCase()} сформовано.`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : `Не удалось сформировать ${format.toUpperCase()}.`);
+      showNotice(
+        'error',
+        getErrorMessage(
+          error,
+          `Не вдалося сформувати ${format.toUpperCase()}.`,
+        ),
+      );
     } finally {
       setExportingFormat('');
     }
-  }, [isDirty, selectedRecord]);
+  }, [
+    exportingFormat,
+    isDirty,
+    isSaving,
+    loading,
+    registryAction,
+    selectedRecord,
+    showNotice,
+  ]);
+
+  const noticeClassName = notice
+    ? [styles.notice, styles[NOTICE_STYLE_BY_TYPE[notice.type]]]
+      .filter(Boolean)
+      .join(' ')
+    : '';
 
   return (
-    <main className={styles.page}>
+    <main
+      className={styles.page}
+      aria-busy={loading || isSaving}
+    >
       <header className={styles.header}>
         <div className={styles.headerText}>
-          <p className={styles.eyebrow}>Документы</p>
-          <h1 className={styles.title}>Удостоверения</h1>
+          <p className={styles.eyebrow}>Документи</p>
+          <h1 className={styles.title}>Посвідчення</h1>
           <p className={styles.description}>
-            Реестр, редактор, предпросмотр и серверный экспорт удостоверений в PNG и PDF.
+            Реєстр, редактор, попередній перегляд та серверний експорт посвідчень у PNG та PDF.
           </p>
         </div>
 
         <div className={styles.headerActions}>
-          <button className={styles.secondaryButton} type="button" onClick={startNewRecord}>
-            Новая запись
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            onClick={startNewRecord}
+            disabled={isAnyActionRunning}
+          >
+            Новий запис
           </button>
-          <button className={styles.primaryButton} type="button" onClick={saveForm} disabled={isSaving || loading}>
-            {isSaving ? 'Сохранение...' : 'Сохранить'}
+          <button
+            className={styles.primaryButton}
+            type="button"
+            onClick={saveForm}
+            disabled={isAnyActionRunning || !isDirty}
+          >
+            {isSaving ? 'Збереження…' : 'Зберегти'}
           </button>
         </div>
       </header>
 
-      <section className={styles.statsGrid} aria-label="Сводка реестра">
+      <section className={styles.statsGrid} aria-label="Статистика реєстру">
         <div className={styles.statItem}>
-          <span>Всего</span>
+          <span>Всього</span>
           <strong>{records.length}</strong>
         </div>
         <div className={styles.statItem}>
-          <span>Действуют</span>
-          <strong>{activeCount}</strong>
+          <span>Активні</span>
+          <strong>{statusSummary.active}</strong>
         </div>
         <div className={styles.statItem}>
-          <span>Истекли</span>
-          <strong>{expiredCount}</strong>
+          <span>Незабаром спливають</span>
+          <strong>{statusSummary.soon}</strong>
+        </div>
+        <div className={styles.statItem}>
+          <span>Прострочені</span>
+          <strong>{statusSummary.expired}</strong>
+        </div>
+        <div className={styles.statItem}>
+          <span>Без статусу</span>
+          <strong>{statusSummary.muted}</strong>
         </div>
       </section>
 
-      {notice ? <p className={styles.notice} aria-live="polite">{notice}</p> : null}
+      <div
+        className={styles.noticeRegion}
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {notice ? (
+          <div
+            className={noticeClassName}
+            role={notice.type === 'error' ? 'alert' : 'status'}
+          >
+            <span>{notice.text}</span>
+            <button
+              className={styles.noticeCloseButton}
+              type="button"
+              onClick={clearNotice}
+              aria-label="Закрити сповіщення"
+            >
+              Закрити
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       <section className={styles.workspace}>
         <CertificateRegistry
@@ -379,7 +654,7 @@ function CertificatesPage() {
             ref={photoInputRef}
             imageUrl={previewImageUrl}
             crop={form.photoCrop}
-            photoFrame={template?.layout.photo}
+            photoFrame={template?.layout?.photo}
             error={errors.photo}
             onCropChange={updateCrop}
             onPhotoChange={handlePhotoChange}
@@ -390,7 +665,11 @@ function CertificatesPage() {
           form={form}
           template={template}
           imageUrl={previewImageUrl}
-          isExportDisabled={!selectedRecord || isDirty || Boolean(exportingFormat)}
+          isExportDisabled={
+            !selectedRecord
+            || isDirty
+            || isAnyActionRunning
+          }
           exportingFormat={exportingFormat}
           onExport={exportCurrentRecord}
         />

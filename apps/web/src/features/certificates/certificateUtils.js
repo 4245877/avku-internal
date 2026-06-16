@@ -121,7 +121,7 @@ export function getCertificateStatus(value) {
 
   if (!date) {
     return {
-      label: 'Без даты',
+      label: 'Без дати',
       tone: 'muted',
     };
   }
@@ -130,7 +130,7 @@ export function getCertificateStatus(value) {
 
   if (daysLeft < 0) {
     return {
-      label: 'Истекло',
+      label: 'Прострочено',
       tone: 'expired',
     };
   }
@@ -143,7 +143,7 @@ export function getCertificateStatus(value) {
   }
 
   return {
-    label: 'Действует',
+    label: 'Дійсне',
     tone: 'active',
   };
 }
@@ -152,23 +152,23 @@ export function validateCertificateForm(form) {
   const errors = {};
 
   if (!normalizeWhitespace(form.fullName)) {
-    errors.fullName = 'Укажите ФИО.';
+    errors.fullName = 'Вкажіть ПІБ.';
   }
 
   if (!normalizeWhitespace(form.certificateNumber)) {
-    errors.certificateNumber = 'Укажите номер удостоверения.';
+    errors.certificateNumber = 'Вкажіть номер посвідчення.';
   }
 
   if (!parseInputDate(form.issuedAt)) {
-    errors.issuedAt = 'Укажите дату выдачи.';
+    errors.issuedAt = 'Вкажіть дату видачі.';
   }
 
   if (!parseInputDate(form.validUntil)) {
-    errors.validUntil = 'Укажите дату окончания действия.';
+    errors.validUntil = 'Вкажіть дату завершення дії.';
   }
 
   if (!form.photoUrl && !form.photoDataUrl) {
-    errors.photo = 'Загрузите фотографию.';
+    errors.photo = 'Завантажте фотографію.';
   }
 
   return errors;
