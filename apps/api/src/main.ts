@@ -74,7 +74,7 @@ function applyCors(
   );
   response.setHeader(
     "Access-Control-Allow-Methods",
-    "GET,POST,PUT,PATCH,OPTIONS",
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   );
 }
 
@@ -303,6 +303,18 @@ async function handleCertificateRequest(
         response,
         200,
         await repository.renew(id),
+      );
+      return;
+    }
+
+    if (request.method === "DELETE" && !action) {
+      await repository.remove(id);
+      sendJson(
+        response,
+        200,
+        {
+          ok: true,
+        },
       );
       return;
     }

@@ -16,6 +16,7 @@ function CertificateRegistry({
   onRenew,
   onReplacePhoto,
   onExport,
+  onDelete,
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const filteredRecords = useMemo(() => {
@@ -110,6 +111,14 @@ function CertificateRegistry({
                     </button>
                     <button className={styles.linkButton} type="button" onClick={() => onExport(record, 'pdf')} disabled={isBusy}>
                       {isBusy && actionState.type === 'pdf' ? '…' : 'PDF'}
+                    </button>
+                    <button
+                      className={`${styles.linkButton} ${styles.dangerLinkButton}`}
+                      type="button"
+                      onClick={() => onDelete(record)}
+                      disabled={isBusy}
+                    >
+                      {isBusy && actionState.type === 'delete' ? '…' : 'Видалити'}
                     </button>
                   </div>
                 </div>

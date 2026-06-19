@@ -12,6 +12,7 @@ import {
 } from '../../features/certificates/certificateUtils.js';
 import {
   createCertificate,
+  deleteCertificate,
   downloadBlob,
   downloadCertificate,
   fetchCertificates,
@@ -22,6 +23,7 @@ import {
 import CertificateForm from './components/CertificateForm.jsx';
 import CertificatePreview from './components/CertificatePreview.jsx';
 import CertificateRegistry from './components/CertificateRegistry.jsx';
+import DeleteCertificateDialog from './components/DeleteCertificateDialog.jsx';
 import PhotoCropper from './components/PhotoCropper.jsx';
 import styles from './CertificatesPage.module.css';
 
@@ -150,6 +152,7 @@ function CertificatesPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [exportingFormat, setExportingFormat] = useState('');
   const [registryAction, setRegistryAction] = useState(null);
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [shouldOpenPhotoPicker, setShouldOpenPhotoPicker] = useState(false);
 
   const statusSummary = useMemo(() => {
@@ -550,6 +553,71 @@ function CertificatesPage() {
     }
   }, [form.id, isAnyActionRunning, isDirty, showNotice]);
 
+  const requestDeleteRecord = useCallback((record) => {
+    if (isAnyActionRunning) {
+      return;
+    }
+
+    if (form.id === record.id && !confirmUnsavedChanges()) {
+      return;
+    }
+
+    setDeleteCandidate(record);
+    clearNotice();
+  }, [
+    clearNotice,
+    confirmUnsavedChanges,
+    form.id,
+    isAnyActionRunning,
+  ]);
+
+  const closeDeleteDialog = useCallback(() => {
+    if (registryAction?.type === 'delete') {
+      return;
+    }
+
+    setDeleteCandidate(null);
+  }, [registryAction]);
+
+  const confirmDeleteRecord = useCallback(async () => {
+    if (!deleteCandidate || isAnyActionRunning) {
+      return;
+    }
+
+    setRegistryAction({
+      id: deleteCandidate.id,
+      type: 'delete',
+    });
+
+    try {
+      await deleteCertificate(deleteCandidate.id);
+
+      setRecords((currentRecords) =>
+        currentRecords.filter((record) => record.id !== deleteCandidate.id),
+      );
+
+      if (form.id === deleteCandidate.id) {
+        setCleanForm(getEmptyCertificateForm());
+      }
+
+      setDeleteCandidate(null);
+      showNotice('success', 'Посвідчення видалено.');
+    } catch (error) {
+      showNotice(
+        'error',
+        getErrorMessage(error, 'Не вдалося видалити посвідчення.'),
+      );
+    } finally {
+      setRegistryAction(null);
+    }
+  }, [
+    deleteCandidate,
+    form.id,
+    isAnyActionRunning,
+    setCleanForm,
+    showNotice,
+  ]);
+
   const exportCurrentRecord = useCallback(async (format) => {
     if (loading || isSaving || registryAction || exportingFormat) {
       return;
@@ -689,6 +757,7 @@ function CertificatesPage() {
           onRenew={renewRecord}
           onReplacePhoto={replacePhotoFromRegistry}
           onExport={exportRecord}
+          onDelete={requestDeleteRecord}
         />
 
         <div className={styles.editorStack}>
@@ -727,6 +796,13 @@ function CertificatesPage() {
           onExport={exportCurrentRecord}
         />
       </section>
+
+      <DeleteCertificateDialog
+        record={deleteCandidate}
+        isDeleting={registryAction?.type === 'delete'}
+        onCancel={closeDeleteDialog}
+        onConfirm={confirmDeleteRecord}
+      />
     </main>
   );
 }

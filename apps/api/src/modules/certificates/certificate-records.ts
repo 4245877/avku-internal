@@ -3,6 +3,7 @@ import {
   mkdir,
   readFile,
   rename,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -409,6 +410,30 @@ export class CertificateRepository {
     return toCertificateResponse(updatedRecord);
   }
 
+  async remove(id: string): Promise<void> {
+    const records = await this.readRegistry();
+    const recordIndex = records.findIndex((record) => record.id === id);
+
+    if (recordIndex === -1) {
+      throw new Error("РЈРґРѕСЃС‚РѕРІРµСЂРµРЅРёРµ РЅРµ РЅР°Р№РґРµРЅРѕ.");
+    }
+
+    const [removedRecord] = records.splice(recordIndex, 1);
+
+    await this.writeRegistry(records);
+    await Promise.all([
+      this.removeFileIfExists(
+        this.getPhotoPath(removedRecord.photoFileName),
+      ),
+      this.removeFileIfExists(
+        path.join(
+          this.generatedDirectory,
+          `${removedRecord.id}.png`,
+        ),
+      ),
+    ]);
+  }
+
   async readTemplateLayout(): Promise<CertificateLayout> {
     const content = await readFile(
       path.join(
@@ -535,6 +560,22 @@ export class CertificateRepository {
       temporaryPath,
       this.registryPath,
     );
+  }
+
+  private async removeFileIfExists(filePath: string): Promise<void> {
+    try {
+      await unlink(filePath);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        return;
+      }
+
+      throw error;
+    }
   }
 
   private async findRecord(

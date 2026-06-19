@@ -150,6 +150,12 @@ export async function renewCertificate(id) {
   );
 }
 
+export async function deleteCertificate(id) {
+  return requestJson(`/certificates/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function downloadCertificate(record, format) {
   const url = resolveStorageUrl(record.exportUrls?.[format]);
 
