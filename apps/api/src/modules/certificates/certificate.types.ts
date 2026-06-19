@@ -15,6 +15,7 @@ export interface CertificatePhotoLayout {
   width: number;
   height: number;
   radius: number;
+  bleed?: number;
 }
 
 export interface CertificateImageOverlayLayout {
@@ -31,6 +32,8 @@ export interface CertificateTextFieldLayout {
   height: number;
   font: string;
   fontSize: number;
+  minFontSize?: number;
+  widthFactor?: number;
   align?: CertificateTextAlign;
 }
 

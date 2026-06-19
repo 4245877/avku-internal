@@ -1,3 +1,7 @@
+import fallbackBackgroundUrl from '../../assets/certificates/volunteer-card-v1/background.png';
+import fallbackLayout from '../../assets/certificates/volunteer-card-v1/layout.json';
+import fallbackStampOverlayUrl from '../../assets/certificates/volunteer-card-v1/stamp-overlay.png';
+
 const API_BASE_URL = (
   import.meta.env.VITE_CERTIFICATES_API_URL ||
   import.meta.env.VITE_API_URL ||
@@ -5,6 +9,8 @@ const API_BASE_URL = (
     ? 'http://localhost:3001/api'
     : '/api')
 ).replace(/\/$/, '');
+const FALLBACK_TEMPLATE_WARNING =
+  'Шаблон із API недоступний; використовується локальна копія для попереднього перегляду.';
 
 function resolveApiUrl(path) {
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
@@ -73,16 +79,43 @@ function normalizeRecord(record) {
   };
 }
 
-export async function fetchCertificateTemplate() {
-  const template = await requestJson('/certificates/template');
-
+function normalizeTemplate(template, options = {}) {
   return {
     ...template,
+    id: template.id || template.layout?.id || fallbackLayout.id,
+    layout: template.layout || fallbackLayout,
+    isFallback: Boolean(options.isFallback),
+    warning: options.warning || '',
     assets: {
-      backgroundUrl: resolveStorageUrl(template.assets.backgroundUrl),
-      stampOverlayUrl: resolveStorageUrl(template.assets.stampOverlayUrl),
+      backgroundUrl: resolveStorageUrl(template.assets?.backgroundUrl) || fallbackBackgroundUrl,
+      stampOverlayUrl: resolveStorageUrl(template.assets?.stampOverlayUrl) || fallbackStampOverlayUrl,
+      backgroundFallbackUrl: fallbackBackgroundUrl,
+      stampOverlayFallbackUrl: fallbackStampOverlayUrl,
     },
   };
+}
+
+export async function fetchCertificateTemplate() {
+  try {
+    return normalizeTemplate(
+      await requestJson('/certificates/template'),
+    );
+  } catch {
+    return normalizeTemplate(
+      {
+        id: fallbackLayout.id,
+        layout: fallbackLayout,
+        assets: {
+          backgroundUrl: fallbackBackgroundUrl,
+          stampOverlayUrl: fallbackStampOverlayUrl,
+        },
+      },
+      {
+        isFallback: true,
+        warning: FALLBACK_TEMPLATE_WARNING,
+      },
+    );
+  }
 }
 
 export async function fetchCertificates() {
@@ -119,6 +152,11 @@ export async function renewCertificate(id) {
 
 export async function downloadCertificate(record, format) {
   const url = resolveStorageUrl(record.exportUrls?.[format]);
+
+  if (!url) {
+    throw new Error('Немає посилання для експорту посвідчення.');
+  }
+
   const response = await fetch(url);
 
   if (!response.ok) {

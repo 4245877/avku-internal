@@ -6,6 +6,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import sharp from "sharp";
 
 import { renderCertificate } from "./certificate-renderer";
 import { createPdfFromPng } from "./certificate-pdf";
@@ -21,6 +22,12 @@ const DEFAULT_CROP: CertificatePhotoCrop = {
   offsetX: 0,
   offsetY: 0,
 };
+const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
+const SUPPORTED_PHOTO_FORMATS = new Set([
+  "jpeg",
+  "png",
+  "webp",
+]);
 
 const IMAGE_DATA_URL_PATTERN =
   /^data:(image\/(?:png|jpe?g|webp));base64,([a-z0-9+/=\r\n]+)$/i;
@@ -130,16 +137,69 @@ function normalizeCrop(
   };
 }
 
-function getExtensionForMimeType(mimeType: string): string {
-  if (mimeType === "image/jpeg" || mimeType === "image/jpg") {
+function getExtensionForImageFormat(format: string): string {
+  if (format === "jpeg") {
     return "jpg";
   }
 
-  if (mimeType === "image/webp") {
+  if (format === "webp") {
     return "webp";
   }
 
   return "png";
+}
+
+async function parsePhotoDataUrl(
+  dataUrl: unknown,
+): Promise<{
+  content: Buffer;
+  extension: string;
+}> {
+  if (typeof dataUrl !== "string") {
+    throw new Error("Фотографія обов'язкова.");
+  }
+
+  const match = IMAGE_DATA_URL_PATTERN.exec(dataUrl);
+
+  if (!match) {
+    throw new Error("Фотографія має бути PNG, JPEG або WebP.");
+  }
+
+  const [, , base64Content] = match;
+  const content = Buffer.from(
+    base64Content.replace(/\s+/g, ""),
+    "base64",
+  );
+
+  if (content.length === 0) {
+    throw new Error("Файл фотографії порожній.");
+  }
+
+  if (content.length > MAX_PHOTO_SIZE_BYTES) {
+    throw new Error("Розмір фотографії не повинен перевищувати 10 МБ.");
+  }
+
+  let metadata: sharp.Metadata;
+
+  try {
+    metadata = await sharp(content).metadata();
+  } catch {
+    throw new Error("Не вдалося прочитати фотографію. Завантажте справний файл PNG, JPEG або WebP.");
+  }
+
+  if (
+    !metadata.format ||
+    !SUPPORTED_PHOTO_FORMATS.has(metadata.format) ||
+    !metadata.width ||
+    !metadata.height
+  ) {
+    throw new Error("Фотографія має бути справним файлом PNG, JPEG або WebP.");
+  }
+
+  return {
+    content,
+    extension: getExtensionForImageFormat(metadata.format),
+  };
 }
 
 function splitFullName(fullName: string): Pick<
@@ -244,22 +304,26 @@ export class CertificateRepository {
   ): Promise<CertificateRecordResponse> {
     const now = new Date().toISOString();
     const id = randomUUID();
+    const fullName = normalizeRequiredText(
+      payload.fullName,
+      "ПІБ",
+    );
+    const certificateNumber = normalizeRequiredText(
+      payload.certificateNumber,
+      "Номер посвідчення",
+    );
+    const issuedAt = normalizeDate(payload.issuedAt);
+    const validUntil = normalizeDate(payload.validUntil);
     const photoFileName = await this.savePhoto(
       id,
       payload.photoDataUrl,
     );
     const record: CertificateRecord = {
       id,
-      fullName: normalizeRequiredText(
-        payload.fullName,
-        "ФИО",
-      ),
-      certificateNumber: normalizeRequiredText(
-        payload.certificateNumber,
-        "Номер удостоверения",
-      ),
-      issuedAt: normalizeDate(payload.issuedAt),
-      validUntil: normalizeDate(payload.validUntil),
+      fullName,
+      certificateNumber,
+      issuedAt,
+      validUntil,
       photoFileName,
       photoCrop: normalizeCrop(payload.photoCrop),
       templateId: TEMPLATE_ID,
@@ -288,6 +352,16 @@ export class CertificateRepository {
     }
 
     const existingRecord = records[recordIndex];
+    const fullName = normalizeRequiredText(
+      payload.fullName,
+      "ПІБ",
+    );
+    const certificateNumber = normalizeRequiredText(
+      payload.certificateNumber,
+      "Номер посвідчення",
+    );
+    const issuedAt = normalizeDate(payload.issuedAt);
+    const validUntil = normalizeDate(payload.validUntil);
     const photoFileName =
       typeof payload.photoDataUrl === "string" && payload.photoDataUrl
         ? await this.savePhoto(
@@ -297,16 +371,10 @@ export class CertificateRepository {
         : existingRecord.photoFileName;
     const updatedRecord: CertificateRecord = {
       ...existingRecord,
-      fullName: normalizeRequiredText(
-        payload.fullName,
-        "ФИО",
-      ),
-      certificateNumber: normalizeRequiredText(
-        payload.certificateNumber,
-        "Номер удостоверения",
-      ),
-      issuedAt: normalizeDate(payload.issuedAt),
-      validUntil: normalizeDate(payload.validUntil),
+      fullName,
+      certificateNumber,
+      issuedAt,
+      validUntil,
       photoFileName,
       photoCrop: normalizeCrop(
         payload.photoCrop,
@@ -486,30 +554,17 @@ export class CertificateRepository {
     id: string,
     dataUrl: unknown,
   ): Promise<string> {
-    if (typeof dataUrl !== "string") {
-      throw new Error("Фотография обязательна.");
-    }
-
-    const match = IMAGE_DATA_URL_PATTERN.exec(dataUrl);
-
-    if (!match) {
-      throw new Error("Фотография должна быть PNG, JPEG или WebP.");
-    }
-
     await this.ensureDirectories();
 
-    const [, mimeType, base64Content] = match;
-    const photoFileName = `${id}-${Date.now()}.${getExtensionForMimeType(mimeType)}`;
+    const { content, extension } = await parsePhotoDataUrl(dataUrl);
+    const photoFileName = `${id}-${Date.now()}.${extension}`;
 
     await writeFile(
       path.join(
         this.photosDirectory,
         photoFileName,
       ),
-      Buffer.from(
-        base64Content.replace(/\s+/g, ""),
-        "base64",
-      ),
+      content,
     );
 
     return photoFileName;

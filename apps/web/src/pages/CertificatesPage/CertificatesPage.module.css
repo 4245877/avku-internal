@@ -1062,12 +1062,12 @@
 .previewText {
   position: absolute;
   display: block;
-  overflow: hidden;
+  overflow: visible;
   white-space: nowrap;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   font-family: var(--font-sans);
   font-weight: var(--weight-regular);
-  line-height: 1.12;
+  line-height: 1;
   color: var(--abyss-steel);
   pointer-events: none;
 }

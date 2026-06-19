@@ -12,9 +12,13 @@ import sharp, {
 import type {
   CertificateLayout,
   CertificatePhotoCrop,
+  CertificatePhotoLayout,
   CertificateTextFieldLayout,
   RenderCertificateInput,
 } from "./certificate.types";
+
+const DEFAULT_PHOTO_BLEED = 2;
+const DEFAULT_TEXT_WIDTH_FACTOR = 0.58;
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -46,20 +50,74 @@ function formatDate(value: string): string {
   return `${day}.${month}.${year}`;
 }
 
+function getPhotoBleed(
+  photo: CertificatePhotoLayout,
+): number {
+  return clamp(
+    Number(photo.bleed ?? DEFAULT_PHOTO_BLEED) || 0,
+    0,
+    8,
+  );
+}
+
+function estimateTextWidth(
+  value: string,
+  fontSize: number,
+  field: CertificateTextFieldLayout,
+): number {
+  const compactValue = value.trim();
+
+  if (!compactValue) {
+    return 0;
+  }
+
+  return compactValue.length * fontSize * (field.widthFactor ?? DEFAULT_TEXT_WIDTH_FACTOR);
+}
+
+function getFittedFontSize(
+  value: string,
+  field: CertificateTextFieldLayout,
+): number {
+  const baseFontSize = field.fontSize;
+  const minFontSize = clamp(
+    Number(field.minFontSize) || Math.round(baseFontSize * 0.48),
+    12,
+    baseFontSize,
+  );
+  const estimatedWidth = estimateTextWidth(
+    value,
+    baseFontSize,
+    field,
+  );
+
+  if (estimatedWidth <= field.width) {
+    return baseFontSize;
+  }
+
+  return Math.max(
+    minFontSize,
+    Math.floor((baseFontSize * field.width) / estimatedWidth),
+  );
+}
+
 function createTextOverlay(
   value: string,
   field: CertificateTextFieldLayout,
 ): OverlayOptions {
   const safeValue = escapePango(value.trim());
+  const fontSize = getFittedFontSize(
+    value,
+    field,
+  );
 
   return {
     input: {
       text: {
         text: safeValue,
-        font: `${field.font} ${field.fontSize}`,
+        font: `${field.font} ${fontSize}`,
         width: field.width,
-        height: field.height,
         align: field.align ?? "left",
+        wrap: "none",
         rgba: true,
       },
     },
@@ -120,45 +178,48 @@ async function createPhotoLayer(
   crop?: Partial<CertificatePhotoCrop>,
 ): Promise<Buffer> {
   const { width, height, radius } = layout.photo;
+  const bleed = getPhotoBleed(layout.photo);
+  const targetWidth = width + bleed * 2;
+  const targetHeight = height + bleed * 2;
   const metadata = await sharp(photoPath).metadata();
   const imageSize = getOrientedSize(metadata);
   const safeCrop = normalizeCrop(crop);
   const scale = Math.max(
-    width / imageSize.width,
-    height / imageSize.height,
+    targetWidth / imageSize.width,
+    targetHeight / imageSize.height,
   ) * safeCrop.zoom;
   const resizedWidth = Math.max(
-    width,
+    targetWidth,
     Math.round(imageSize.width * scale),
   );
   const resizedHeight = Math.max(
-    height,
+    targetHeight,
     Math.round(imageSize.height * scale),
   );
   const extractLeft = clamp(
-    Math.round((resizedWidth - width) / 2 - safeCrop.offsetX),
+    Math.round((resizedWidth - targetWidth) / 2 - safeCrop.offsetX),
     0,
-    Math.max(0, resizedWidth - width),
+    Math.max(0, resizedWidth - targetWidth),
   );
   const extractTop = clamp(
-    Math.round((resizedHeight - height) / 2 - safeCrop.offsetY),
+    Math.round((resizedHeight - targetHeight) / 2 - safeCrop.offsetY),
     0,
-    Math.max(0, resizedHeight - height),
+    Math.max(0, resizedHeight - targetHeight),
   );
   const roundedMask = Buffer.from(`
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width="${width}"
-      height="${height}"
-      viewBox="0 0 ${width} ${height}"
+      width="${targetWidth}"
+      height="${targetHeight}"
+      viewBox="0 0 ${targetWidth} ${targetHeight}"
     >
       <rect
         x="0"
         y="0"
-        width="${width}"
-        height="${height}"
-        rx="${radius}"
-        ry="${radius}"
+        width="${targetWidth}"
+        height="${targetHeight}"
+        rx="${radius + bleed}"
+        ry="${radius + bleed}"
         fill="#ffffff"
       />
     </svg>
@@ -172,8 +233,8 @@ async function createPhotoLayer(
     .extract({
       left: extractLeft,
       top: extractTop,
-      width,
-      height,
+      width: targetWidth,
+      height: targetHeight,
     })
     .composite([
       {
@@ -294,6 +355,7 @@ export async function renderCertificate(
     layout,
     input.photoCrop,
   );
+  const photoBleed = getPhotoBleed(layout.photo);
   const fullName = [
     input.firstName,
     input.middleName,
@@ -303,8 +365,8 @@ export async function renderCertificate(
   const layers: OverlayOptions[] = [
     {
       input: photoLayer,
-      left: layout.photo.x,
-      top: layout.photo.y,
+      left: layout.photo.x - photoBleed,
+      top: layout.photo.y - photoBleed,
     },
     createTextOverlay(
       input.lastName,

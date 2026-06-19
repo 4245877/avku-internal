@@ -8,14 +8,64 @@ import {
 } from '../../../features/certificates/certificateUtils.js';
 import styles from '../CertificatesPage.module.css';
 
-function getFieldStyle(field, canvas, previewWidth) {
+const DEFAULT_PHOTO_BLEED = 2;
+const DEFAULT_TEXT_WIDTH_FACTOR = 0.58;
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function getTextOrigin(align) {
+  if (align === 'right') {
+    return 'right center';
+  }
+
+  if (align === 'center' || align === 'centre') {
+    return 'center';
+  }
+
+  return 'left center';
+}
+
+function estimateTextWidth(value, fontSize, field) {
+  const compactValue = String(value ?? '').trim();
+
+  if (!compactValue) {
+    return 0;
+  }
+
+  return compactValue.length * fontSize * (field.widthFactor ?? DEFAULT_TEXT_WIDTH_FACTOR);
+}
+
+function getTextMetrics(value, field, canvas, previewWidth) {
+  const baseFontSize = (previewWidth * field.fontSize) / canvas.width;
+  const minFontSize = (previewWidth * (field.minFontSize ?? field.fontSize * 0.48)) / canvas.width;
+  const width = (previewWidth * field.width) / canvas.width;
+  const estimatedWidth = estimateTextWidth(value, baseFontSize, field);
+  const fontSize = estimatedWidth > width
+    ? clamp((baseFontSize * width) / estimatedWidth, minFontSize, baseFontSize)
+    : baseFontSize;
+  const fittedWidth = estimateTextWidth(value, fontSize, field);
+  const scaleX = fittedWidth > width ? clamp(width / fittedWidth, 0.78, 1) : 1;
+
+  return {
+    fontSize: Math.max(8, fontSize),
+    scaleX,
+  };
+}
+
+function getFieldStyle(value, field, canvas, previewWidth) {
+  const metrics = getTextMetrics(value, field, canvas, previewWidth);
+
   return {
     left: `${(field.x / canvas.width) * 100}%`,
     top: `${(field.y / canvas.height) * 100}%`,
     width: `${(field.width / canvas.width) * 100}%`,
     height: `${(field.height / canvas.height) * 100}%`,
-    fontSize: `${Math.max(12, (previewWidth * field.fontSize) / canvas.width)}px`,
+    fontSize: `${metrics.fontSize}px`,
     textAlign: field.align === 'centre' ? 'center' : field.align || 'left',
+    transform: metrics.scaleX < 1 ? `scaleX(${metrics.scaleX})` : undefined,
+    transformOrigin: getTextOrigin(field.align),
   };
 }
 
@@ -27,11 +77,37 @@ function PreviewText({ value, field, canvas, previewWidth, strong = true }) {
   return (
     <span
       className={`${styles.previewText} ${strong ? styles.previewTextStrong : ''}`}
-      style={getFieldStyle(field, canvas, previewWidth)}
+      style={getFieldStyle(value, field, canvas, previewWidth)}
     >
       {value}
     </span>
   );
+}
+
+function getPhotoBleed(photo) {
+  return clamp(Number(photo.bleed ?? DEFAULT_PHOTO_BLEED) || 0, 0, 8);
+}
+
+function getPhotoFrameStyle(layout, previewWidth) {
+  const bleed = getPhotoBleed(layout.photo);
+
+  return {
+    left: `${((layout.photo.x - bleed) / layout.canvas.width) * 100}%`,
+    top: `${((layout.photo.y - bleed) / layout.canvas.height) * 100}%`,
+    width: `${((layout.photo.width + bleed * 2) / layout.canvas.width) * 100}%`,
+    height: `${((layout.photo.height + bleed * 2) / layout.canvas.height) * 100}%`,
+    borderRadius: `${(previewWidth * (layout.photo.radius + bleed)) / layout.canvas.width}px`,
+  };
+}
+
+function getPhotoFrameForPlacement(photo) {
+  const bleed = getPhotoBleed(photo);
+
+  return {
+    ...photo,
+    width: photo.width + bleed * 2,
+    height: photo.height + bleed * 2,
+  };
 }
 
 function getStampStyle(layout, previewWidth) {
@@ -53,6 +129,15 @@ function getStampStyle(layout, previewWidth) {
     maxWidth: 'none',
     borderRadius: `${(previewWidth * 4) / layout.canvas.width}px`,
   };
+}
+
+function applyImageFallback(event, fallbackUrl) {
+  if (!fallbackUrl || event.currentTarget.dataset.fallbackApplied === 'true') {
+    return;
+  }
+
+  event.currentTarget.dataset.fallbackApplied = 'true';
+  event.currentTarget.src = fallbackUrl;
 }
 
 function CertificatePreview({
@@ -108,7 +193,7 @@ function CertificatePreview({
   }, [imageUrl]);
 
   const photoPlacement = useMemo(
-    () => (layout ? getPhotoPlacement(imageSize, layout.photo, form.photoCrop) : null),
+    () => (layout ? getPhotoPlacement(imageSize, getPhotoFrameForPlacement(layout.photo), form.photoCrop) : null),
     [form.photoCrop, imageSize, layout],
   );
   const nameParts = useMemo(
@@ -134,18 +219,17 @@ function CertificatePreview({
               aspectRatio: `${layout.canvas.width} / ${layout.canvas.height}`,
             }}
           >
-            <img className={styles.previewLayer} src={assets.backgroundUrl} alt="" />
+            <img
+              className={styles.previewLayer}
+              src={assets.backgroundUrl || assets.backgroundFallbackUrl}
+              alt=""
+              onError={(event) => applyImageFallback(event, assets.backgroundFallbackUrl)}
+            />
 
             {imageUrl && photoPlacement ? (
               <div
                 className={styles.previewPhotoFrame}
-                style={{
-                  left: `${(layout.photo.x / layout.canvas.width) * 100}%`,
-                  top: `${(layout.photo.y / layout.canvas.height) * 100}%`,
-                  width: `${(layout.photo.width / layout.canvas.width) * 100}%`,
-                  height: `${(layout.photo.height / layout.canvas.height) * 100}%`,
-                  borderRadius: `${(previewWidth * layout.photo.radius) / layout.canvas.width}px`,
-                }}
+                style={getPhotoFrameStyle(layout, previewWidth)}
               >
                 <img className={styles.previewPhoto} src={imageUrl} alt="" style={photoPlacement} draggable="false" />
               </div>
@@ -183,12 +267,13 @@ function CertificatePreview({
               previewWidth={previewWidth}
             />
 
-            {assets.stampOverlayUrl ? (
+            {assets.stampOverlayUrl || assets.stampOverlayFallbackUrl ? (
               <img
                 className={`${styles.previewLayer} ${styles.previewStamp}`}
-                src={assets.stampOverlayUrl}
+                src={assets.stampOverlayUrl || assets.stampOverlayFallbackUrl}
                 alt=""
                 style={getStampStyle(layout, previewWidth)}
+                onError={(event) => applyImageFallback(event, assets.stampOverlayFallbackUrl)}
               />
             ) : null}
           </div>

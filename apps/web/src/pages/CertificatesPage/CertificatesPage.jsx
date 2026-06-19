@@ -31,6 +31,12 @@ const ALLOWED_PHOTO_TYPES = new Set([
   'image/png',
   'image/webp',
 ]);
+const PHOTO_TYPE_BY_EXTENSION = new Map([
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['png', 'image/png'],
+  ['webp', 'image/webp'],
+]);
 
 const NOTICE_STYLE_BY_TYPE = {
   error: 'noticeError',
@@ -79,9 +85,49 @@ function upsertRecord(records, nextRecord) {
   return sortRecordsByUpdatedAt([nextRecord, ...otherRecords]);
 }
 
+function normalizePhotoMimeType(value) {
+  const mimeType = String(value ?? '').toLowerCase();
+
+  if (mimeType === 'image/jpg' || mimeType === 'image/pjpeg') {
+    return 'image/jpeg';
+  }
+
+  return ALLOWED_PHOTO_TYPES.has(mimeType) ? mimeType : '';
+}
+
+function getPhotoMimeType(file) {
+  const fileMimeType = normalizePhotoMimeType(file.type);
+
+  if (fileMimeType) {
+    return fileMimeType;
+  }
+
+  const extension = file.name
+    .split('.')
+    .pop()
+    ?.toLowerCase();
+
+  return PHOTO_TYPE_BY_EXTENSION.get(extension) ?? '';
+}
+
+function normalizePhotoDataUrl(dataUrl, mimeType) {
+  if (!mimeType) {
+    return dataUrl;
+  }
+
+  return dataUrl.replace(
+    /^data:[^;]*;base64,/i,
+    `data:${mimeType};base64,`,
+  );
+}
+
 function validatePhotoFile(file) {
-  if (!ALLOWED_PHOTO_TYPES.has(file.type)) {
+  if (!getPhotoMimeType(file)) {
     return 'Підтримуються фотографії у форматах JPG, PNG та WebP.';
+  }
+
+  if (file.size === 0) {
+    return 'Файл фотографії порожній.';
   }
 
   if (file.size > MAX_PHOTO_SIZE_BYTES) {
@@ -183,6 +229,10 @@ function CertificatesPage() {
 
       if (templateResult.status === 'fulfilled') {
         setTemplate(templateResult.value);
+
+        if (templateResult.value.warning) {
+          loadingErrors.push(templateResult.value.warning);
+        }
       } else {
         loadingErrors.push(
           getErrorMessage(
@@ -324,7 +374,10 @@ function CertificatesPage() {
     }
 
     try {
-      const photoDataUrl = await readFileAsDataUrl(file);
+      const photoDataUrl = normalizePhotoDataUrl(
+        await readFileAsDataUrl(file),
+        getPhotoMimeType(file),
+      );
       const defaultPhotoCrop = getEmptyCertificateForm().photoCrop;
 
       setForm((currentForm) => ({

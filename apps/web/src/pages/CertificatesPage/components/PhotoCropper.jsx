@@ -118,7 +118,13 @@ const PhotoCropper = forwardRef(function PhotoCropper({
 
         <label className={styles.fileButton}>
           Замінити
-          <input ref={inputRef} className={styles.fileInputHidden} type="file" accept="image/*" onChange={onPhotoChange} />
+          <input
+            ref={inputRef}
+            className={styles.fileInputHidden}
+            type="file"
+            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+            onChange={onPhotoChange}
+          />
         </label>
       </div>
 
