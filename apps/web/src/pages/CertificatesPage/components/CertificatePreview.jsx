@@ -27,6 +27,34 @@ function getTextOrigin(align) {
   return 'left center';
 }
 
+function getFontFamily(font) {
+  if (!font || font === 'sans') {
+    return undefined;
+  }
+
+  if (font === 'Roboto Medium') {
+    return "'Roboto Medium', Roboto, Arial, sans-serif";
+  }
+
+  if (font === 'Arial Narrow') {
+    return "'Arial Narrow', Arial, sans-serif";
+  }
+
+  return font;
+}
+
+function getFontWeight(font) {
+  if (font === 'Roboto Medium') {
+    return 500;
+  }
+
+  if (font === 'Arial Narrow') {
+    return 400;
+  }
+
+  return undefined;
+}
+
 function estimateTextWidth(value, fontSize, field) {
   const compactValue = String(value ?? '').trim();
 
@@ -62,6 +90,8 @@ function getFieldStyle(value, field, canvas, previewWidth) {
     top: `${(field.y / canvas.height) * 100}%`,
     width: `${(field.width / canvas.width) * 100}%`,
     height: `${(field.height / canvas.height) * 100}%`,
+    fontFamily: getFontFamily(field.font),
+    fontWeight: getFontWeight(field.font),
     fontSize: `${metrics.fontSize}px`,
     textAlign: field.align === 'centre' ? 'center' : field.align || 'left',
     transform: metrics.scaleX < 1 ? `scaleX(${metrics.scaleX})` : undefined,

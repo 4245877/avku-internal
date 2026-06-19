@@ -1,18 +1,1 @@
-[
-  {
-    "id": "1e3501a8-5a6f-4b69-a37f-52630f7ab210",
-    "fullName": "Головч Михайло Дмитрович",
-    "certificateNumber": "123",
-    "issuedAt": "2026-06-19",
-    "validUntil": "2028-06-19",
-    "photoFileName": "1e3501a8-5a6f-4b69-a37f-52630f7ab210-1781885554878.png",
-    "photoCrop": {
-      "zoom": 1,
-      "offsetX": 0,
-      "offsetY": 0
-    },
-    "templateId": "volunteer-card-v1",
-    "createdAt": "2026-06-19T16:12:34.869Z",
-    "updatedAt": "2026-06-19T16:12:41.566Z"
-  }
-]
+[]
