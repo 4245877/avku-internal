@@ -1,6 +1,9 @@
 services:
   api:
-    image: node:22-bookworm
+    image: avku-node:22-bookworm-fonts
+    build:
+      context: .
+      dockerfile: infra/node/Dockerfile
     working_dir: /app/apps/api
     command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm start"
     environment:
@@ -17,7 +20,10 @@ services:
       - "3001:3001"
 
   web:
-    image: node:22-bookworm
+    image: avku-node:22-bookworm-fonts
+    build:
+      context: .
+      dockerfile: infra/node/Dockerfile
     working_dir: /app/apps/web
     command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm run dev -- --host 0.0.0.0"
     environment:

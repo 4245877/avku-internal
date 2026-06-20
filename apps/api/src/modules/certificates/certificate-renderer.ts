@@ -18,7 +18,12 @@ import type {
 } from "./certificate.types";
 
 const DEFAULT_PHOTO_BLEED = 2;
-const DEFAULT_TEXT_WIDTH_FACTOR = 0.58;
+
+interface RenderedTextBitmap {
+  buffer: Buffer;
+  width: number;
+  height: number;
+}
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -60,67 +65,229 @@ function getPhotoBleed(
   );
 }
 
-function estimateTextWidth(
-  value: string,
-  fontSize: number,
+function getTextAlign(
   field: CertificateTextFieldLayout,
-): number {
-  const compactValue = value.trim();
-
-  if (!compactValue) {
-    return 0;
+): "left" | "center" | "right" {
+  if (field.align === "right") {
+    return "right";
   }
 
-  return compactValue.length * fontSize * (field.widthFactor ?? DEFAULT_TEXT_WIDTH_FACTOR);
+  if (field.align === "center" || field.align === "centre") {
+    return "center";
+  }
+
+  return "left";
 }
 
-function getFittedFontSize(
+function getAlignedOffset(
+  containerWidth: number,
+  contentWidth: number,
+  align: "left" | "center" | "right",
+): number {
+  const availableSpace = Math.max(
+    0,
+    containerWidth - contentWidth,
+  );
+
+  if (align === "right") {
+    return availableSpace;
+  }
+
+  if (align === "center") {
+    return Math.round(availableSpace / 2);
+  }
+
+  return 0;
+}
+
+async function renderTextBitmap(
   value: string,
   field: CertificateTextFieldLayout,
-): number {
+  fontSize: number,
+): Promise<RenderedTextBitmap> {
+  const safeValue = escapePango(value.trim());
+  const buffer = await sharp({
+    text: {
+      text: safeValue,
+      font: `${field.font} ${fontSize}`,
+      wrap: "none",
+      rgba: true,
+    },
+  })
+    .png()
+    .toBuffer();
+  const metadata = await sharp(buffer).metadata();
+
+  return {
+    buffer,
+    width: metadata.width ?? 0,
+    height: metadata.height ?? 0,
+  };
+}
+
+function doesTextFitField(
+  bitmap: RenderedTextBitmap,
+  field: CertificateTextFieldLayout,
+): boolean {
+  return bitmap.width <= field.width && bitmap.height <= field.height;
+}
+
+async function getFittedTextBitmap(
+  value: string,
+  field: CertificateTextFieldLayout,
+): Promise<RenderedTextBitmap> {
   const baseFontSize = field.fontSize;
   const minFontSize = clamp(
     Number(field.minFontSize) || Math.round(baseFontSize * 0.48),
-    12,
+    1,
     baseFontSize,
   );
-  const estimatedWidth = estimateTextWidth(
+  const baseBitmap = await renderTextBitmap(
     value,
-    baseFontSize,
     field,
+    baseFontSize,
   );
 
-  if (estimatedWidth <= field.width) {
-    return baseFontSize;
+  if (doesTextFitField(
+    baseBitmap,
+    field,
+  )) {
+    return baseBitmap;
   }
 
-  return Math.max(
-    minFontSize,
-    Math.floor((baseFontSize * field.width) / estimatedWidth),
-  );
-}
-
-function createTextOverlay(
-  value: string,
-  field: CertificateTextFieldLayout,
-): OverlayOptions {
-  const safeValue = escapePango(value.trim());
-  const fontSize = getFittedFontSize(
+  let bestBitmap = await renderTextBitmap(
     value,
     field,
+    minFontSize,
   );
+  let low = minFontSize + 1;
+  let high = baseFontSize - 1;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const bitmap = await renderTextBitmap(
+      value,
+      field,
+      mid,
+    );
+
+    if (doesTextFitField(
+      bitmap,
+      field,
+    )) {
+      bestBitmap = bitmap;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  if (bestBitmap.height > field.height) {
+    const fittedBuffer = await sharp(bestBitmap.buffer)
+      .resize({
+        height: field.height,
+        fit: "inside",
+      })
+      .png()
+      .toBuffer();
+    const metadata = await sharp(fittedBuffer).metadata();
+
+    bestBitmap = {
+      buffer: fittedBuffer,
+      width: metadata.width ?? bestBitmap.width,
+      height: metadata.height ?? field.height,
+    };
+  }
+
+  if (bestBitmap.width <= field.width) {
+    return bestBitmap;
+  }
+
+  const fittedBuffer = await sharp(bestBitmap.buffer)
+    .resize({
+      width: field.width,
+      height: bestBitmap.height,
+      fit: "fill",
+    })
+    .png()
+    .toBuffer();
+  const metadata = await sharp(fittedBuffer).metadata();
 
   return {
-    input: {
-      text: {
-        text: safeValue,
-        font: `${field.font} ${fontSize}`,
-        width: field.width,
-        align: field.align ?? "left",
-        wrap: "none",
-        rgba: true,
+    buffer: fittedBuffer,
+    width: metadata.width ?? field.width,
+    height: metadata.height ?? bestBitmap.height,
+  };
+}
+
+async function createTextFieldLayer(
+  value: string,
+  field: CertificateTextFieldLayout,
+): Promise<Buffer> {
+  const layerWidth = Math.max(
+    1,
+    Math.round(field.width),
+  );
+  const layerHeight = Math.max(
+    1,
+    Math.round(field.height),
+  );
+  const emptyLayer = sharp({
+    create: {
+      width: layerWidth,
+      height: layerHeight,
+      channels: 4,
+      background: {
+        r: 0,
+        g: 0,
+        b: 0,
+        alpha: 0,
       },
     },
+  });
+  const text = value.trim();
+
+  if (!text) {
+    return emptyLayer
+      .png()
+      .toBuffer();
+  }
+
+  const bitmap = await getFittedTextBitmap(
+    text,
+    field,
+  );
+  const align = getTextAlign(field);
+
+  return emptyLayer
+    .composite([
+      {
+        input: bitmap.buffer,
+        left: getAlignedOffset(
+          layerWidth,
+          bitmap.width,
+          align,
+        ),
+        top: clamp(
+          Math.round((layerHeight - bitmap.height) / 2),
+          0,
+          Math.max(0, layerHeight - bitmap.height),
+        ),
+      },
+    ])
+    .png()
+    .toBuffer();
+}
+
+async function createTextOverlay(
+  value: string,
+  field: CertificateTextFieldLayout,
+): Promise<OverlayOptions> {
+  return {
+    input: await createTextFieldLayer(
+      value,
+      field,
+    ),
     left: field.x,
     top: field.y,
   };
@@ -362,12 +529,7 @@ export async function renderCertificate(
   ]
     .filter(Boolean)
     .join(" ");
-  const layers: OverlayOptions[] = [
-    {
-      input: photoLayer,
-      left: layout.photo.x - photoBleed,
-      top: layout.photo.y - photoBleed,
-    },
+  const textLayers = await Promise.all([
     createTextOverlay(
       input.lastName,
       layout.fields.lastName,
@@ -392,6 +554,14 @@ export async function renderCertificate(
       formatDate(input.validUntil),
       layout.fields.validUntil,
     ),
+  ]);
+  const layers: OverlayOptions[] = [
+    {
+      input: photoLayer,
+      left: layout.photo.x - photoBleed,
+      top: layout.photo.y - photoBleed,
+    },
+    ...textLayers,
   ];
   const stampOverlay = await createStampOverlay(
     stampOverlayPath,

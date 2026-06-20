@@ -10,6 +10,7 @@ import styles from '../CertificatesPage.module.css';
 
 const DEFAULT_PHOTO_BLEED = 2;
 const DEFAULT_TEXT_WIDTH_FACTOR = 0.58;
+let textMeasureContext;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -55,6 +56,25 @@ function getFontWeight(font) {
   return undefined;
 }
 
+function getTextMeasureContext() {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  if (!textMeasureContext) {
+    textMeasureContext = document.createElement('canvas').getContext('2d');
+  }
+
+  return textMeasureContext;
+}
+
+function getCanvasFont(fontSize, field) {
+  const fontWeight = getFontWeight(field.font) ?? 400;
+  const fontFamily = getFontFamily(field.font) ?? 'sans-serif';
+
+  return `${fontWeight} ${fontSize}px ${fontFamily}`;
+}
+
 function estimateTextWidth(value, fontSize, field) {
   const compactValue = String(value ?? '').trim();
 
@@ -65,25 +85,72 @@ function estimateTextWidth(value, fontSize, field) {
   return compactValue.length * fontSize * (field.widthFactor ?? DEFAULT_TEXT_WIDTH_FACTOR);
 }
 
+function measureTextWidth(value, fontSize, field) {
+  const compactValue = String(value ?? '').trim();
+  const context = getTextMeasureContext();
+
+  if (!compactValue || !context) {
+    return estimateTextWidth(compactValue, fontSize, field);
+  }
+
+  context.font = getCanvasFont(fontSize, field);
+
+  return context.measureText(compactValue).width;
+}
+
+function getFittedTextMetrics(value, field, baseFontSize, minFontSize, width) {
+  const baseWidth = measureTextWidth(value, baseFontSize, field);
+
+  if (baseWidth <= width) {
+    return {
+      fontSize: baseFontSize,
+      width: baseWidth,
+    };
+  }
+
+  let low = minFontSize;
+  let high = baseFontSize;
+  let bestFontSize = minFontSize;
+
+  for (let index = 0; index < 8; index += 1) {
+    const mid = (low + high) / 2;
+    const measuredWidth = measureTextWidth(value, mid, field);
+
+    if (measuredWidth <= width) {
+      bestFontSize = mid;
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return {
+    fontSize: bestFontSize,
+    width: measureTextWidth(value, bestFontSize, field),
+  };
+}
+
 function getTextMetrics(value, field, canvas, previewWidth) {
-  const baseFontSize = (previewWidth * field.fontSize) / canvas.width;
-  const minFontSize = (previewWidth * (field.minFontSize ?? field.fontSize * 0.48)) / canvas.width;
+  const baseFontSize = Math.max(8, (previewWidth * field.fontSize) / canvas.width);
+  const minFontSize = Math.max(
+    8,
+    (previewWidth * (field.minFontSize ?? field.fontSize * 0.48)) / canvas.width,
+  );
   const width = (previewWidth * field.width) / canvas.width;
-  const estimatedWidth = estimateTextWidth(value, baseFontSize, field);
-  const fontSize = estimatedWidth > width
-    ? clamp((baseFontSize * width) / estimatedWidth, minFontSize, baseFontSize)
-    : baseFontSize;
-  const fittedWidth = estimateTextWidth(value, fontSize, field);
+  const fitted = getFittedTextMetrics(value, field, baseFontSize, minFontSize, width);
+  const fontSize = fitted.fontSize;
+  const fittedWidth = fitted.width;
   const scaleX = fittedWidth > width ? clamp(width / fittedWidth, 0.78, 1) : 1;
 
   return {
-    fontSize: Math.max(8, fontSize),
+    fontSize,
     scaleX,
   };
 }
 
 function getFieldStyle(value, field, canvas, previewWidth) {
   const metrics = getTextMetrics(value, field, canvas, previewWidth);
+  const height = (previewWidth * field.height) / canvas.width;
 
   return {
     left: `${(field.x / canvas.width) * 100}%`,
@@ -93,6 +160,7 @@ function getFieldStyle(value, field, canvas, previewWidth) {
     fontFamily: getFontFamily(field.font),
     fontWeight: getFontWeight(field.font),
     fontSize: `${metrics.fontSize}px`,
+    lineHeight: `${height}px`,
     textAlign: field.align === 'centre' ? 'center' : field.align || 'left',
     transform: metrics.scaleX < 1 ? `scaleX(${metrics.scaleX})` : undefined,
     transformOrigin: getTextOrigin(field.align),

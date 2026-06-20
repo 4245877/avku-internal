@@ -1,6 +1,9 @@
 services:
   api:
-    image: node:22-bookworm
+    image: avku-node:22-bookworm-fonts
+    build:
+      context: .
+      dockerfile: infra/node/Dockerfile
     working_dir: /app/apps/api
     command: sh -lc "corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm start"
     restart: unless-stopped
@@ -17,7 +20,10 @@ services:
       - certificates-data:/data/certificates
 
   web:
-    image: node:22-bookworm
+    image: avku-node:22-bookworm-fonts
+    build:
+      context: .
+      dockerfile: infra/node/Dockerfile
     working_dir: /app/apps/web
     command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm run build && pnpm run preview -- --host 0.0.0.0 --port 5173"
     restart: unless-stopped
