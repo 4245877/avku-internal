@@ -37,6 +37,7 @@ export function getEmptyCertificateForm() {
     validUntil: getDefaultValidUntil(),
     photoUrl: '',
     photoDataUrl: '',
+    photoFile: null,
     photoCrop: {
       ...EMPTY_CROP,
     },
@@ -54,6 +55,7 @@ export function createFormFromRecord(record) {
     validUntil: record.validUntil,
     photoUrl: record.photoUrl,
     photoDataUrl: '',
+    photoFile: null,
     photoCrop: {
       ...EMPTY_CROP,
       ...record.photoCrop,
@@ -150,6 +152,8 @@ export function getCertificateStatus(value) {
 
 export function validateCertificateForm(form) {
   const errors = {};
+  const issuedAtDate = parseInputDate(form.issuedAt);
+  const validUntilDate = parseInputDate(form.validUntil);
 
   if (!normalizeWhitespace(form.fullName)) {
     errors.fullName = 'Вкажіть ПІБ.';
@@ -159,15 +163,17 @@ export function validateCertificateForm(form) {
     errors.certificateNumber = 'Вкажіть номер посвідчення.';
   }
 
-  if (!parseInputDate(form.issuedAt)) {
+  if (!issuedAtDate) {
     errors.issuedAt = 'Вкажіть дату видачі.';
   }
 
-  if (!parseInputDate(form.validUntil)) {
+  if (!validUntilDate) {
     errors.validUntil = 'Вкажіть дату завершення дії.';
+  } else if (issuedAtDate && validUntilDate < issuedAtDate) {
+    errors.validUntil = 'Дата завершення дії має бути не раніше дати видачі.';
   }
 
-  if (!form.photoUrl && !form.photoDataUrl) {
+  if (!form.photoUrl && !form.photoDataUrl && !form.photoFile) {
     errors.photo = 'Завантажте фотографію.';
   }
 
@@ -184,9 +190,25 @@ export function buildCertificatePayload(form) {
     certificateNumber: normalizeWhitespace(form.certificateNumber),
     issuedAt: form.issuedAt,
     validUntil: form.validUntil,
-    photoDataUrl: form.photoDataUrl || undefined,
+    photoDataUrl: form.photoFile ? undefined : form.photoDataUrl || undefined,
+    photoFile: form.photoFile || undefined,
     photoCrop: form.photoCrop,
   };
+}
+
+export function buildCertificateSnapshot(form) {
+  const payload = buildCertificatePayload(form);
+
+  return JSON.stringify({
+    ...payload,
+    photoFile: payload.photoFile
+      ? [
+        payload.photoFile.name,
+        payload.photoFile.size,
+        payload.photoFile.lastModified,
+      ].join(':')
+      : undefined,
+  });
 }
 
 export function clamp(value, min, max) {

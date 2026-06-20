@@ -7,6 +7,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import sharp from "sharp";
 
 import { renderCertificate } from "./certificate-renderer";
@@ -61,12 +62,34 @@ export interface CertificatePayload {
   issuedAt?: unknown;
   validUntil?: unknown;
   photoDataUrl?: unknown;
-  photoCrop?: Partial<CertificatePhotoCrop>;
+  photoFile?: CertificatePhotoFilePayload;
+  photoCrop?: unknown;
+}
+
+export interface CertificatePhotoFilePayload {
+  content: Buffer;
+  fileName?: string;
+  contentType?: string;
 }
 
 export interface CertificateRepositoryOptions {
   storageRoot: string;
   templateDirectory: string;
+  legacyRegistryPath?: string;
+}
+
+interface NormalizedCertificatePayload {
+  fullName: string;
+  certificateNumber: string;
+  issuedAt: string;
+  validUntil: string;
+  photoCrop: CertificatePhotoCrop;
+}
+
+interface PendingPhotoFile {
+  temporaryPath: string;
+  finalPath: string;
+  photoFileName: string;
 }
 
 function normalizeWhitespace(value: string): string {
@@ -100,6 +123,15 @@ function normalizeDate(value: unknown): string {
   return value;
 }
 
+function assertDateRange(
+  issuedAt: string,
+  validUntil: string,
+): void {
+  if (validUntil < issuedAt) {
+    throw new Error("Дата завершения действия должна быть не раньше даты выдачи.");
+  }
+}
+
 function normalizeRequiredText(
   value: unknown,
   fieldName: string,
@@ -118,12 +150,26 @@ function normalizeRequiredText(
 }
 
 function normalizeCrop(
-  value: Partial<CertificatePhotoCrop> | undefined,
+  value: unknown,
   fallback: CertificatePhotoCrop = DEFAULT_CROP,
 ): CertificatePhotoCrop {
-  const zoom = Number(value?.zoom ?? fallback.zoom);
-  const offsetX = Number(value?.offsetX ?? fallback.offsetX);
-  const offsetY = Number(value?.offsetY ?? fallback.offsetY);
+  let source = value;
+
+  if (typeof source === "string" && source.trim()) {
+    try {
+      source = JSON.parse(source) as unknown;
+    } catch {
+      source = undefined;
+    }
+  }
+
+  const crop =
+    source && typeof source === "object"
+      ? source as Partial<CertificatePhotoCrop>
+      : {};
+  const zoom = Number(crop.zoom ?? fallback.zoom);
+  const offsetX = Number(crop.offsetX ?? fallback.offsetX);
+  const offsetY = Number(crop.offsetY ?? fallback.offsetY);
 
   return {
     zoom: Math.min(
@@ -150,28 +196,12 @@ function getExtensionForImageFormat(format: string): string {
   return "png";
 }
 
-async function parsePhotoDataUrl(
-  dataUrl: unknown,
+async function validatePhotoBuffer(
+  content: Buffer,
 ): Promise<{
   content: Buffer;
   extension: string;
 }> {
-  if (typeof dataUrl !== "string") {
-    throw new Error("Фотографія обов'язкова.");
-  }
-
-  const match = IMAGE_DATA_URL_PATTERN.exec(dataUrl);
-
-  if (!match) {
-    throw new Error("Фотографія має бути PNG, JPEG або WebP.");
-  }
-
-  const [, , base64Content] = match;
-  const content = Buffer.from(
-    base64Content.replace(/\s+/g, ""),
-    "base64",
-  );
-
   if (content.length === 0) {
     throw new Error("Файл фотографії порожній.");
   }
@@ -201,6 +231,45 @@ async function parsePhotoDataUrl(
     content,
     extension: getExtensionForImageFormat(metadata.format),
   };
+}
+
+async function parsePhotoDataUrl(
+  dataUrl: unknown,
+): Promise<{
+  content: Buffer;
+  extension: string;
+}> {
+  if (typeof dataUrl !== "string") {
+    throw new Error("Фотографія обов'язкова.");
+  }
+
+  const match = IMAGE_DATA_URL_PATTERN.exec(dataUrl);
+
+  if (!match) {
+    throw new Error("Фотографія має бути PNG, JPEG або WebP.");
+  }
+
+  const [, , base64Content] = match;
+
+  return validatePhotoBuffer(
+    Buffer.from(
+      base64Content.replace(/\s+/g, ""),
+      "base64",
+    ),
+  );
+}
+
+async function parsePhotoPayload(
+  payload: CertificatePayload,
+): Promise<{
+  content: Buffer;
+  extension: string;
+}> {
+  if (payload.photoFile) {
+    return validatePhotoBuffer(payload.photoFile.content);
+  }
+
+  return parsePhotoDataUrl(payload.photoDataUrl);
 }
 
 function splitFullName(fullName: string): Pick<
@@ -238,6 +307,84 @@ function addOneYear(value: string): string {
   return nextDate.toISOString().slice(0, 10);
 }
 
+function normalizeCertificatePayload(
+  payload: CertificatePayload,
+  fallbackCrop: CertificatePhotoCrop = DEFAULT_CROP,
+): NormalizedCertificatePayload {
+  const fullName = normalizeRequiredText(
+    payload.fullName,
+    "ПІБ",
+  );
+  const certificateNumber = normalizeRequiredText(
+    payload.certificateNumber,
+    "Номер посвідчення",
+  );
+  const issuedAt = normalizeDate(payload.issuedAt);
+  const validUntil = normalizeDate(payload.validUntil);
+
+  assertDateRange(
+    issuedAt,
+    validUntil,
+  );
+
+  return {
+    fullName,
+    certificateNumber,
+    issuedAt,
+    validUntil,
+    photoCrop: normalizeCrop(
+      payload.photoCrop,
+      fallbackCrop,
+    ),
+  };
+}
+
+function isSqliteConstraintError(error: unknown): boolean {
+  return error instanceof Error &&
+    "code" in error &&
+    error.code === "ERR_SQLITE_ERROR" &&
+    error.message.includes("constraint");
+}
+
+function toRepositoryError(error: unknown): Error {
+  if (error instanceof Error) {
+    if (error.message.includes("certificate_records.certificate_number")) {
+      return new Error("Номер посвідчення вже існує.");
+    }
+
+    if (isSqliteConstraintError(error)) {
+      return new Error("Дані посвідчення не пройшли перевірку обмежень.");
+    }
+
+    return error;
+  }
+
+  return new Error("Помилка обробки посвідчення.");
+}
+
+function rowToRecord(row: Record<string, unknown>): CertificateRecord {
+  return {
+    id: String(row.id ?? ""),
+    fullName: String(row.full_name ?? ""),
+    certificateNumber: String(row.certificate_number ?? ""),
+    issuedAt: String(row.issued_at ?? ""),
+    validUntil: String(row.valid_until ?? ""),
+    photoFileName: String(row.photo_file_name ?? ""),
+    photoCrop: normalizeCrop({
+      zoom: row.photo_crop_zoom,
+      offsetX: row.photo_crop_offset_x,
+      offsetY: row.photo_crop_offset_y,
+    }),
+    templateId: String(row.template_id ?? TEMPLATE_ID),
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? ""),
+  };
+}
+
+function getCount(row: Record<string, unknown> | undefined): number {
+  return Number(row?.total ?? 0);
+}
+
 export function toCertificateResponse(
   record: CertificateRecord,
 ): CertificateRecordResponse {
@@ -255,7 +402,9 @@ export function toCertificateResponse(
 }
 
 export class CertificateRepository {
-  private readonly registryPath: string;
+  private readonly databasePath: string;
+
+  private readonly legacyRegistryPath: string;
 
   private readonly photosDirectory: string;
 
@@ -263,11 +412,18 @@ export class CertificateRepository {
 
   private readonly templateDirectory: string;
 
+  private database: DatabaseSync | null = null;
+
   constructor(options: CertificateRepositoryOptions) {
-    this.registryPath = path.join(
+    this.databasePath = path.join(
       options.storageRoot,
-      "registry.json",
+      "certificates.sqlite",
     );
+    this.legacyRegistryPath = options.legacyRegistryPath ??
+      path.join(
+        options.storageRoot,
+        "registry.json",
+      );
     this.photosDirectory = path.join(
       options.storageRoot,
       "photos",
@@ -281,22 +437,31 @@ export class CertificateRepository {
 
   async check(): Promise<void> {
     await this.ensureDirectories();
+    await this.getDatabase();
     await this.readTemplateLayout();
   }
 
   async list(): Promise<CertificateRecordResponse[]> {
-    const records = await this.readRegistry();
+    const database = await this.getDatabase();
+    const rows = database.prepare(`
+      SELECT *
+      FROM certificate_records
+      ORDER BY updated_at DESC, id DESC
+    `).all() as Record<string, unknown>[];
 
-    return records
-      .sort((first, second) =>
-        second.updatedAt.localeCompare(first.updatedAt),
-      )
+    return rows
+      .map(rowToRecord)
       .map(toCertificateResponse);
   }
 
   async get(id: string): Promise<CertificateRecordResponse> {
+    const database = await this.getDatabase();
+
     return toCertificateResponse(
-      await this.findRecord(id),
+      this.findRecordInDatabase(
+        database,
+        id,
+      ),
     );
   }
 
@@ -305,38 +470,42 @@ export class CertificateRepository {
   ): Promise<CertificateRecordResponse> {
     const now = new Date().toISOString();
     const id = randomUUID();
-    const fullName = normalizeRequiredText(
-      payload.fullName,
-      "ПІБ",
-    );
-    const certificateNumber = normalizeRequiredText(
-      payload.certificateNumber,
-      "Номер посвідчення",
-    );
-    const issuedAt = normalizeDate(payload.issuedAt);
-    const validUntil = normalizeDate(payload.validUntil);
-    const photoFileName = await this.savePhoto(
+    const normalizedPayload = normalizeCertificatePayload(payload);
+    const pendingPhoto = await this.savePhotoToTemporary(
       id,
-      payload.photoDataUrl,
+      payload,
     );
     const record: CertificateRecord = {
       id,
-      fullName,
-      certificateNumber,
-      issuedAt,
-      validUntil,
-      photoFileName,
-      photoCrop: normalizeCrop(payload.photoCrop),
+      ...normalizedPayload,
+      photoFileName: pendingPhoto.photoFileName,
       templateId: TEMPLATE_ID,
       createdAt: now,
       updatedAt: now,
     };
+    const database = await this.getDatabase();
 
-    const records = await this.readRegistry();
-    await this.writeRegistry([
-      record,
-      ...records,
-    ]);
+    try {
+      await this.runInTransaction(
+        database,
+        async () => {
+          await rename(
+            pendingPhoto.temporaryPath,
+            pendingPhoto.finalPath,
+          );
+          this.insertRecord(
+            database,
+            record,
+          );
+        },
+      );
+    } catch (error) {
+      await this.cleanupFiles([
+        pendingPhoto.temporaryPath,
+        pendingPhoto.finalPath,
+      ]);
+      throw toRepositoryError(error);
+    }
 
     return toCertificateResponse(record);
   }
@@ -345,93 +514,123 @@ export class CertificateRepository {
     id: string,
     payload: CertificatePayload,
   ): Promise<CertificateRecordResponse> {
-    const records = await this.readRegistry();
-    const recordIndex = records.findIndex((record) => record.id === id);
-
-    if (recordIndex === -1) {
-      throw new Error("Удостоверение не найдено.");
-    }
-
-    const existingRecord = records[recordIndex];
-    const fullName = normalizeRequiredText(
-      payload.fullName,
-      "ПІБ",
+    const database = await this.getDatabase();
+    const existingRecord = this.findRecordInDatabase(
+      database,
+      id,
     );
-    const certificateNumber = normalizeRequiredText(
-      payload.certificateNumber,
-      "Номер посвідчення",
+    const normalizedPayload = normalizeCertificatePayload(
+      payload,
+      existingRecord.photoCrop,
     );
-    const issuedAt = normalizeDate(payload.issuedAt);
-    const validUntil = normalizeDate(payload.validUntil);
-    const photoFileName =
-      typeof payload.photoDataUrl === "string" && payload.photoDataUrl
-        ? await this.savePhoto(
-          id,
-          payload.photoDataUrl,
-        )
-        : existingRecord.photoFileName;
+    const shouldReplacePhoto =
+      Boolean(payload.photoFile) ||
+      (typeof payload.photoDataUrl === "string" && Boolean(payload.photoDataUrl));
+    const pendingPhoto = shouldReplacePhoto
+      ? await this.savePhotoToTemporary(
+        id,
+        payload,
+      )
+      : null;
     const updatedRecord: CertificateRecord = {
       ...existingRecord,
-      fullName,
-      certificateNumber,
-      issuedAt,
-      validUntil,
-      photoFileName,
-      photoCrop: normalizeCrop(
-        payload.photoCrop,
-        existingRecord.photoCrop,
-      ),
+      ...normalizedPayload,
+      photoFileName: pendingPhoto?.photoFileName ?? existingRecord.photoFileName,
       updatedAt: new Date().toISOString(),
     };
 
-    records[recordIndex] = updatedRecord;
-    await this.writeRegistry(records);
+    try {
+      await this.runInTransaction(
+        database,
+        async () => {
+          if (pendingPhoto) {
+            await rename(
+              pendingPhoto.temporaryPath,
+              pendingPhoto.finalPath,
+            );
+          }
+
+          this.updateRecord(
+            database,
+            updatedRecord,
+          );
+        },
+      );
+    } catch (error) {
+      if (pendingPhoto) {
+        await this.cleanupFiles([
+          pendingPhoto.temporaryPath,
+          pendingPhoto.finalPath,
+        ]);
+      }
+      throw toRepositoryError(error);
+    }
+
+    if (
+      pendingPhoto &&
+      existingRecord.photoFileName !== updatedRecord.photoFileName
+    ) {
+      await this.cleanupFiles([
+        this.getPhotoPath(existingRecord.photoFileName),
+        this.getGeneratedPath(existingRecord.id),
+      ]);
+    }
 
     return toCertificateResponse(updatedRecord);
   }
 
   async renew(id: string): Promise<CertificateRecordResponse> {
-    const records = await this.readRegistry();
-    const recordIndex = records.findIndex((record) => record.id === id);
+    const database = await this.getDatabase();
+    let updatedRecord: CertificateRecord | null = null;
 
-    if (recordIndex === -1) {
-      throw new Error("Удостоверение не найдено.");
-    }
+    await this.runInTransaction(
+      database,
+      async () => {
+        const record = this.findRecordInDatabase(
+          database,
+          id,
+        );
 
-    const updatedRecord: CertificateRecord = {
-      ...records[recordIndex],
-      validUntil: addOneYear(records[recordIndex].validUntil),
-      updatedAt: new Date().toISOString(),
-    };
+        updatedRecord = {
+          ...record,
+          validUntil: addOneYear(record.validUntil),
+          updatedAt: new Date().toISOString(),
+        };
 
-    records[recordIndex] = updatedRecord;
-    await this.writeRegistry(records);
+        this.updateRecord(
+          database,
+          updatedRecord,
+        );
+      },
+    );
 
-    return toCertificateResponse(updatedRecord);
+    return toCertificateResponse(updatedRecord as CertificateRecord);
   }
 
   async remove(id: string): Promise<void> {
-    const records = await this.readRegistry();
-    const recordIndex = records.findIndex((record) => record.id === id);
+    const database = await this.getDatabase();
+    let removedRecord: CertificateRecord | null = null;
 
-    if (recordIndex === -1) {
-      throw new Error("РЈРґРѕСЃС‚РѕРІРµСЂРµРЅРёРµ РЅРµ РЅР°Р№РґРµРЅРѕ.");
-    }
+    await this.runInTransaction(
+      database,
+      async () => {
+        removedRecord = this.findRecordInDatabase(
+          database,
+          id,
+        );
+        database.prepare(`
+          DELETE FROM certificate_records
+          WHERE id = ?
+        `).run(id);
+      },
+    );
 
-    const [removedRecord] = records.splice(recordIndex, 1);
-
-    await this.writeRegistry(records);
-    await Promise.all([
-      this.removeFileIfExists(
+    if (removedRecord) {
+      await this.cleanupFiles([
         this.getPhotoPath(removedRecord.photoFileName),
-      ),
-      this.removeFileIfExists(
-        path.join(
-          this.generatedDirectory,
-          `${removedRecord.id}.png`,
-        ),
-      ),
-    ]);
+        this.getGeneratedPath(removedRecord.id),
+      ]);
+    }
   }
 
   async readTemplateLayout(): Promise<CertificateLayout> {
@@ -463,11 +662,12 @@ export class CertificateRepository {
   }
 
   async renderPng(id: string): Promise<string> {
-    const record = await this.findRecord(id);
-    const outputPath = path.join(
-      this.generatedDirectory,
-      `${record.id}.png`,
+    const database = await this.getDatabase();
+    const record = this.findRecordInDatabase(
+      database,
+      id,
     );
+    const outputPath = this.getGeneratedPath(record.id);
     const nameParts = splitFullName(record.fullName);
 
     await renderCertificate({
@@ -493,7 +693,7 @@ export class CertificateRepository {
   private async ensureDirectories(): Promise<void> {
     await Promise.all([
       mkdir(
-        path.dirname(this.registryPath),
+        path.dirname(this.databasePath),
         {
           recursive: true,
         },
@@ -513,24 +713,108 @@ export class CertificateRepository {
     ]);
   }
 
-  private async readRegistry(): Promise<CertificateRecord[]> {
+  private async getDatabase(): Promise<DatabaseSync> {
+    if (this.database) {
+      return this.database;
+    }
+
     await this.ensureDirectories();
 
+    const database = new DatabaseSync(this.databasePath);
+
+    database.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA foreign_keys = ON;
+      PRAGMA busy_timeout = 5000;
+    `);
+    this.migrateDatabase(database);
+    this.database = database;
+    await this.migrateLegacyRegistry(database);
+
+    return database;
+  }
+
+  private migrateDatabase(database: DatabaseSync): void {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS certificate_records (
+        id TEXT PRIMARY KEY NOT NULL,
+        full_name TEXT NOT NULL CHECK (length(trim(full_name)) > 0),
+        certificate_number TEXT NOT NULL COLLATE NOCASE UNIQUE
+          CHECK (length(trim(certificate_number)) > 0),
+        issued_at TEXT NOT NULL
+          CHECK (issued_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        valid_until TEXT NOT NULL
+          CHECK (
+            valid_until GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND
+            valid_until >= issued_at
+          ),
+        photo_file_name TEXT NOT NULL CHECK (length(trim(photo_file_name)) > 0),
+        photo_crop_zoom REAL NOT NULL DEFAULT 1
+          CHECK (photo_crop_zoom >= 1 AND photo_crop_zoom <= 3),
+        photo_crop_offset_x REAL NOT NULL DEFAULT 0,
+        photo_crop_offset_y REAL NOT NULL DEFAULT 0,
+        template_id TEXT NOT NULL CHECK (length(trim(template_id)) > 0),
+        created_at TEXT NOT NULL CHECK (length(trim(created_at)) > 0),
+        updated_at TEXT NOT NULL CHECK (length(trim(updated_at)) > 0)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_certificate_records_updated_at
+        ON certificate_records(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_certificate_records_valid_until
+        ON certificate_records(valid_until);
+
+      PRAGMA user_version = 1;
+    `);
+  }
+
+  private async migrateLegacyRegistry(database: DatabaseSync): Promise<void> {
+    const existingCount = getCount(
+      database.prepare(`
+        SELECT COUNT(*) AS total
+        FROM certificate_records
+      `).get() as Record<string, unknown> | undefined,
+    );
+
+    if (existingCount > 0) {
+      return;
+    }
+
+    const legacyRecords = await this.readLegacyRegistry();
+
+    if (legacyRecords.length === 0) {
+      return;
+    }
+
+    await this.runInTransaction(
+      database,
+      async () => {
+        for (const record of legacyRecords) {
+          this.insertRecord(
+            database,
+            record,
+          );
+        }
+      },
+    );
+  }
+
+  private async readLegacyRegistry(): Promise<CertificateRecord[]> {
     try {
       const content = await readFile(
-        this.registryPath,
+        this.legacyRegistryPath,
         "utf8",
       );
       const parsedValue = JSON.parse(
         content.replace(/^\uFEFF/, ""),
       );
 
-      return Array.isArray(parsedValue)
-        ? parsedValue.map((record) => ({
-          ...record,
-          photoCrop: normalizeCrop(record.photoCrop),
-        }))
-        : [];
+      if (!Array.isArray(parsedValue)) {
+        return [];
+      }
+
+      return parsedValue.map((record) =>
+        this.normalizeLegacyRecord(record),
+      );
     } catch (error) {
       if (
         error instanceof Error &&
@@ -544,22 +828,159 @@ export class CertificateRepository {
     }
   }
 
-  private async writeRegistry(
-    records: CertificateRecord[],
-  ): Promise<void> {
-    await this.ensureDirectories();
+  private normalizeLegacyRecord(record: unknown): CertificateRecord {
+    if (!record || typeof record !== "object") {
+      throw new Error("Некоректний запис у legacy registry.json.");
+    }
 
-    const temporaryPath = `${this.registryPath}.tmp`;
+    const source = record as Record<string, unknown>;
+    const issuedAt = normalizeDate(source.issuedAt);
+    const validUntil = normalizeDate(source.validUntil);
 
-    await writeFile(
-      temporaryPath,
-      `${JSON.stringify(records, null, 2)}\n`,
-      "utf8",
+    assertDateRange(
+      issuedAt,
+      validUntil,
     );
-    await rename(
-      temporaryPath,
-      this.registryPath,
+
+    return {
+      id: normalizeRequiredText(
+        source.id,
+        "ID",
+      ),
+      fullName: normalizeRequiredText(
+        source.fullName,
+        "ПІБ",
+      ),
+      certificateNumber: normalizeRequiredText(
+        source.certificateNumber,
+        "Номер посвідчення",
+      ),
+      issuedAt,
+      validUntil,
+      photoFileName: normalizeRequiredText(
+        source.photoFileName,
+        "Файл фотографії",
+      ),
+      photoCrop: normalizeCrop(source.photoCrop),
+      templateId: typeof source.templateId === "string" && source.templateId.trim()
+        ? normalizeWhitespace(source.templateId)
+        : TEMPLATE_ID,
+      createdAt: typeof source.createdAt === "string" && source.createdAt.trim()
+        ? source.createdAt
+        : new Date().toISOString(),
+      updatedAt: typeof source.updatedAt === "string" && source.updatedAt.trim()
+        ? source.updatedAt
+        : new Date().toISOString(),
+    };
+  }
+
+  private async runInTransaction<T>(
+    database: DatabaseSync,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    database.exec("BEGIN IMMEDIATE");
+
+    try {
+      const result = await operation();
+
+      database.exec("COMMIT");
+
+      return result;
+    } catch (error) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // Keep the original failure visible.
+      }
+
+      throw error;
+    }
+  }
+
+  private insertRecord(
+    database: DatabaseSync,
+    record: CertificateRecord,
+  ): void {
+    database.prepare(`
+      INSERT INTO certificate_records (
+        id,
+        full_name,
+        certificate_number,
+        issued_at,
+        valid_until,
+        photo_file_name,
+        photo_crop_zoom,
+        photo_crop_offset_x,
+        photo_crop_offset_y,
+        template_id,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      record.id,
+      record.fullName,
+      record.certificateNumber,
+      record.issuedAt,
+      record.validUntil,
+      record.photoFileName,
+      record.photoCrop.zoom,
+      record.photoCrop.offsetX,
+      record.photoCrop.offsetY,
+      record.templateId,
+      record.createdAt,
+      record.updatedAt,
     );
+  }
+
+  private updateRecord(
+    database: DatabaseSync,
+    record: CertificateRecord,
+  ): void {
+    database.prepare(`
+      UPDATE certificate_records
+      SET
+        full_name = ?,
+        certificate_number = ?,
+        issued_at = ?,
+        valid_until = ?,
+        photo_file_name = ?,
+        photo_crop_zoom = ?,
+        photo_crop_offset_x = ?,
+        photo_crop_offset_y = ?,
+        template_id = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      record.fullName,
+      record.certificateNumber,
+      record.issuedAt,
+      record.validUntil,
+      record.photoFileName,
+      record.photoCrop.zoom,
+      record.photoCrop.offsetX,
+      record.photoCrop.offsetY,
+      record.templateId,
+      record.updatedAt,
+      record.id,
+    );
+  }
+
+  private findRecordInDatabase(
+    database: DatabaseSync,
+    id: string,
+  ): CertificateRecord {
+    const row = database.prepare(`
+      SELECT *
+      FROM certificate_records
+      WHERE id = ?
+    `).get(id) as Record<string, unknown> | undefined;
+
+    if (!row) {
+      throw new Error("Удостоверение не найдено.");
+    }
+
+    return rowToRecord(row);
   }
 
   private async removeFileIfExists(filePath: string): Promise<void> {
@@ -578,36 +999,54 @@ export class CertificateRepository {
     }
   }
 
-  private async findRecord(
-    id: string,
-  ): Promise<CertificateRecord> {
-    const records = await this.readRegistry();
-    const record = records.find((item) => item.id === id);
-
-    if (!record) {
-      throw new Error("Удостоверение не найдено.");
-    }
-
-    return record;
+  private getGeneratedPath(id: string): string {
+    return path.join(
+      this.generatedDirectory,
+      `${id}.png`,
+    );
   }
 
-  private async savePhoto(
+  private async savePhotoToTemporary(
     id: string,
-    dataUrl: unknown,
-  ): Promise<string> {
+    payload: CertificatePayload,
+  ): Promise<PendingPhotoFile> {
     await this.ensureDirectories();
 
-    const { content, extension } = await parsePhotoDataUrl(dataUrl);
+    const { content, extension } = await parsePhotoPayload(payload);
     const photoFileName = `${id}-${Date.now()}.${extension}`;
-
-    await writeFile(
-      path.join(
-        this.photosDirectory,
-        photoFileName,
-      ),
-      content,
+    const temporaryPath = path.join(
+      this.photosDirectory,
+      `${photoFileName}.${randomUUID()}.tmp`,
+    );
+    const finalPath = path.join(
+      this.photosDirectory,
+      photoFileName,
     );
 
-    return photoFileName;
+    await writeFile(
+      temporaryPath,
+      content,
+      {
+        flag: "wx",
+      },
+    );
+
+    return {
+      temporaryPath,
+      finalPath,
+      photoFileName,
+    };
+  }
+
+  private async cleanupFiles(filePaths: string[]): Promise<void> {
+    await Promise.all(
+      filePaths.map(async (filePath) => {
+        try {
+          await this.removeFileIfExists(filePath);
+        } catch {
+          // Cleanup must not hide the database operation result.
+        }
+      }),
+    );
   }
 }

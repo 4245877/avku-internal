@@ -33,6 +33,7 @@ export const EMPTY_CROP = {
  * @property {string} validUntil
  * @property {string} photoUrl
  * @property {string} photoDataUrl
+ * @property {File|null} photoFile
  * @property {CertificatePhotoCrop} photoCrop
  * @property {string} createdAt
  * @property {string} updatedAt

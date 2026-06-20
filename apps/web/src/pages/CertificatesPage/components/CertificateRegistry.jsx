@@ -11,6 +11,7 @@ function CertificateRegistry({
   records,
   selectedId,
   loading,
+  loadError,
   actionState,
   onOpen,
   onRenew,
@@ -62,14 +63,21 @@ function CertificateRegistry({
       <div className={styles.recordList}>
         {loading ? <div className={styles.emptyRegistry}>Завантаження реєстру…</div> : null}
 
-        {!loading && filteredRecords.length === 0 ? (
+        {!loading && loadError ? (
+          <div className={styles.emptyRegistry} role="alert">
+            <strong>Не вдалося завантажити реєстр</strong>
+            <span>{loadError}</span>
+          </div>
+        ) : null}
+
+        {!loading && !loadError && filteredRecords.length === 0 ? (
           <div className={styles.emptyRegistry}>
             <strong>Немає записів</strong>
             <span>Збережені посвідчення з'являться тут.</span>
           </div>
         ) : null}
 
-        {!loading
+        {!loading && !loadError
           ? filteredRecords.map((record) => {
             const status = getCertificateStatus(record.validUntil);
             const isBusy = actionState?.id === record.id;

@@ -5,9 +5,7 @@ import fallbackStampOverlayUrl from '../../assets/certificates/volunteer-card-v1
 const API_BASE_URL = (
   import.meta.env.VITE_CERTIFICATES_API_URL ||
   import.meta.env.VITE_API_URL ||
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:3001/api'
-    : '/api')
+  '/api'
 ).replace(/\/$/, '');
 const FALLBACK_TEMPLATE_WARNING =
   'Шаблон із API недоступний; використовується локальна копія для попереднього перегляду.';
@@ -57,15 +55,53 @@ async function parseResponse(response) {
 }
 
 async function requestJson(path, options = {}) {
+  const headers = {
+    ...(options.headers || {}),
+  };
+
+  if (!(options.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const response = await fetch(resolveApiUrl(path), {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
+    headers,
   });
 
   return parseResponse(response);
+}
+
+function hasPhotoFile(payload) {
+  return typeof File !== 'undefined' && payload.photoFile instanceof File;
+}
+
+function appendCertificateFields(formData, payload) {
+  formData.append('fullName', payload.fullName ?? '');
+  formData.append('certificateNumber', payload.certificateNumber ?? '');
+  formData.append('issuedAt', payload.issuedAt ?? '');
+  formData.append('validUntil', payload.validUntil ?? '');
+  formData.append('photoCrop', JSON.stringify(payload.photoCrop ?? {}));
+}
+
+function buildCertificateRequestOptions(method, payload) {
+  const { photoFile, ...jsonPayload } = payload;
+
+  if (hasPhotoFile(payload)) {
+    const formData = new FormData();
+
+    appendCertificateFields(formData, payload);
+    formData.append('photo', photoFile, photoFile.name);
+
+    return {
+      method,
+      body: formData,
+    };
+  }
+
+  return {
+    method,
+    body: JSON.stringify(jsonPayload),
+  };
 }
 
 function normalizeRecord(record) {
@@ -126,19 +162,19 @@ export async function fetchCertificates() {
 
 export async function createCertificate(payload) {
   return normalizeRecord(
-    await requestJson('/certificates', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+    await requestJson(
+      '/certificates',
+      buildCertificateRequestOptions('POST', payload),
+    ),
   );
 }
 
 export async function updateCertificate(id, payload) {
   return normalizeRecord(
-    await requestJson(`/certificates/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    }),
+    await requestJson(
+      `/certificates/${encodeURIComponent(id)}`,
+      buildCertificateRequestOptions('PUT', payload),
+    ),
   );
 }
 

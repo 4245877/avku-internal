@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   addOneYear,
+  buildCertificateSnapshot,
   buildCertificatePayload,
   buildDownloadFileName,
   createFormFromRecord,
@@ -148,6 +149,7 @@ function CertificatesPage() {
   const [savedSnapshot, setSavedSnapshot] = useState('');
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState(null);
+  const [registryLoadError, setRegistryLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [exportingFormat, setExportingFormat] = useState('');
@@ -177,7 +179,7 @@ function CertificatesPage() {
   }, [records]);
 
   const currentSnapshot = useMemo(
-    () => JSON.stringify(buildCertificatePayload(form)),
+    () => buildCertificateSnapshot(form),
     [form],
   );
 
@@ -201,7 +203,7 @@ function CertificatesPage() {
 
   const setCleanForm = useCallback((nextForm) => {
     setForm(nextForm);
-    setSavedSnapshot(JSON.stringify(buildCertificatePayload(nextForm)));
+    setSavedSnapshot(buildCertificateSnapshot(nextForm));
     setErrors({});
   }, []);
 
@@ -247,12 +249,16 @@ function CertificatesPage() {
 
       if (recordsResult.status === 'fulfilled') {
         setRecords(sortRecordsByUpdatedAt(recordsResult.value));
+        setRegistryLoadError('');
       } else {
+        const recordsMessage = getErrorMessage(
+          recordsResult.reason,
+          'Не вдалося завантажити реєстр посвідчень.',
+        );
+
+        setRegistryLoadError(recordsMessage);
         loadingErrors.push(
-          getErrorMessage(
-            recordsResult.reason,
-            'Не вдалося завантажити реєстр посвідчень.',
-          ),
+          recordsMessage,
         );
       }
 
@@ -278,6 +284,9 @@ function CertificatesPage() {
       showNotice(
         'error',
         getErrorMessage(error, 'Не вдалося завантажити модуль посвідчень.'),
+      );
+      setRegistryLoadError(
+        getErrorMessage(error, 'Не вдалося завантажити реєстр посвідчень.'),
       );
       setCleanForm(getEmptyCertificateForm());
       setLoading(false);
@@ -386,6 +395,7 @@ function CertificatesPage() {
       setForm((currentForm) => ({
         ...currentForm,
         photoDataUrl,
+        photoFile: file,
         photoUrl: '',
         photoCrop: defaultPhotoCrop,
       }));
@@ -752,6 +762,7 @@ function CertificatesPage() {
           records={records}
           selectedId={form.id}
           loading={loading}
+          loadError={registryLoadError}
           actionState={registryAction}
           onOpen={openRecord}
           onRenew={renewRecord}

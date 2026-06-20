@@ -8,13 +8,14 @@ import { fileURLToPath } from "node:url";
 
 import {
   CertificateRepository,
+  type CertificatePhotoFilePayload,
   type CertificatePayload,
 } from "./modules/certificates/certificate-records";
 
 const PORT = Number(
   process.env.PORT ?? process.env.API_PORT ?? 3001,
 );
-const MAX_JSON_BYTES = 30 * 1024 * 1024;
+const MAX_REQUEST_BYTES = 30 * 1024 * 1024;
 const TEMPLATE_ASSETS = new Map([
   [
     "background.png",
@@ -25,6 +26,15 @@ const TEMPLATE_ASSETS = new Map([
     "image/png",
   ],
 ]);
+
+class HttpError extends Error {
+  constructor(
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 function getRepositoryRoot(): string {
   return path.resolve(
@@ -53,6 +63,7 @@ function createRepository(): CertificateRepository {
   return new CertificateRepository({
     storageRoot,
     templateDirectory,
+    legacyRegistryPath: process.env.CERTIFICATES_LEGACY_REGISTRY_PATH,
   });
 }
 
@@ -111,9 +122,16 @@ function sendError(
   );
 }
 
-async function readJsonBody(
+interface MultipartPart {
+  name: string;
+  fileName?: string;
+  contentType?: string;
+  content: Buffer;
+}
+
+async function readRequestBody(
   request: IncomingMessage,
-): Promise<CertificatePayload> {
+): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let totalLength = 0;
 
@@ -124,19 +142,175 @@ async function readJsonBody(
 
     totalLength += buffer.length;
 
-    if (totalLength > MAX_JSON_BYTES) {
-      throw new Error("Размер запроса превышает лимит.");
+    if (totalLength > MAX_REQUEST_BYTES) {
+      throw new HttpError(
+        413,
+        "Размер запроса превышает лимит 30 МБ.",
+      );
     }
 
     chunks.push(buffer);
   }
 
-  if (chunks.length === 0) {
+  return Buffer.concat(chunks);
+}
+
+function getMultipartBoundary(contentType: string): string {
+  const match = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
+  const boundary = match?.[1] ?? match?.[2];
+
+  if (!boundary) {
+    throw new Error("Не указан boundary для multipart/form-data.");
+  }
+
+  return boundary.trim();
+}
+
+function parseContentDisposition(value: string): {
+  name: string;
+  fileName?: string;
+} {
+  const name = /(?:^|;\s*)name="([^"]*)"/i.exec(value)?.[1];
+  const fileName = /(?:^|;\s*)filename="([^"]*)"/i.exec(value)?.[1];
+
+  if (!name) {
+    throw new Error("Некорректная часть multipart/form-data.");
+  }
+
+  return {
+    name,
+    fileName: fileName || undefined,
+  };
+}
+
+function parseMultipartBody(
+  body: Buffer,
+  contentType: string,
+): MultipartPart[] {
+  const boundary = getMultipartBoundary(contentType);
+  const delimiter = `--${boundary}`;
+  const segments = body
+    .toString("latin1")
+    .split(delimiter)
+    .slice(1, -1);
+
+  return segments.map((segment) => {
+    const normalizedSegment = segment.startsWith("\r\n")
+      ? segment.slice(2)
+      : segment;
+    const headerEndIndex = normalizedSegment.indexOf("\r\n\r\n");
+
+    if (headerEndIndex === -1) {
+      throw new Error("Некорректное multipart/form-data тело.");
+    }
+
+    const rawHeaders = normalizedSegment.slice(0, headerEndIndex);
+    let rawContent = normalizedSegment.slice(headerEndIndex + 4);
+
+    if (rawContent.endsWith("\r\n")) {
+      rawContent = rawContent.slice(0, -2);
+    }
+
+    const headers = new Map<string, string>();
+
+    for (const line of rawHeaders.split("\r\n")) {
+      const separatorIndex = line.indexOf(":");
+
+      if (separatorIndex === -1) {
+        continue;
+      }
+
+      headers.set(
+        line.slice(0, separatorIndex).trim().toLowerCase(),
+        line.slice(separatorIndex + 1).trim(),
+      );
+    }
+
+    const disposition = parseContentDisposition(
+      headers.get("content-disposition") ?? "",
+    );
+
+    return {
+      ...disposition,
+      contentType: headers.get("content-type"),
+      content: Buffer.from(
+        rawContent,
+        "latin1",
+      ),
+    };
+  });
+}
+
+function parsePhotoCropField(value: string | undefined): unknown {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new Error("Некорректные параметры кадрирования фотографии.");
+  }
+}
+
+function multipartPartsToPayload(parts: MultipartPart[]): CertificatePayload {
+  const fields = new Map<string, string>();
+  let photoFile: CertificatePhotoFilePayload | undefined;
+
+  for (const part of parts) {
+    if (part.fileName) {
+      if (part.name === "photo" || part.name === "photoFile") {
+        photoFile = {
+          content: part.content,
+          fileName: part.fileName,
+          contentType: part.contentType,
+        };
+      }
+
+      continue;
+    }
+
+    fields.set(
+      part.name,
+      part.content.toString("utf8"),
+    );
+  }
+
+  return {
+    fullName: fields.get("fullName"),
+    certificateNumber: fields.get("certificateNumber"),
+    issuedAt: fields.get("issuedAt"),
+    validUntil: fields.get("validUntil"),
+    photoCrop: parsePhotoCropField(fields.get("photoCrop")),
+    photoFile,
+  };
+}
+
+async function readCertificatePayload(
+  request: IncomingMessage,
+): Promise<CertificatePayload> {
+  const body = await readRequestBody(request);
+
+  if (body.length === 0) {
     return {};
   }
 
+  const contentTypeHeader = request.headers["content-type"];
+  const contentType = Array.isArray(contentTypeHeader)
+    ? contentTypeHeader.join(";")
+    : contentTypeHeader ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    return multipartPartsToPayload(
+      parseMultipartBody(
+        body,
+        contentType,
+      ),
+    );
+  }
+
   return JSON.parse(
-    Buffer.concat(chunks).toString("utf8"),
+    body.toString("utf8"),
   ) as CertificatePayload;
 }
 
@@ -265,7 +439,7 @@ async function handleCertificateRequest(
       response,
       201,
       await repository.create(
-        await readJsonBody(request),
+        await readCertificatePayload(request),
       ),
     );
     return;
@@ -292,7 +466,7 @@ async function handleCertificateRequest(
         200,
         await repository.update(
           id,
-          await readJsonBody(request),
+          await readCertificatePayload(request),
         ),
       );
       return;
@@ -375,7 +549,9 @@ export function createCertificateApiServer(): http.Server {
       repository,
     ).catch((error: unknown) => {
       const statusCode =
-        error instanceof SyntaxError
+        error instanceof HttpError
+          ? error.statusCode
+          : error instanceof SyntaxError
           ? 400
           : error instanceof Error &&
               error.message.includes("не найден")

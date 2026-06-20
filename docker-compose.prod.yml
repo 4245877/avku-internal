@@ -1,0 +1,46 @@
+services:
+  api:
+    image: node:22-bookworm
+    working_dir: /app/apps/api
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm start"
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      CERTIFICATES_STORAGE_ROOT: /data/certificates
+      CERTIFICATES_TEMPLATE_DIRECTORY: /app/storage/certificates/templates/volunteer-card-v1
+      CERTIFICATES_LEGACY_REGISTRY_PATH: /app/storage/certificates/registry.json
+      NODE_OPTIONS: --no-warnings=ExperimentalWarning
+    volumes:
+      - ./:/app
+      - api-node-modules:/app/apps/api/node_modules
+      - certificates-data:/data/certificates
+
+  web:
+    image: node:22-bookworm
+    working_dir: /app/apps/web
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm run build && pnpm run preview -- --host 0.0.0.0 --port 5173"
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    volumes:
+      - ./:/app
+      - web-node-modules:/app/apps/web/node_modules
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./infra/nginx/app.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+      - web
+
+volumes:
+  certificates-data:
+  api-node-modules:
+  web-node-modules:

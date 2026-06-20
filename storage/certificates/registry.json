@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "id": "3b1d6446-fee3-47e3-bfac-582855f52965",
+    "fullName": "Кулья Юлія Володимірівна",
+    "certificateNumber": "123",
+    "issuedAt": "2026-06-19",
+    "validUntil": "2027-06-19",
+    "photoFileName": "3b1d6446-fee3-47e3-bfac-582855f52965-1781889622979.png",
+    "photoCrop": {
+      "zoom": 1,
+      "offsetX": 0,
+      "offsetY": 0
+    },
+    "templateId": "volunteer-card-v1",
+    "createdAt": "2026-06-19T17:20:22.973Z",
+    "updatedAt": "2026-06-19T17:20:22.973Z"
+  }
+]
