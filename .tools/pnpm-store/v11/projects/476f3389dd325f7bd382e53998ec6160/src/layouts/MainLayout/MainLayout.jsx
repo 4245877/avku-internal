@@ -23,6 +23,18 @@ const navigationItems = [
     icon: 'П',
   },
   {
+    path: '/warehouse-aid',
+    label: 'Склад',
+    description: 'Матеріальна допомога',
+    icon: 'W',
+  },
+  {
+    path: '/logistics-transfers',
+    label: 'Логістика',
+    description: 'Передачі допомоги',
+    icon: 'L',
+  },
+  {
     path: '/smm',
     label: 'SMM',
     description: 'Instagram та YouTube',
