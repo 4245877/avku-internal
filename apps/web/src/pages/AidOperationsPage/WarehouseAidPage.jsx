@@ -1,284 +1,319 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import {
+  addWarehouseMovement,
+  createWarehouseItem,
+  deleteWarehouseItem,
+  downloadBlob,
+  downloadWarehouseStock,
+  fetchWarehouseItems,
+  updateWarehouseItem,
+} from '../../features/warehouse/warehouseApi.js';
+import {
+  WAREHOUSE_CATEGORIES,
+  buildItemPayload,
+  filterItems,
+  getAvailabilityLabel,
+  getItemStatus,
+  getMovementTypeLabel,
+  getReserveLabel,
+  summarizeItems,
+  upsertItem,
+} from '../../features/warehouse/warehouseUtils.js';
+import WarehouseItemDialog from './components/WarehouseItemDialog.jsx';
+import WarehouseMovementDialog from './components/WarehouseMovementDialog.jsx';
+import DeleteWarehouseItemDialog from './components/DeleteWarehouseItemDialog.jsx';
 import styles from './AidOperationsPage.module.css';
 
-const categories = [
-  'Дрони',
-  'Генератори',
-  'Продукти',
-  'Медикаменти',
-  'Сітки',
-  'Свічки',
-  'Одяг',
-];
+const NOTICE_STYLE_BY_TYPE = {
+  error: 'noticeError',
+  info: 'noticeInfo',
+  success: 'noticeSuccess',
+  warning: 'noticeWarning',
+};
 
-const inventoryItems = [
-  {
-    id: 'WH-DRN-001',
-    name: 'FPV комплекти 7"',
-    category: 'Дрони',
-    quantity: 12,
-    unit: 'компл.',
-    condition: 'Нові, перевірені',
-    location: 'Київ, склад A / стелаж 2',
-    reservedFor: '93 ОМБр, заявка REQ-2026-031',
-    availableNow: 4,
-    status: 'Частково доступно',
-    statusTone: 'progress',
-    movement: [
-      {
-        date: '2026-06-18',
-        title: 'Надходження на склад',
-        meta: '+12 комплектів від партнерів, прийняв Олександр',
-      },
-      {
-        date: '2026-06-20',
-        title: 'Резерв під заявку',
-        meta: '8 комплектів зарезервовано для 93 ОМБр',
-      },
-      {
-        date: '2026-06-22',
-        title: 'Перевірка комплектації',
-        meta: 'Акумулятори та антени підтверджені',
-      },
-    ],
-  },
-  {
-    id: 'WH-GEN-014',
-    name: 'Генератори 3 кВт',
-    category: 'Генератори',
-    quantity: 6,
-    unit: 'шт.',
-    condition: 'Після сервісу, готові',
-    location: 'Львів, склад B / зона техніки',
-    reservedFor: 'Немає резерву',
-    availableNow: 6,
-    status: 'Можна видати',
-    statusTone: 'ready',
-    movement: [
-      {
-        date: '2026-06-12',
-        title: 'Закупівля',
-        meta: '+6 шт. за партнерським рахунком',
-      },
-      {
-        date: '2026-06-14',
-        title: 'Сервісна перевірка',
-        meta: 'Мастило, запуск, навантаження - без зауважень',
-      },
-    ],
-  },
-  {
-    id: 'WH-FOOD-027',
-    name: 'Продуктові набори',
-    category: 'Продукти',
-    quantity: 80,
-    unit: 'наборів',
-    condition: 'Термін придатності до 2027-01',
-    location: 'Київ, склад A / суха зона',
-    reservedFor: 'Центр ВПО Харків, заявка REQ-2026-044',
-    availableNow: 35,
-    status: 'Частково доступно',
-    statusTone: 'progress',
-    movement: [
-      {
-        date: '2026-06-10',
-        title: 'Надходження',
-        meta: '+100 наборів від волонтерської групи',
-      },
-      {
-        date: '2026-06-16',
-        title: 'Видача',
-        meta: '-20 наборів для сімей ВПО',
-      },
-      {
-        date: '2026-06-24',
-        title: 'Резерв',
-        meta: '45 наборів під маршрут TR-2026-052',
-      },
-    ],
-  },
-  {
-    id: 'WH-MED-009',
-    name: 'Аптечки тактичні',
-    category: 'Медикаменти',
-    quantity: 24,
-    unit: 'шт.',
-    condition: 'Потребують доукомплектації турнікетами',
-    location: 'Київ, склад A / медична шафа',
-    reservedFor: 'Медики Сумського напрямку, REQ-2026-039',
-    availableNow: 0,
-    status: 'Потрібна перевірка',
-    statusTone: 'warning',
-    movement: [
-      {
-        date: '2026-06-07',
-        title: 'Приймання',
-        meta: '+24 аптечки без частини вкладень',
-      },
-      {
-        date: '2026-06-11',
-        title: 'Інвентаризація',
-        meta: 'Не вистачає 24 турнікетів та 12 бандажів',
-      },
-      {
-        date: '2026-06-21',
-        title: 'Резерв',
-        meta: 'Після доукомплектації передати медикам',
-      },
-    ],
-  },
-  {
-    id: 'WH-NET-018',
-    name: 'Маскувальні сітки 6x4',
-    category: 'Сітки',
-    quantity: 18,
-    unit: 'шт.',
-    condition: 'Готові, упаковані',
-    location: 'Дніпро, партнерський склад / зона видачі',
-    reservedFor: 'Немає резерву',
-    availableNow: 18,
-    status: 'Можна видати',
-    statusTone: 'ready',
-    movement: [
-      {
-        date: '2026-06-13',
-        title: 'Передано від майстерні',
-        meta: '+18 сіток, маркування за розміром',
-      },
-      {
-        date: '2026-06-15',
-        title: 'Фотофіксація',
-        meta: 'Додано фото партії для звіту',
-      },
-    ],
-  },
-  {
-    id: 'WH-CND-006',
-    name: 'Окопні свічки',
-    category: 'Свічки',
-    quantity: 240,
-    unit: 'шт.',
-    condition: 'Готові до відвантаження',
-    location: 'Львів, склад B / коробки C4-C7',
-    reservedFor: 'Бахмутський напрямок, REQ-2026-047',
-    availableNow: 120,
-    status: 'Частково доступно',
-    statusTone: 'progress',
-    movement: [
-      {
-        date: '2026-06-05',
-        title: 'Виробництво',
-        meta: '+240 шт. від локальної майстерні',
-      },
-      {
-        date: '2026-06-19',
-        title: 'Резерв',
-        meta: '120 шт. під найближчу передачу',
-      },
-    ],
-  },
-  {
-    id: 'WH-CLT-033',
-    name: 'Термобілизна, мікс розмірів',
-    category: 'Одяг',
-    quantity: 46,
-    unit: 'компл.',
-    condition: 'Новий одяг, розмірна сітка в описі',
-    location: 'Київ, склад A / стелаж 5',
-    reservedFor: 'Немає резерву',
-    availableNow: 46,
-    status: 'Можна видати',
-    statusTone: 'ready',
-    movement: [
-      {
-        date: '2026-06-09',
-        title: 'Надходження',
-        meta: '+50 комплектів від донорів',
-      },
-      {
-        date: '2026-06-17',
-        title: 'Видача',
-        meta: '-4 комплекти для індивідуальної заявки',
-      },
-    ],
-  },
-];
-
-function getAvailabilityLabel(item) {
-  if (item.availableNow <= 0) {
-    return 'Немає для негайної видачі';
-  }
-
-  if (item.availableNow === item.quantity) {
-    return 'Можна видати все';
-  }
-
-  return `Можна видати ${item.availableNow} ${item.unit}`;
+function getErrorMessage(error, fallbackMessage) {
+  return error instanceof Error && error.message ? error.message : fallbackMessage;
 }
 
 function WarehouseAidPage() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [notice, setNotice] = useState(null);
+
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [availabilityFilter, setAvailabilityFilter] = useState('all');
-  const [selectedId, setSelectedId] = useState(inventoryItems[0].id);
+  const [selectedId, setSelectedId] = useState('');
 
-  const filteredItems = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
+  const [isExporting, setIsExporting] = useState(false);
+  const [itemDialog, setItemDialog] = useState(null);
+  const [isSavingItem, setIsSavingItem] = useState(false);
+  const [movementTarget, setMovementTarget] = useState(null);
+  const [isSavingMovement, setIsSavingMovement] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-    return inventoryItems.filter((item) => {
-      const matchesCategory =
-        categoryFilter === 'all' || item.category === categoryFilter;
-      const matchesAvailability =
-        availabilityFilter === 'all' ||
-        (availabilityFilter === 'now' && item.availableNow > 0) ||
-        (availabilityFilter === 'reserved' &&
-          item.reservedFor !== 'Немає резерву') ||
-        (availabilityFilter === 'check' && item.statusTone === 'warning');
-      const matchesSearch =
-        !normalizedSearch ||
-        [
-          item.id,
-          item.name,
-          item.category,
-          item.condition,
-          item.location,
-          item.reservedFor,
-          item.status,
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(normalizedSearch);
-
-      return matchesCategory && matchesAvailability && matchesSearch;
-    });
-  }, [availabilityFilter, categoryFilter, search]);
-
-  const selectedItem =
-    filteredItems.find((item) => item.id === selectedId) ||
-    filteredItems[0] ||
-    inventoryItems[0];
-
-  const totals = useMemo(() => {
-    const totalQuantity = inventoryItems.reduce(
-      (sum, item) => sum + item.quantity,
-      0,
-    );
-    const availableNow = inventoryItems.reduce(
-      (sum, item) => sum + item.availableNow,
-      0,
-    );
-    const reservedItems = inventoryItems.filter(
-      (item) => item.reservedFor !== 'Немає резерву',
-    ).length;
-    const needsCheck = inventoryItems.filter(
-      (item) => item.statusTone === 'warning',
-    ).length;
-
-    return { totalQuantity, availableNow, reservedItems, needsCheck };
+  const showNotice = useCallback((type, text) => {
+    setNotice({ type, text });
   }, []);
 
+  const clearNotice = useCallback(() => {
+    setNotice(null);
+  }, []);
+
+  const loadItems = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const records = await fetchWarehouseItems();
+
+      setItems(records);
+      setLoadError('');
+
+      return records;
+    } catch (error) {
+      const message = getErrorMessage(
+        error,
+        'Не вдалося завантажити дані складу.',
+      );
+
+      setLoadError(message);
+      showNotice('error', message);
+
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, [showNotice]);
+
+  useEffect(() => {
+    loadItems();
+  }, [loadItems]);
+
+  const filteredItems = useMemo(
+    () =>
+      filterItems(items, {
+        search,
+        category: categoryFilter,
+        availability: availabilityFilter,
+      }),
+    [availabilityFilter, categoryFilter, items, search],
+  );
+
+  const selectedItem = useMemo(() => {
+    if (filteredItems.length === 0) {
+      return null;
+    }
+
+    return (
+      filteredItems.find((item) => item.id === selectedId) ?? filteredItems[0]
+    );
+  }, [filteredItems, selectedId]);
+
+  const totals = useMemo(() => summarizeItems(items), [items]);
+
+  const isBusy =
+    loading || isSavingItem || isSavingMovement || isDeleting || isExporting;
+
+  const handleRefresh = useCallback(async () => {
+    if (isBusy) {
+      return;
+    }
+
+    const records = await loadItems();
+
+    if (records) {
+      showNotice('info', 'Дані складу оновлено.');
+    }
+  }, [isBusy, loadItems, showNotice]);
+
+  const handleExport = useCallback(async () => {
+    if (isBusy) {
+      return;
+    }
+
+    setIsExporting(true);
+
+    try {
+      const blob = await downloadWarehouseStock();
+
+      downloadBlob(blob, 'warehouse-stock.csv');
+      showNotice('success', 'Експорт залишків сформовано.');
+    } catch (error) {
+      showNotice(
+        'error',
+        getErrorMessage(error, 'Не вдалося сформувати експорт.'),
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  }, [isBusy, showNotice]);
+
+  const openCreateDialog = useCallback(() => {
+    if (isBusy) {
+      return;
+    }
+
+    clearNotice();
+    setItemDialog({ mode: 'create', item: null });
+  }, [clearNotice, isBusy]);
+
+  const openEditDialog = useCallback(
+    (item) => {
+      if (isBusy) {
+        return;
+      }
+
+      clearNotice();
+      setItemDialog({ mode: 'edit', item });
+    },
+    [clearNotice, isBusy],
+  );
+
+  const closeItemDialog = useCallback(() => {
+    if (isSavingItem) {
+      return;
+    }
+
+    setItemDialog(null);
+  }, [isSavingItem]);
+
+  const submitItemDialog = useCallback(
+    async (form) => {
+      setIsSavingItem(true);
+
+      try {
+        const payload = buildItemPayload(form);
+        const isEdit = Boolean(itemDialog?.item);
+        const savedItem = isEdit
+          ? await updateWarehouseItem(itemDialog.item.id, payload)
+          : await createWarehouseItem(payload);
+
+        setItems((current) => upsertItem(current, savedItem));
+        setSelectedId(savedItem.id);
+        setItemDialog(null);
+        showNotice(
+          'success',
+          isEdit ? 'Позицію оновлено.' : 'Позицію додано на склад.',
+        );
+      } catch (error) {
+        showNotice(
+          'error',
+          getErrorMessage(error, 'Не вдалося зберегти позицію.'),
+        );
+      } finally {
+        setIsSavingItem(false);
+      }
+    },
+    [itemDialog, showNotice],
+  );
+
+  const openMovementDialog = useCallback(
+    (item) => {
+      if (isBusy) {
+        return;
+      }
+
+      clearNotice();
+      setMovementTarget(item);
+    },
+    [clearNotice, isBusy],
+  );
+
+  const closeMovementDialog = useCallback(() => {
+    if (isSavingMovement) {
+      return;
+    }
+
+    setMovementTarget(null);
+  }, [isSavingMovement]);
+
+  const submitMovement = useCallback(
+    async (payload) => {
+      if (!movementTarget) {
+        return;
+      }
+
+      setIsSavingMovement(true);
+
+      try {
+        const updatedItem = await addWarehouseMovement(
+          movementTarget.id,
+          payload,
+        );
+
+        setItems((current) => upsertItem(current, updatedItem));
+        setSelectedId(updatedItem.id);
+        setMovementTarget(null);
+        showNotice('success', 'Рух по позиції записано.');
+      } catch (error) {
+        showNotice(
+          'error',
+          getErrorMessage(error, 'Не вдалося записати рух.'),
+        );
+      } finally {
+        setIsSavingMovement(false);
+      }
+    },
+    [movementTarget, showNotice],
+  );
+
+  const requestDelete = useCallback(
+    (item) => {
+      if (isBusy) {
+        return;
+      }
+
+      clearNotice();
+      setDeleteCandidate(item);
+    },
+    [clearNotice, isBusy],
+  );
+
+  const cancelDelete = useCallback(() => {
+    if (isDeleting) {
+      return;
+    }
+
+    setDeleteCandidate(null);
+  }, [isDeleting]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteCandidate) {
+      return;
+    }
+
+    setIsDeleting(true);
+
+    try {
+      await deleteWarehouseItem(deleteCandidate.id);
+
+      setItems((current) =>
+        current.filter((item) => item.id !== deleteCandidate.id),
+      );
+      setDeleteCandidate(null);
+      showNotice('success', 'Позицію видалено зі складу.');
+    } catch (error) {
+      showNotice(
+        'error',
+        getErrorMessage(error, 'Не вдалося видалити позицію.'),
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteCandidate, showNotice]);
+
+  const selectedStatus = selectedItem ? getItemStatus(selectedItem) : null;
+  const noticeClassName = notice
+    ? [styles.notice, styles[NOTICE_STYLE_BY_TYPE[notice.type]]]
+        .filter(Boolean)
+        .join(' ')
+    : '';
+
   return (
-    <main className={styles.page}>
+    <main className={styles.page} aria-busy={loading}>
       <header className={styles.pageHeader}>
         <div>
           <p className={styles.eyebrow}>Склад / Матеріальна допомога</p>
@@ -290,11 +325,21 @@ function WarehouseAidPage() {
         </div>
 
         <div className={styles.headerActions}>
-          <button className={styles.primaryButton} type="button">
+          <button
+            className={styles.primaryButton}
+            type="button"
+            onClick={openCreateDialog}
+            disabled={isBusy}
+          >
             Додати позицію
           </button>
-          <button className={styles.secondaryButton} type="button">
-            Експорт залишків
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            onClick={handleExport}
+            disabled={isBusy || items.length === 0}
+          >
+            {isExporting ? 'Експорт…' : 'Експорт залишків'}
           </button>
         </div>
       </header>
@@ -325,18 +370,42 @@ function WarehouseAidPage() {
         </article>
       </section>
 
+      <div className={styles.noticeRegion} aria-live="polite" aria-atomic="true">
+        {notice ? (
+          <div
+            className={noticeClassName}
+            role={notice.type === 'error' ? 'alert' : 'status'}
+          >
+            <span>{notice.text}</span>
+            <button
+              className={styles.noticeCloseButton}
+              type="button"
+              onClick={clearNotice}
+              aria-label="Закрити сповіщення"
+            >
+              Закрити
+            </button>
+          </div>
+        ) : null}
+      </div>
+
       <section className={styles.workspaceGrid}>
         <article className={styles.panel}>
           <div className={styles.panelHeader}>
             <div>
               <h2 className={styles.panelTitle}>Позиції на складі</h2>
               <p className={styles.panelText}>
-                Знайдено: {filteredItems.length} з {inventoryItems.length}
+                Знайдено: {filteredItems.length} з {items.length}
               </p>
             </div>
 
-            <button className={styles.smallButton} type="button">
-              Оновити
+            <button
+              className={styles.smallButton}
+              type="button"
+              onClick={handleRefresh}
+              disabled={isBusy}
+            >
+              {loading ? 'Оновлення…' : 'Оновити'}
             </button>
           </div>
 
@@ -345,7 +414,7 @@ function WarehouseAidPage() {
               aria-label="Пошук по складу"
               className={styles.searchInput}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Пошук за назвою, місцем, резервом або ID"
+              placeholder="Пошук за назвою, місцем, резервом або кодом"
               type="search"
               value={search}
             />
@@ -357,7 +426,7 @@ function WarehouseAidPage() {
               value={categoryFilter}
             >
               <option value="all">Усі категорії</option>
-              {categories.map((category) => (
+              {WAREHOUSE_CATEGORIES.map((category) => (
                 <option key={category} value={category}>
                   {category}
                 </option>
@@ -391,124 +460,207 @@ function WarehouseAidPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item) => (
-                  <tr
-                    className={
-                      item.id === selectedItem.id ? styles.activeRow : ''
-                    }
-                    key={item.id}
-                    onClick={() => setSelectedId(item.id)}
-                  >
-                    <td>
-                      <span className={styles.mainCell}>
-                        <strong>{item.name}</strong>
-                        <span>{item.id}</span>
-                      </span>
-                    </td>
-                    <td>
-                      <span className={styles.categoryBadge}>
-                        {item.category}
-                      </span>
-                    </td>
-                    <td className={styles.nowrap}>
-                      {item.quantity} {item.unit}
-                    </td>
-                    <td>
-                      <span
-                        className={`${styles.statusBadge} ${
-                          styles[`status-${item.statusTone}`]
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                      <div className={styles.mutedCell}>{item.condition}</div>
-                    </td>
-                    <td>{item.location}</td>
-                    <td>{item.reservedFor}</td>
-                    <td>
-                      <span className={styles.availability}>
-                        <strong>
-                          {item.availableNow} {item.unit}
-                        </strong>
-                        <span>{getAvailabilityLabel(item)}</span>
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {filteredItems.map((item) => {
+                  const status = getItemStatus(item);
+
+                  return (
+                    <tr
+                      className={
+                        selectedItem && item.id === selectedItem.id
+                          ? styles.activeRow
+                          : ''
+                      }
+                      key={item.id}
+                      onClick={() => setSelectedId(item.id)}
+                    >
+                      <td>
+                        <span className={styles.mainCell}>
+                          <strong>{item.name}</strong>
+                          <span>{item.code}</span>
+                        </span>
+                      </td>
+                      <td>
+                        <span className={styles.categoryBadge}>
+                          {item.category}
+                        </span>
+                      </td>
+                      <td className={styles.nowrap}>
+                        {item.quantity} {item.unit}
+                      </td>
+                      <td>
+                        <span
+                          className={`${styles.statusBadge} ${
+                            styles[`status-${status.tone}`]
+                          }`}
+                        >
+                          {status.label}
+                        </span>
+                        <div className={styles.mutedCell}>
+                          {item.condition || '—'}
+                        </div>
+                      </td>
+                      <td>{item.location || '—'}</td>
+                      <td>{getReserveLabel(item)}</td>
+                      <td>
+                        <span className={styles.availability}>
+                          <strong>
+                            {item.availableNow} {item.unit}
+                          </strong>
+                          <span>{getAvailabilityLabel(item)}</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
-          {filteredItems.length === 0 && (
+          {!loading && filteredItems.length === 0 && (
             <div className={styles.emptyState}>
-              За цими фільтрами позицій не знайдено.
+              {loadError
+                ? loadError
+                : items.length === 0
+                  ? 'Склад порожній. Додайте першу позицію.'
+                  : 'За цими фільтрами позицій не знайдено.'}
             </div>
           )}
         </article>
 
         <aside className={styles.detailPanel}>
-          <div className={styles.detailHeader}>
-            <div>
-              <span className={styles.detailCode}>{selectedItem.id}</span>
-              <h2>{selectedItem.name}</h2>
-              <p>{selectedItem.category}</p>
-            </div>
+          {selectedItem ? (
+            <>
+              <div className={styles.detailHeader}>
+                <div>
+                  <span className={styles.detailCode}>{selectedItem.code}</span>
+                  <h2>{selectedItem.name}</h2>
+                  <p>{selectedItem.category}</p>
+                </div>
 
-            <span
-              className={`${styles.statusBadge} ${
-                styles[`status-${selectedItem.statusTone}`]
-              }`}
-            >
-              {selectedItem.status}
-            </span>
-          </div>
+                <span
+                  className={`${styles.statusBadge} ${
+                    styles[`status-${selectedStatus.tone}`]
+                  }`}
+                >
+                  {selectedStatus.label}
+                </span>
+              </div>
 
-          <section className={styles.detailSection}>
-            <h3>Швидка видача</h3>
-            <dl className={styles.infoList}>
-              <div>
-                <dt>Доступно зараз</dt>
-                <dd>
-                  {selectedItem.availableNow} {selectedItem.unit}
-                </dd>
+              <div className={styles.detailActions}>
+                <button
+                  className={styles.smallButton}
+                  type="button"
+                  onClick={() => openMovementDialog(selectedItem)}
+                  disabled={isBusy}
+                >
+                  Рух
+                </button>
+                <button
+                  className={styles.smallButton}
+                  type="button"
+                  onClick={() => openEditDialog(selectedItem)}
+                  disabled={isBusy}
+                >
+                  Редагувати
+                </button>
+                <button
+                  className={styles.smallDangerButton}
+                  type="button"
+                  onClick={() => requestDelete(selectedItem)}
+                  disabled={isBusy}
+                >
+                  Видалити
+                </button>
               </div>
-              <div>
-                <dt>Усього на залишку</dt>
-                <dd>
-                  {selectedItem.quantity} {selectedItem.unit}
-                </dd>
-              </div>
-              <div>
-                <dt>Резерв</dt>
-                <dd>{selectedItem.reservedFor}</dd>
-              </div>
-              <div>
-                <dt>Стан</dt>
-                <dd>{selectedItem.condition}</dd>
-              </div>
-              <div>
-                <dt>Місце</dt>
-                <dd>{selectedItem.location}</dd>
-              </div>
-            </dl>
-          </section>
 
-          <section className={styles.detailSection}>
-            <h3>Історія руху</h3>
-            <div className={styles.timeline}>
-              {selectedItem.movement.map((event) => (
-                <article className={styles.timelineItem} key={event.title}>
-                  <time dateTime={event.date}>{event.date}</time>
-                  <div className={styles.timelineBody}>
-                    <strong>{event.title}</strong>
-                    <span>{event.meta}</span>
+              <section className={styles.detailSection}>
+                <h3>Швидка видача</h3>
+                <dl className={styles.infoList}>
+                  <div>
+                    <dt>Доступно зараз</dt>
+                    <dd>
+                      {selectedItem.availableNow} {selectedItem.unit}
+                    </dd>
                   </div>
-                </article>
-              ))}
+                  <div>
+                    <dt>Усього на залишку</dt>
+                    <dd>
+                      {selectedItem.quantity} {selectedItem.unit}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Резерв</dt>
+                    <dd>{getReserveLabel(selectedItem)}</dd>
+                  </div>
+                  <div>
+                    <dt>Стан</dt>
+                    <dd>{selectedItem.condition || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Місце</dt>
+                    <dd>{selectedItem.location || '—'}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className={styles.detailSection}>
+                <h3>Історія руху</h3>
+                {selectedItem.movement.length > 0 ? (
+                  <div className={styles.timeline}>
+                    {[...selectedItem.movement]
+                      .reverse()
+                      .map((event) => (
+                        <article className={styles.timelineItem} key={event.id}>
+                          <time dateTime={event.date}>{event.date}</time>
+                          <div className={styles.timelineBody}>
+                            <strong>
+                              {event.title}
+                              <span className={styles.timelineTag}>
+                                {getMovementTypeLabel(event.type)}
+                              </span>
+                            </strong>
+                            {event.meta ? <span>{event.meta}</span> : null}
+                          </div>
+                        </article>
+                      ))}
+                  </div>
+                ) : (
+                  <p className={styles.panelText}>Записів руху ще немає.</p>
+                )}
+              </section>
+            </>
+          ) : (
+            <div className={styles.emptyState}>
+              {loading
+                ? 'Завантаження складу…'
+                : 'Оберіть позицію зі списку, щоб побачити деталі.'}
             </div>
-          </section>
+          )}
         </aside>
       </section>
+
+      <WarehouseItemDialog
+        item={itemDialog?.item ?? null}
+        isOpen={Boolean(itemDialog)}
+        isSaving={isSavingItem}
+        onClose={closeItemDialog}
+        onSubmit={submitItemDialog}
+      />
+
+      <WarehouseMovementDialog
+        item={movementTarget}
+        isOpen={Boolean(movementTarget)}
+        isSaving={isSavingMovement}
+        onClose={closeMovementDialog}
+        onSubmit={submitMovement}
+      />
+
+      <DeleteWarehouseItemDialog
+        item={deleteCandidate}
+        isDeleting={isDeleting}
+        onCancel={cancelDelete}
+        onConfirm={confirmDelete}
+      />
     </main>
   );
 }

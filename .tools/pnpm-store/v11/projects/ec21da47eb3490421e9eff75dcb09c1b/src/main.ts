@@ -11,6 +11,9 @@ import {
   type CertificatePhotoFilePayload,
   type CertificatePayload,
 } from "./modules/certificates/certificate-records";
+import {
+  WarehouseRepository,
+} from "./modules/warehouse/warehouse-records";
 
 const PORT = Number(
   process.env.PORT ?? process.env.API_PORT ?? 3001,
@@ -64,6 +67,21 @@ function createRepository(): CertificateRepository {
     storageRoot,
     templateDirectory,
     legacyRegistryPath: process.env.CERTIFICATES_LEGACY_REGISTRY_PATH,
+  });
+}
+
+function createWarehouseRepository(): WarehouseRepository {
+  const repositoryRoot = getRepositoryRoot();
+  const storageRoot =
+    process.env.WAREHOUSE_STORAGE_ROOT ??
+    path.join(
+      repositoryRoot,
+      "storage",
+      "warehouse",
+    );
+
+  return new WarehouseRepository({
+    storageRoot,
   });
 }
 
@@ -334,6 +352,130 @@ function getImageContentType(fileName: string): string {
   return "image/png";
 }
 
+async function readJsonBody(
+  request: IncomingMessage,
+): Promise<Record<string, unknown>> {
+  const body = await readRequestBody(request);
+
+  if (body.length === 0) {
+    return {};
+  }
+
+  const parsed = JSON.parse(body.toString("utf8")) as unknown;
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new HttpError(
+      400,
+      "Очікується тіло запиту у форматі JSON.",
+    );
+  }
+
+  return parsed as Record<string, unknown>;
+}
+
+async function handleWarehouseRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  repository: WarehouseRepository,
+  pathname: string,
+): Promise<void> {
+  if (request.method === "GET" && pathname === "/api/warehouse") {
+    sendJson(
+      response,
+      200,
+      await repository.list(),
+    );
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/warehouse") {
+    sendJson(
+      response,
+      201,
+      await repository.create(
+        await readJsonBody(request),
+      ),
+    );
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/warehouse/export.csv") {
+    const content = await repository.exportCsv();
+    const buffer = Buffer.from(`﻿${content}`, "utf8");
+
+    response.writeHead(
+      200,
+      {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Length": buffer.length,
+        "Content-Disposition": 'attachment; filename="warehouse-stock.csv"',
+      },
+    );
+    response.end(buffer);
+    return;
+  }
+
+  const warehouseActionMatch =
+    /^\/api\/warehouse\/([^/]+)(?:\/([^/]+))?$/.exec(pathname);
+
+  if (warehouseActionMatch) {
+    const [, id, action] = warehouseActionMatch;
+
+    if (request.method === "GET" && !action) {
+      sendJson(
+        response,
+        200,
+        await repository.get(id),
+      );
+      return;
+    }
+
+    if (request.method === "PUT" && !action) {
+      sendJson(
+        response,
+        200,
+        await repository.update(
+          id,
+          await readJsonBody(request),
+        ),
+      );
+      return;
+    }
+
+    if (request.method === "DELETE" && !action) {
+      await repository.remove(id);
+      sendJson(
+        response,
+        200,
+        {
+          ok: true,
+        },
+      );
+      return;
+    }
+
+    if (request.method === "POST" && action === "movements") {
+      sendJson(
+        response,
+        201,
+        await repository.addMovement(
+          id,
+          await readJsonBody(request),
+        ),
+      );
+      return;
+    }
+  }
+
+  sendJson(
+    response,
+    404,
+    {
+      error: "Маршрут не найден.",
+    },
+  );
+}
+
 async function handleCertificateRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -534,8 +676,67 @@ async function handleCertificateRequest(
   );
 }
 
+function resolveErrorStatusCode(error: unknown): number {
+  if (error instanceof HttpError) {
+    return error.statusCode;
+  }
+
+  if (error instanceof SyntaxError) {
+    return 400;
+  }
+
+  if (error instanceof Error && error.message.includes("не найден")) {
+    return 404;
+  }
+
+  if (error instanceof Error && error.message.includes("не знайдено")) {
+    return 404;
+  }
+
+  return 400;
+}
+
+async function dispatchRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  certificateRepository: CertificateRepository,
+  warehouseRepository: WarehouseRepository,
+): Promise<void> {
+  if (request.method === "OPTIONS") {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+
+  const url = new URL(
+    request.url ?? "/",
+    `http://${request.headers.host ?? "localhost"}`,
+  );
+  const pathname = decodeURIComponent(url.pathname);
+
+  if (
+    pathname === "/api/warehouse" ||
+    pathname.startsWith("/api/warehouse/")
+  ) {
+    await handleWarehouseRequest(
+      request,
+      response,
+      warehouseRepository,
+      pathname,
+    );
+    return;
+  }
+
+  await handleCertificateRequest(
+    request,
+    response,
+    certificateRepository,
+  );
+}
+
 export function createCertificateApiServer(): http.Server {
-  const repository = createRepository();
+  const certificateRepository = createRepository();
+  const warehouseRepository = createWarehouseRepository();
 
   return http.createServer((request, response) => {
     applyCors(
@@ -543,24 +744,15 @@ export function createCertificateApiServer(): http.Server {
       response,
     );
 
-    handleCertificateRequest(
+    dispatchRequest(
       request,
       response,
-      repository,
+      certificateRepository,
+      warehouseRepository,
     ).catch((error: unknown) => {
-      const statusCode =
-        error instanceof HttpError
-          ? error.statusCode
-          : error instanceof SyntaxError
-          ? 400
-          : error instanceof Error &&
-              error.message.includes("не найден")
-            ? 404
-            : 400;
-
       sendError(
         response,
-        statusCode,
+        resolveErrorStatusCode(error),
         error,
       );
     });
@@ -568,18 +760,17 @@ export function createCertificateApiServer(): http.Server {
 }
 
 async function main(): Promise<void> {
-  const repository = createRepository();
-
   if (process.argv.includes("--check")) {
-    await repository.check();
-    console.log("Certificates API storage and template check passed.");
+    await createRepository().check();
+    await createWarehouseRepository().check();
+    console.log("Certificates and warehouse API storage check passed.");
     return;
   }
 
   createCertificateApiServer().listen(
     PORT,
     () => {
-      console.log(`Certificates API is listening on http://localhost:${PORT}`);
+      console.log(`AVKU API is listening on http://localhost:${PORT}`);
     },
   );
 }

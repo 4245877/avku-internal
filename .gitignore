@@ -31,4 +31,7 @@ storage/certificates/photos/*
 !storage/certificates/photos/.gitkeep
 storage/certificates/generated/*
 !storage/certificates/generated/.gitkeep
+# Warehouse database (regenerated/seeded on startup)
+storage/warehouse/*.sqlite
+storage/warehouse/*.sqlite-*
 storage/backups/
