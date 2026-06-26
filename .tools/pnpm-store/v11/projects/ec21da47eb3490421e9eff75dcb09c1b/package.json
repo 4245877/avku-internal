@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "check": "tsx src/main.ts --check"
+  },
+  "dependencies": {
+    "sharp": "^0.35.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4"
+  }
+}
