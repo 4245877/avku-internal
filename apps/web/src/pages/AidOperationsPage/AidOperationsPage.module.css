@@ -798,6 +798,66 @@
   font-size: var(--text-xs);
 }
 
+.fieldTextarea {
+  width: 100%;
+  min-height: 84px;
+  padding: var(--space-3);
+  color: var(--input-text);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  outline: 0;
+  font: inherit;
+  resize: vertical;
+  transition:
+    border-color var(--duration-base) var(--ease-out),
+    box-shadow var(--duration-base) var(--ease-out);
+}
+
+.fieldTextarea:focus {
+  border-color: var(--input-border-focus);
+  box-shadow: var(--shadow-ice);
+}
+
+.manifestEditor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.manifestEditorRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.manifestRemoveButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--input-height);
+  height: var(--input-height);
+  font-size: var(--text-lg);
+  line-height: 1;
+  color: var(--color-text-muted);
+  background: var(--btn-ghost-bg);
+  border: 1px solid var(--btn-ghost-border);
+  border-radius: var(--input-radius);
+  transition: var(--transition-base);
+}
+
+.manifestRemoveButton:hover:not(:disabled) {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-color: color-mix(in srgb, var(--color-danger) 24%, transparent);
+}
+
+.manifestRemoveButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .checkboxField {
   display: flex;
   align-items: flex-start;

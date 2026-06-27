@@ -14,6 +14,9 @@ import {
 import {
   WarehouseRepository,
 } from "./modules/warehouse/warehouse-records";
+import {
+  LogisticsRepository,
+} from "./modules/logistics/logistics-records";
 
 const PORT = Number(
   process.env.PORT ?? process.env.API_PORT ?? 3001,
@@ -81,6 +84,21 @@ function createWarehouseRepository(): WarehouseRepository {
     );
 
   return new WarehouseRepository({
+    storageRoot,
+  });
+}
+
+function createLogisticsRepository(): LogisticsRepository {
+  const repositoryRoot = getRepositoryRoot();
+  const storageRoot =
+    process.env.LOGISTICS_STORAGE_ROOT ??
+    path.join(
+      repositoryRoot,
+      "storage",
+      "logistics",
+    );
+
+  return new LogisticsRepository({
     storageRoot,
   });
 }
@@ -476,6 +494,109 @@ async function handleWarehouseRequest(
   );
 }
 
+async function handleLogisticsRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  repository: LogisticsRepository,
+  pathname: string,
+): Promise<void> {
+  if (request.method === "GET" && pathname === "/api/logistics") {
+    sendJson(
+      response,
+      200,
+      await repository.list(),
+    );
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/logistics") {
+    sendJson(
+      response,
+      201,
+      await repository.create(
+        await readJsonBody(request),
+      ),
+    );
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/logistics/export.csv") {
+    const content = await repository.exportCsv();
+    const buffer = Buffer.from(`﻿${content}`, "utf8");
+
+    response.writeHead(
+      200,
+      {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Length": buffer.length,
+        "Content-Disposition": 'attachment; filename="logistics-transfers.csv"',
+      },
+    );
+    response.end(buffer);
+    return;
+  }
+
+  const logisticsActionMatch =
+    /^\/api\/logistics\/([^/]+)(?:\/([^/]+))?$/.exec(pathname);
+
+  if (logisticsActionMatch) {
+    const [, id, action] = logisticsActionMatch;
+
+    if (request.method === "GET" && !action) {
+      sendJson(
+        response,
+        200,
+        await repository.get(id),
+      );
+      return;
+    }
+
+    if (request.method === "PUT" && !action) {
+      sendJson(
+        response,
+        200,
+        await repository.update(
+          id,
+          await readJsonBody(request),
+        ),
+      );
+      return;
+    }
+
+    if (request.method === "DELETE" && !action) {
+      await repository.remove(id);
+      sendJson(
+        response,
+        200,
+        {
+          ok: true,
+        },
+      );
+      return;
+    }
+
+    if (request.method === "POST" && action === "events") {
+      sendJson(
+        response,
+        201,
+        await repository.addEvent(
+          id,
+          await readJsonBody(request),
+        ),
+      );
+      return;
+    }
+  }
+
+  sendJson(
+    response,
+    404,
+    {
+      error: "Маршрут не найден.",
+    },
+  );
+}
+
 async function handleCertificateRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -701,6 +822,7 @@ async function dispatchRequest(
   response: ServerResponse,
   certificateRepository: CertificateRepository,
   warehouseRepository: WarehouseRepository,
+  logisticsRepository: LogisticsRepository,
 ): Promise<void> {
   if (request.method === "OPTIONS") {
     response.writeHead(204);
@@ -727,6 +849,19 @@ async function dispatchRequest(
     return;
   }
 
+  if (
+    pathname === "/api/logistics" ||
+    pathname.startsWith("/api/logistics/")
+  ) {
+    await handleLogisticsRequest(
+      request,
+      response,
+      logisticsRepository,
+      pathname,
+    );
+    return;
+  }
+
   await handleCertificateRequest(
     request,
     response,
@@ -737,6 +872,7 @@ async function dispatchRequest(
 export function createCertificateApiServer(): http.Server {
   const certificateRepository = createRepository();
   const warehouseRepository = createWarehouseRepository();
+  const logisticsRepository = createLogisticsRepository();
 
   return http.createServer((request, response) => {
     applyCors(
@@ -749,6 +885,7 @@ export function createCertificateApiServer(): http.Server {
       response,
       certificateRepository,
       warehouseRepository,
+      logisticsRepository,
     ).catch((error: unknown) => {
       sendError(
         response,
@@ -763,7 +900,10 @@ async function main(): Promise<void> {
   if (process.argv.includes("--check")) {
     await createRepository().check();
     await createWarehouseRepository().check();
-    console.log("Certificates and warehouse API storage check passed.");
+    await createLogisticsRepository().check();
+    console.log(
+      "Certificates, warehouse and logistics API storage check passed.",
+    );
     return;
   }
 

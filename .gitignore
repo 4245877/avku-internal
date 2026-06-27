@@ -34,4 +34,7 @@ storage/certificates/generated/*
 # Warehouse database (regenerated/seeded on startup)
 storage/warehouse/*.sqlite
 storage/warehouse/*.sqlite-*
+# Logistics database (regenerated/seeded on startup)
+storage/logistics/*.sqlite
+storage/logistics/*.sqlite-*
 storage/backups/

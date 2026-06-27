@@ -1,213 +1,329 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import {
+  addTransferEvent,
+  createTransfer,
+  deleteTransfer,
+  downloadBlob,
+  downloadTransfers,
+  fetchTransfers,
+  updateTransfer,
+} from '../../features/logistics/logisticsApi.js';
+import {
+  buildChecklist,
+  buildTransferPayload,
+  filterTransfers,
+  getActBadge,
+  getEventTypeLabel,
+  getPhotoBadge,
+  getStatusBadge,
+  summarizeTransfers,
+  upsertTransfer,
+} from '../../features/logistics/logisticsUtils.js';
+import TransferDialog from './components/TransferDialog.jsx';
+import TransferUpdateDialog from './components/TransferUpdateDialog.jsx';
+import DeleteTransferDialog from './components/DeleteTransferDialog.jsx';
 import styles from './AidOperationsPage.module.css';
 
-const transferRecords = [
-  {
-    id: 'TR-2026-052',
-    route: "Київ - Харків - Куп'янський напрямок",
-    recipient: 'Медична рота, Харківська область',
-    driver: 'Ірина Коваль / бус Renault Master',
-    transferDate: '2026-06-27',
-    status: 'Заплановано',
-    statusTone: 'planned',
-    act: 'Акт підготовлено',
-    actTone: 'partial',
-    photo: 'Очікується після передачі',
-    photoTone: 'partial',
-    requestId: 'REQ-2026-044',
-    warehouseId: 'WH-FOOD-027, WH-MED-009',
-    reportId: 'REP-2026-019',
-    manifest: [
-      { name: 'Продуктові набори', quantity: '45 наборів' },
-      { name: 'Аптечки тактичні', quantity: '24 шт. після доукомплектації' },
-    ],
-    checklist: [
-      { label: 'Маршрут погоджено', state: 'Готово', done: true },
-      { label: 'Акт передачі', state: 'Чернетка', done: false },
-      { label: 'Фото передачі', state: 'Після вручення', done: false },
-      { label: 'Звіт', state: 'Створено картку', done: true },
-    ],
-    notes: 'Перед виїздом перевірити медичну комплектацію та додати турнікети.',
-  },
-  {
-    id: 'TR-2026-049',
-    route: 'Львів - Дніпро - стабпункт',
-    recipient: 'Стабілізаційний пункт, Дніпропетровська область',
-    driver: 'Андрій Мельник / волонтерський екіпаж',
-    transferDate: '2026-06-24',
-    status: 'Передано',
-    statusTone: 'transferred',
-    act: 'ACT-2026-049.pdf',
-    actTone: 'complete',
-    photo: '8 фото завантажено',
-    photoTone: 'complete',
-    requestId: 'REQ-2026-039',
-    warehouseId: 'WH-GEN-014',
-    reportId: 'REP-2026-017',
-    manifest: [
-      { name: 'Генератори 3 кВт', quantity: '2 шт.' },
-      { name: 'Окопні свічки', quantity: '120 шт.' },
-    ],
-    checklist: [
-      { label: 'Маршрут погоджено', state: 'Готово', done: true },
-      { label: 'Акт передачі', state: 'Підписано', done: true },
-      { label: 'Фото передачі', state: 'Завантажено', done: true },
-      { label: 'Звіт', state: 'Готовий до публікації', done: true },
-    ],
-    notes: 'Отримувач підтвердив генератори і свічки у день передачі.',
-  },
-  {
-    id: 'TR-2026-046',
-    route: 'Київ - Суми - прикордонна громада',
-    recipient: 'Волонтерський штаб Сумської області',
-    driver: 'Богдан Колодій / Нова пошта гуманітарна',
-    transferDate: '2026-06-21',
-    status: 'Потрібно дозавантажити звіт',
-    statusTone: 'report',
-    act: 'ACT-2026-046.pdf',
-    actTone: 'complete',
-    photo: 'Фото немає',
-    photoTone: 'missing',
-    requestId: 'REQ-2026-036',
-    warehouseId: 'WH-CLT-033',
-    reportId: 'REP-2026-014',
-    manifest: [
-      { name: 'Термобілизна', quantity: '18 компл.' },
-      { name: 'Маскувальні сітки 6x4', quantity: '6 шт.' },
-    ],
-    checklist: [
-      { label: 'Маршрут погоджено', state: 'Готово', done: true },
-      { label: 'Акт передачі', state: 'Підписано', done: true },
-      { label: 'Фото передачі', state: 'Потрібно додати', done: false },
-      { label: 'Звіт', state: 'Без фото не завершено', done: false },
-    ],
-    notes: 'Потрібно отримати фото від штабу або водія для закриття звіту.',
-  },
-  {
-    id: 'TR-2026-043',
-    route: 'Дніпро - Запоріжжя - Оріхів',
-    recipient: "Підрозділ радіозв'язку",
-    driver: 'Сергій Романенко / пікап L200',
-    transferDate: '2026-06-18',
-    status: 'Передано',
-    statusTone: 'transferred',
-    act: 'ACT-2026-043.pdf',
-    actTone: 'complete',
-    photo: '5 фото завантажено',
-    photoTone: 'complete',
-    requestId: 'REQ-2026-031',
-    warehouseId: 'WH-DRN-001',
-    reportId: 'REP-2026-012',
-    manifest: [
-      { name: 'FPV комплекти 7"', quantity: '8 компл.' },
-      { name: 'Акумулятори та антени', quantity: '8 наборів' },
-    ],
-    checklist: [
-      { label: 'Маршрут погоджено', state: 'Готово', done: true },
-      { label: 'Акт передачі', state: 'Підписано', done: true },
-      { label: 'Фото передачі', state: 'Завантажено', done: true },
-      { label: 'Звіт', state: 'Опубліковано', done: true },
-    ],
-    notes: 'Партію закрито, залишок FPV комплектів повернувся у вільний склад.',
-  },
-  {
-    id: 'TR-2026-054',
-    route: 'Львів - Київ - Чернігів',
-    recipient: 'Чернігівський центр підтримки ВПО',
-    driver: 'Марія Савчук / волонтер',
-    transferDate: '2026-06-29',
-    status: 'Заплановано',
-    statusTone: 'planned',
-    act: 'Акт не створено',
-    actTone: 'missing',
-    photo: 'Очікується після передачі',
-    photoTone: 'partial',
-    requestId: 'REQ-2026-048',
-    warehouseId: 'WH-FOOD-027, WH-CND-006',
-    reportId: 'REP-2026-021',
-    manifest: [
-      { name: 'Продуктові набори', quantity: '20 наборів' },
-      { name: 'Окопні свічки', quantity: '60 шт.' },
-    ],
-    checklist: [
-      { label: 'Маршрут погоджено', state: 'Уточнюється час', done: false },
-      { label: 'Акт передачі', state: 'Потрібно створити', done: false },
-      { label: 'Фото передачі', state: 'Після вручення', done: false },
-      { label: 'Звіт', state: 'Очікує дані', done: false },
-    ],
-    notes: 'Підтвердити слот отримувача до кінця дня 2026-06-27.',
-  },
-];
+const NOTICE_STYLE_BY_TYPE = {
+  error: 'noticeError',
+  info: 'noticeInfo',
+  success: 'noticeSuccess',
+  warning: 'noticeWarning',
+};
+
+function getErrorMessage(error, fallbackMessage) {
+  return error instanceof Error && error.message ? error.message : fallbackMessage;
+}
 
 function getFileBadgeClass(tone) {
   return styles[`file-${tone}`] || styles['file-partial'];
 }
 
 function LogisticsTransfersPage() {
+  const [transfers, setTransfers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [notice, setNotice] = useState(null);
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [documentFilter, setDocumentFilter] = useState('all');
-  const [selectedId, setSelectedId] = useState(transferRecords[0].id);
+  const [selectedId, setSelectedId] = useState('');
 
-  const filteredTransfers = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
+  const [isExporting, setIsExporting] = useState(false);
+  const [transferDialog, setTransferDialog] = useState(null);
+  const [isSavingTransfer, setIsSavingTransfer] = useState(false);
+  const [updateTarget, setUpdateTarget] = useState(null);
+  const [isSavingUpdate, setIsSavingUpdate] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-    return transferRecords.filter((transfer) => {
-      const matchesStatus =
-        statusFilter === 'all' || transfer.statusTone === statusFilter;
-      const matchesDocuments =
-        documentFilter === 'all' ||
-        (documentFilter === 'missingAct' && transfer.actTone === 'missing') ||
-        (documentFilter === 'missingPhoto' &&
-          transfer.photoTone === 'missing') ||
-        (documentFilter === 'reportReady' &&
-          transfer.actTone === 'complete' &&
-          transfer.photoTone === 'complete');
-      const matchesSearch =
-        !normalizedSearch ||
-        [
-          transfer.id,
-          transfer.route,
-          transfer.recipient,
-          transfer.driver,
-          transfer.status,
-          transfer.requestId,
-          transfer.warehouseId,
-          transfer.reportId,
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(normalizedSearch);
-
-      return matchesStatus && matchesDocuments && matchesSearch;
-    });
-  }, [documentFilter, search, statusFilter]);
-
-  const selectedTransfer =
-    filteredTransfers.find((transfer) => transfer.id === selectedId) ||
-    filteredTransfers[0] ||
-    transferRecords[0];
-
-  const totals = useMemo(() => {
-    const planned = transferRecords.filter(
-      (transfer) => transfer.statusTone === 'planned',
-    ).length;
-    const transferred = transferRecords.filter(
-      (transfer) => transfer.statusTone === 'transferred',
-    ).length;
-    const needsReport = transferRecords.filter(
-      (transfer) => transfer.statusTone === 'report',
-    ).length;
-    const missingFiles = transferRecords.filter(
-      (transfer) =>
-        transfer.actTone === 'missing' || transfer.photoTone === 'missing',
-    ).length;
-
-    return { planned, transferred, needsReport, missingFiles };
+  const showNotice = useCallback((type, text) => {
+    setNotice({ type, text });
   }, []);
 
+  const clearNotice = useCallback(() => {
+    setNotice(null);
+  }, []);
+
+  const loadTransfers = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const records = await fetchTransfers();
+
+      setTransfers(records);
+      setLoadError('');
+
+      return records;
+    } catch (error) {
+      const message = getErrorMessage(
+        error,
+        'Не вдалося завантажити передачі.',
+      );
+
+      setLoadError(message);
+      showNotice('error', message);
+
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, [showNotice]);
+
+  useEffect(() => {
+    loadTransfers();
+  }, [loadTransfers]);
+
+  const filteredTransfers = useMemo(
+    () =>
+      filterTransfers(transfers, {
+        search,
+        status: statusFilter,
+        documents: documentFilter,
+      }),
+    [documentFilter, search, statusFilter, transfers],
+  );
+
+  const selectedTransfer = useMemo(() => {
+    if (filteredTransfers.length === 0) {
+      return null;
+    }
+
+    return (
+      filteredTransfers.find((transfer) => transfer.id === selectedId) ??
+      filteredTransfers[0]
+    );
+  }, [filteredTransfers, selectedId]);
+
+  const totals = useMemo(() => summarizeTransfers(transfers), [transfers]);
+
+  const isBusy =
+    loading || isSavingTransfer || isSavingUpdate || isDeleting || isExporting;
+
+  const handleRefresh = useCallback(async () => {
+    if (isBusy) {
+      return;
+    }
+
+    const records = await loadTransfers();
+
+    if (records) {
+      showNotice('info', 'Дані передач оновлено.');
+    }
+  }, [isBusy, loadTransfers, showNotice]);
+
+  const handleExport = useCallback(async () => {
+    if (isBusy) {
+      return;
+    }
+
+    setIsExporting(true);
+
+    try {
+      const blob = await downloadTransfers();
+
+      downloadBlob(blob, 'logistics-transfers.csv');
+      showNotice('success', 'Експорт передач сформовано.');
+    } catch (error) {
+      showNotice(
+        'error',
+        getErrorMessage(error, 'Не вдалося сформувати експорт.'),
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  }, [isBusy, showNotice]);
+
+  const openCreateDialog = useCallback(() => {
+    if (isBusy) {
+      return;
+    }
+
+    clearNotice();
+    setTransferDialog({ mode: 'create', transfer: null });
+  }, [clearNotice, isBusy]);
+
+  const openEditDialog = useCallback(
+    (transfer) => {
+      if (isBusy) {
+        return;
+      }
+
+      clearNotice();
+      setTransferDialog({ mode: 'edit', transfer });
+    },
+    [clearNotice, isBusy],
+  );
+
+  const closeTransferDialog = useCallback(() => {
+    if (isSavingTransfer) {
+      return;
+    }
+
+    setTransferDialog(null);
+  }, [isSavingTransfer]);
+
+  const submitTransferDialog = useCallback(
+    async (form) => {
+      setIsSavingTransfer(true);
+
+      try {
+        const payload = buildTransferPayload(form);
+        const isEdit = Boolean(transferDialog?.transfer);
+        const savedTransfer = isEdit
+          ? await updateTransfer(transferDialog.transfer.id, payload)
+          : await createTransfer(payload);
+
+        setTransfers((current) => upsertTransfer(current, savedTransfer));
+        setSelectedId(savedTransfer.id);
+        setTransferDialog(null);
+        showNotice(
+          'success',
+          isEdit ? 'Передачу оновлено.' : 'Передачу додано.',
+        );
+      } catch (error) {
+        showNotice(
+          'error',
+          getErrorMessage(error, 'Не вдалося зберегти передачу.'),
+        );
+      } finally {
+        setIsSavingTransfer(false);
+      }
+    },
+    [showNotice, transferDialog],
+  );
+
+  const openUpdateDialog = useCallback(
+    (transfer) => {
+      if (isBusy) {
+        return;
+      }
+
+      clearNotice();
+      setUpdateTarget(transfer);
+    },
+    [clearNotice, isBusy],
+  );
+
+  const closeUpdateDialog = useCallback(() => {
+    if (isSavingUpdate) {
+      return;
+    }
+
+    setUpdateTarget(null);
+  }, [isSavingUpdate]);
+
+  const submitUpdate = useCallback(
+    async (payload) => {
+      if (!updateTarget) {
+        return;
+      }
+
+      setIsSavingUpdate(true);
+
+      try {
+        const updatedTransfer = await addTransferEvent(
+          updateTarget.id,
+          payload,
+        );
+
+        setTransfers((current) => upsertTransfer(current, updatedTransfer));
+        setSelectedId(updatedTransfer.id);
+        setUpdateTarget(null);
+        showNotice('success', 'Запис у передачі оновлено.');
+      } catch (error) {
+        showNotice(
+          'error',
+          getErrorMessage(error, 'Не вдалося зберегти оновлення.'),
+        );
+      } finally {
+        setIsSavingUpdate(false);
+      }
+    },
+    [showNotice, updateTarget],
+  );
+
+  const requestDelete = useCallback(
+    (transfer) => {
+      if (isBusy) {
+        return;
+      }
+
+      clearNotice();
+      setDeleteCandidate(transfer);
+    },
+    [clearNotice, isBusy],
+  );
+
+  const cancelDelete = useCallback(() => {
+    if (isDeleting) {
+      return;
+    }
+
+    setDeleteCandidate(null);
+  }, [isDeleting]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteCandidate) {
+      return;
+    }
+
+    setIsDeleting(true);
+
+    try {
+      await deleteTransfer(deleteCandidate.id);
+
+      setTransfers((current) =>
+        current.filter((transfer) => transfer.id !== deleteCandidate.id),
+      );
+      setDeleteCandidate(null);
+      showNotice('success', 'Передачу видалено.');
+    } catch (error) {
+      showNotice(
+        'error',
+        getErrorMessage(error, 'Не вдалося видалити передачу.'),
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteCandidate, showNotice]);
+
+  const selectedStatus = selectedTransfer
+    ? getStatusBadge(selectedTransfer)
+    : null;
+  const selectedChecklist = selectedTransfer
+    ? buildChecklist(selectedTransfer)
+    : [];
+  const noticeClassName = notice
+    ? [styles.notice, styles[NOTICE_STYLE_BY_TYPE[notice.type]]]
+        .filter(Boolean)
+        .join(' ')
+    : '';
+
   return (
-    <main className={styles.page}>
+    <main className={styles.page} aria-busy={loading}>
       <header className={styles.pageHeader}>
         <div>
           <p className={styles.eyebrow}>Логістика / Передачі</p>
@@ -220,18 +336,21 @@ function LogisticsTransfersPage() {
         </div>
 
         <div className={styles.headerActions}>
-          <button className={styles.primaryButton} type="button">
+          <button
+            className={styles.primaryButton}
+            type="button"
+            onClick={openCreateDialog}
+            disabled={isBusy}
+          >
             Додати передачу
           </button>
           <button
             className={styles.secondaryButton}
-            onClick={() => {
-              setDocumentFilter('missingAct');
-              setStatusFilter('all');
-            }}
             type="button"
+            onClick={handleExport}
+            disabled={isBusy || transfers.length === 0}
           >
-            Список без актів
+            {isExporting ? 'Експорт…' : 'Експорт передач'}
           </button>
         </div>
       </header>
@@ -262,22 +381,42 @@ function LogisticsTransfersPage() {
         </article>
       </section>
 
+      <div className={styles.noticeRegion} aria-live="polite" aria-atomic="true">
+        {notice ? (
+          <div
+            className={noticeClassName}
+            role={notice.type === 'error' ? 'alert' : 'status'}
+          >
+            <span>{notice.text}</span>
+            <button
+              className={styles.noticeCloseButton}
+              type="button"
+              onClick={clearNotice}
+              aria-label="Закрити сповіщення"
+            >
+              Закрити
+            </button>
+          </div>
+        ) : null}
+      </div>
+
       <section className={styles.workspaceGrid}>
         <article className={styles.panel}>
           <div className={styles.panelHeader}>
             <div>
               <h2 className={styles.panelTitle}>Передачі</h2>
               <p className={styles.panelText}>
-                Знайдено: {filteredTransfers.length} з {transferRecords.length}
+                Знайдено: {filteredTransfers.length} з {transfers.length}
               </p>
             </div>
 
             <button
               className={styles.smallButton}
-              onClick={() => setStatusFilter('report')}
               type="button"
+              onClick={handleRefresh}
+              disabled={isBusy}
             >
-              Нагадати про звіти
+              {loading ? 'Оновлення…' : 'Оновити'}
             </button>
           </div>
 
@@ -332,164 +471,280 @@ function LogisticsTransfersPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredTransfers.map((transfer) => (
-                  <tr
-                    className={
-                      transfer.id === selectedTransfer.id ? styles.activeRow : ''
-                    }
-                    key={transfer.id}
-                    onClick={() => setSelectedId(transfer.id)}
-                  >
-                    <td>
-                      <span className={styles.mainCell}>
-                        <strong>{transfer.id}</strong>
-                        <span>{transfer.manifest.length} позиції в передачі</span>
-                      </span>
-                    </td>
-                    <td>{transfer.route}</td>
-                    <td>{transfer.recipient}</td>
-                    <td>{transfer.driver}</td>
-                    <td className={styles.nowrap}>{transfer.transferDate}</td>
-                    <td>
-                      <span
-                        className={`${styles.statusBadge} ${
-                          styles[`status-${transfer.statusTone}`]
-                        }`}
-                      >
-                        {transfer.status}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`${styles.fileBadge} ${getFileBadgeClass(
-                          transfer.actTone,
-                        )}`}
-                      >
-                        {transfer.act}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`${styles.fileBadge} ${getFileBadgeClass(
-                          transfer.photoTone,
-                        )}`}
-                      >
-                        {transfer.photo}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={styles.mutedCell}>
-                        {transfer.requestId}
-                        <br />
-                        {transfer.reportId}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {filteredTransfers.map((transfer) => {
+                  const status = getStatusBadge(transfer);
+                  const act = getActBadge(transfer);
+                  const photo = getPhotoBadge(transfer);
+
+                  return (
+                    <tr
+                      className={
+                        selectedTransfer && transfer.id === selectedTransfer.id
+                          ? styles.activeRow
+                          : ''
+                      }
+                      key={transfer.id}
+                      onClick={() => setSelectedId(transfer.id)}
+                    >
+                      <td>
+                        <span className={styles.mainCell}>
+                          <strong>{transfer.code}</strong>
+                          <span>
+                            {transfer.manifest.length} позиції в передачі
+                          </span>
+                        </span>
+                      </td>
+                      <td>{transfer.route}</td>
+                      <td>{transfer.recipient}</td>
+                      <td>{transfer.driver}</td>
+                      <td className={styles.nowrap}>{transfer.transferDate}</td>
+                      <td>
+                        <span
+                          className={`${styles.statusBadge} ${
+                            styles[`status-${status.tone}`]
+                          }`}
+                        >
+                          {status.label}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`${styles.fileBadge} ${getFileBadgeClass(
+                            act.tone,
+                          )}`}
+                        >
+                          {act.label}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`${styles.fileBadge} ${getFileBadgeClass(
+                            photo.tone,
+                          )}`}
+                        >
+                          {photo.label}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={styles.mutedCell}>
+                          {transfer.requestId || '—'}
+                          <br />
+                          {transfer.reportId || '—'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
-          {filteredTransfers.length === 0 && (
+          {!loading && filteredTransfers.length === 0 && (
             <div className={styles.emptyState}>
-              За цими фільтрами передач не знайдено.
+              {loadError
+                ? loadError
+                : transfers.length === 0
+                  ? 'Передач ще немає. Додайте першу передачу.'
+                  : 'За цими фільтрами передач не знайдено.'}
             </div>
           )}
         </article>
 
         <aside className={styles.detailPanel}>
-          <div className={styles.detailHeader}>
-            <div>
-              <span className={styles.detailCode}>{selectedTransfer.id}</span>
-              <h2>{selectedTransfer.recipient}</h2>
-              <p>{selectedTransfer.route}</p>
-            </div>
-
-            <span
-              className={`${styles.statusBadge} ${
-                styles[`status-${selectedTransfer.statusTone}`]
-              }`}
-            >
-              {selectedTransfer.status}
-            </span>
-          </div>
-
-          <section className={styles.detailSection}>
-            <h3>Хто і коли передає</h3>
-            <dl className={styles.infoList}>
-              <div>
-                <dt>Дата передачі</dt>
-                <dd>{selectedTransfer.transferDate}</dd>
-              </div>
-              <div>
-                <dt>Водій або волонтер</dt>
-                <dd>{selectedTransfer.driver}</dd>
-              </div>
-              <div>
-                <dt>Акт</dt>
-                <dd>{selectedTransfer.act}</dd>
-              </div>
-              <div>
-                <dt>Фото</dt>
-                <dd>{selectedTransfer.photo}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section className={styles.detailSection}>
-            <h3>Що передається</h3>
-            <div className={styles.manifestList}>
-              {selectedTransfer.manifest.map((item) => (
-                <div className={styles.manifestItem} key={item.name}>
-                  <strong>{item.name}</strong>
-                  <span>{item.quantity}</span>
+          {selectedTransfer ? (
+            <>
+              <div className={styles.detailHeader}>
+                <div>
+                  <span className={styles.detailCode}>
+                    {selectedTransfer.code}
+                  </span>
+                  <h2>{selectedTransfer.recipient}</h2>
+                  <p>{selectedTransfer.route}</p>
                 </div>
-              ))}
+
+                <span
+                  className={`${styles.statusBadge} ${
+                    styles[`status-${selectedStatus.tone}`]
+                  }`}
+                >
+                  {selectedStatus.label}
+                </span>
+              </div>
+
+              <div className={styles.detailActions}>
+                <button
+                  className={styles.smallButton}
+                  type="button"
+                  onClick={() => openUpdateDialog(selectedTransfer)}
+                  disabled={isBusy}
+                >
+                  Оновити
+                </button>
+                <button
+                  className={styles.smallButton}
+                  type="button"
+                  onClick={() => openEditDialog(selectedTransfer)}
+                  disabled={isBusy}
+                >
+                  Редагувати
+                </button>
+                <button
+                  className={styles.smallDangerButton}
+                  type="button"
+                  onClick={() => requestDelete(selectedTransfer)}
+                  disabled={isBusy}
+                >
+                  Видалити
+                </button>
+              </div>
+
+              <section className={styles.detailSection}>
+                <h3>Хто і коли передає</h3>
+                <dl className={styles.infoList}>
+                  <div>
+                    <dt>Дата передачі</dt>
+                    <dd>{selectedTransfer.transferDate}</dd>
+                  </div>
+                  <div>
+                    <dt>Водій або волонтер</dt>
+                    <dd>{selectedTransfer.driver}</dd>
+                  </div>
+                  <div>
+                    <dt>Акт</dt>
+                    <dd>{getActBadge(selectedTransfer).label}</dd>
+                  </div>
+                  <div>
+                    <dt>Фото</dt>
+                    <dd>{getPhotoBadge(selectedTransfer).label}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className={styles.detailSection}>
+                <h3>Що передається</h3>
+                {selectedTransfer.manifest.length > 0 ? (
+                  <div className={styles.manifestList}>
+                    {selectedTransfer.manifest.map((item, index) => (
+                      <div
+                        className={styles.manifestItem}
+                        // eslint-disable-next-line react/no-array-index-key
+                        key={`${item.name}-${index}`}
+                      >
+                        <strong>{item.name}</strong>
+                        <span>{item.quantity || '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className={styles.panelText}>Склад передачі не вказано.</p>
+                )}
+              </section>
+
+              <section className={styles.detailSection}>
+                <h3>Контроль документів</h3>
+                <ul className={styles.checkList}>
+                  {selectedChecklist.map((item) => (
+                    <li key={item.label}>
+                      <span
+                        className={`${styles.checkDot} ${
+                          item.done ? '' : styles.checkDotWarning
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <strong>{item.label}</strong>
+                      <span>{item.state}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className={styles.detailSection}>
+                <h3>Зв'язки</h3>
+                <ul className={styles.linkList}>
+                  <li>
+                    <span>Заявка</span>
+                    <span className={styles.linkBadge}>
+                      {selectedTransfer.requestId || '—'}
+                    </span>
+                  </li>
+                  <li>
+                    <span>Склад</span>
+                    <span className={styles.linkBadge}>
+                      {selectedTransfer.warehouseId || '—'}
+                    </span>
+                  </li>
+                  <li>
+                    <span>Звіт</span>
+                    <span className={styles.linkBadge}>
+                      {selectedTransfer.reportId || '—'}
+                    </span>
+                  </li>
+                </ul>
+              </section>
+
+              {selectedTransfer.notes ? (
+                <section className={styles.detailSection}>
+                  <h3>Нотатка</h3>
+                  <p className={styles.panelText}>{selectedTransfer.notes}</p>
+                </section>
+              ) : null}
+
+              <section className={styles.detailSection}>
+                <h3>Історія передачі</h3>
+                {selectedTransfer.events.length > 0 ? (
+                  <div className={styles.timeline}>
+                    {[...selectedTransfer.events].reverse().map((event) => (
+                      <article className={styles.timelineItem} key={event.id}>
+                        <time dateTime={event.date}>{event.date}</time>
+                        <div className={styles.timelineBody}>
+                          <strong>
+                            {event.title}
+                            <span className={styles.timelineTag}>
+                              {getEventTypeLabel(event.type)}
+                            </span>
+                          </strong>
+                          {event.meta ? <span>{event.meta}</span> : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className={styles.panelText}>Записів в історії ще немає.</p>
+                )}
+              </section>
+            </>
+          ) : (
+            <div className={styles.emptyState}>
+              {loading
+                ? 'Завантаження передач…'
+                : 'Оберіть передачу зі списку, щоб побачити деталі.'}
             </div>
-          </section>
-
-          <section className={styles.detailSection}>
-            <h3>Контроль документів</h3>
-            <ul className={styles.checkList}>
-              {selectedTransfer.checklist.map((item) => (
-                <li key={item.label}>
-                  <span
-                    className={`${styles.checkDot} ${
-                      item.done ? '' : styles.checkDotWarning
-                    }`}
-                    aria-hidden="true"
-                  />
-                  <strong>{item.label}</strong>
-                  <span>{item.state}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className={styles.detailSection}>
-            <h3>Зв'язки</h3>
-            <ul className={styles.linkList}>
-              <li>
-                <span>Заявка</span>
-                <span className={styles.linkBadge}>{selectedTransfer.requestId}</span>
-              </li>
-              <li>
-                <span>Склад</span>
-                <span className={styles.linkBadge}>{selectedTransfer.warehouseId}</span>
-              </li>
-              <li>
-                <span>Звіт</span>
-                <span className={styles.linkBadge}>{selectedTransfer.reportId}</span>
-              </li>
-            </ul>
-          </section>
-
-          <section className={styles.detailSection}>
-            <h3>Нотатка</h3>
-            <p className={styles.panelText}>{selectedTransfer.notes}</p>
-          </section>
+          )}
         </aside>
       </section>
+
+      <TransferDialog
+        transfer={transferDialog?.transfer ?? null}
+        isOpen={Boolean(transferDialog)}
+        isSaving={isSavingTransfer}
+        onClose={closeTransferDialog}
+        onSubmit={submitTransferDialog}
+      />
+
+      <TransferUpdateDialog
+        transfer={updateTarget}
+        isOpen={Boolean(updateTarget)}
+        isSaving={isSavingUpdate}
+        onClose={closeUpdateDialog}
+        onSubmit={submitUpdate}
+      />
+
+      <DeleteTransferDialog
+        transfer={deleteCandidate}
+        isDeleting={isDeleting}
+        onCancel={cancelDelete}
+        onConfirm={confirmDelete}
+      />
     </main>
   );
 }
