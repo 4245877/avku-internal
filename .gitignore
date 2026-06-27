@@ -43,3 +43,4 @@ storage/backups/
 
 # Local tool / pnpm cache
 .tools/pnpm-store/
+.tools/**/pnpm-store/
