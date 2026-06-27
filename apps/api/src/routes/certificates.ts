@@ -5,7 +5,10 @@ import {
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 
-import type { CertificateRepository } from "../modules/certificates/certificate-records";
+import type {
+  CertificateRepository,
+  CertificateTemplateDefinition,
+} from "../modules/certificates/certificate-records";
 import { readCertificatePayload } from "../http/body";
 import { sendJson } from "../http/responses";
 
@@ -40,6 +43,35 @@ function getImageContentType(fileName: string): string {
   return "image/png";
 }
 
+function getTemplateAssetUrl(
+  templateId: string,
+  fileName: string,
+): string {
+  return `/api/certificates/templates/${encodeURIComponent(templateId)}/${fileName}`;
+}
+
+function toTemplateResponse(
+  template: CertificateTemplateDefinition,
+): Record<string, unknown> {
+  return {
+    id: template.id,
+    name: template.name,
+    locale: template.locale,
+    isDefault: template.isDefault,
+    layout: template.layout,
+    assets: {
+      backgroundUrl: getTemplateAssetUrl(
+        template.id,
+        "background.png",
+      ),
+      stampOverlayUrl: getTemplateAssetUrl(
+        template.id,
+        "stamp-overlay.png",
+      ),
+    },
+  };
+}
+
 export async function handleCertificateRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -68,20 +100,73 @@ export async function handleCertificateRequest(
     return;
   }
 
-  if (request.method === "GET" && pathname === "/api/certificates/template") {
-    const layout = await repository.readTemplateLayout();
+  if (request.method === "GET" && pathname === "/api/certificates/templates") {
+    const templates = await repository.listTemplates();
 
     sendJson(
       response,
       200,
       {
-        id: layout.id,
-        layout,
-        assets: {
-          backgroundUrl: "/api/certificates/template/background.png",
-          stampOverlayUrl: "/api/certificates/template/stamp-overlay.png",
-        },
+        defaultId: repository.getDefaultTemplateId(),
+        templates: templates.map(toTemplateResponse),
       },
+    );
+    return;
+  }
+
+  const localizedTemplateAssetMatch =
+    /^\/api\/certificates\/templates\/([^/]+)\/([^/]+)$/.exec(pathname);
+
+  if (
+    request.method === "GET" &&
+    localizedTemplateAssetMatch &&
+    TEMPLATE_ASSETS.has(localizedTemplateAssetMatch[2])
+  ) {
+    const [, templateId, fileName] = localizedTemplateAssetMatch;
+    const content = await readFile(
+      repository.getTemplateAssetPath(
+        fileName,
+        templateId,
+      ),
+    );
+
+    response.writeHead(
+      200,
+      {
+        "Content-Type": TEMPLATE_ASSETS.get(fileName) ?? "application/octet-stream",
+        "Content-Length": content.length,
+        "Cache-Control": "public, max-age=3600",
+      },
+    );
+    response.end(content);
+    return;
+  }
+
+  const localizedTemplateMatch =
+    /^\/api\/certificates\/templates\/([^/]+)$/.exec(pathname);
+
+  if (request.method === "GET" && localizedTemplateMatch) {
+    sendJson(
+      response,
+      200,
+      toTemplateResponse(
+        await repository.getTemplate(localizedTemplateMatch[1]),
+      ),
+    );
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/certificates/template") {
+    const templateId = url.searchParams.get("templateId") ??
+      url.searchParams.get("id") ??
+      repository.getDefaultTemplateId();
+
+    sendJson(
+      response,
+      200,
+      toTemplateResponse(
+        await repository.getTemplate(templateId),
+      ),
     );
     return;
   }

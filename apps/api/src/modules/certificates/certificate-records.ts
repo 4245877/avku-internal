@@ -1,6 +1,7 @@
 import path from "node:path";
 import {
   mkdir,
+  readdir,
   readFile,
   rename,
   unlink,
@@ -23,7 +24,16 @@ import type {
   RenderCertificateInput,
 } from "./certificate.types";
 
-const TEMPLATE_ID = "volunteer-card-v1";
+export const DEFAULT_CERTIFICATE_TEMPLATE_ID = "volunteer-card-v1-uk";
+export const LEGACY_CERTIFICATE_TEMPLATE_ID = "volunteer-card-v1";
+
+const TEMPLATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+const LEGACY_TEMPLATE_ALIASES = new Map([
+  [
+    LEGACY_CERTIFICATE_TEMPLATE_ID,
+    DEFAULT_CERTIFICATE_TEMPLATE_ID,
+  ],
+]);
 const DEFAULT_CROP: CertificatePhotoCrop = {
   zoom: 1,
   offsetX: 0,
@@ -66,6 +76,7 @@ export interface CertificatePayload {
   certificateNumber?: unknown;
   issuedAt?: unknown;
   validUntil?: unknown;
+  templateId?: unknown;
   photoDataUrl?: unknown;
   photoFile?: CertificatePhotoFilePayload;
   photoCrop?: unknown;
@@ -79,8 +90,18 @@ export interface CertificatePhotoFilePayload {
 
 export interface CertificateRepositoryOptions {
   storageRoot: string;
-  templateDirectory: string;
+  templatesDirectory?: string;
+  templateDirectory?: string;
+  defaultTemplateId?: string;
   legacyRegistryPath?: string;
+}
+
+export interface CertificateTemplateDefinition {
+  id: string;
+  name: string;
+  locale: string;
+  isDefault: boolean;
+  layout: CertificateLayout;
 }
 
 interface NormalizedCertificatePayload {
@@ -88,6 +109,7 @@ interface NormalizedCertificatePayload {
   certificateNumber: string;
   issuedAt: string;
   validUntil: string;
+  templateId: string;
   photoCrop: CertificatePhotoCrop;
 }
 
@@ -101,6 +123,44 @@ function normalizeWhitespace(value: string): string {
   return value
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function canonicalizeTemplateId(value: string): string {
+  return LEGACY_TEMPLATE_ALIASES.get(value) ?? value;
+}
+
+function normalizeTemplateId(
+  value: unknown,
+  fallback = DEFAULT_CERTIFICATE_TEMPLATE_ID,
+): string {
+  if (value === undefined || value === null || value === "") {
+    return canonicalizeTemplateId(fallback);
+  }
+
+  if (typeof value !== "string") {
+    throw new Error("Template id must be a string.");
+  }
+
+  const templateId = canonicalizeTemplateId(
+    normalizeWhitespace(value).toLowerCase(),
+  );
+
+  if (!TEMPLATE_ID_PATTERN.test(templateId)) {
+    throw new Error("Unsupported certificate template id.");
+  }
+
+  return templateId;
+}
+
+function compareTemplates(
+  first: CertificateTemplateDefinition,
+  second: CertificateTemplateDefinition,
+): number {
+  if (first.isDefault !== second.isDefault) {
+    return first.isDefault ? -1 : 1;
+  }
+
+  return first.id.localeCompare(second.id);
 }
 
 function normalizeDate(value: unknown): string {
@@ -315,6 +375,7 @@ function addOneYear(value: string): string {
 function normalizeCertificatePayload(
   payload: CertificatePayload,
   fallbackCrop: CertificatePhotoCrop = DEFAULT_CROP,
+  fallbackTemplateId = DEFAULT_CERTIFICATE_TEMPLATE_ID,
 ): NormalizedCertificatePayload {
   const fullName = normalizeRequiredText(
     payload.fullName,
@@ -337,6 +398,10 @@ function normalizeCertificatePayload(
     certificateNumber,
     issuedAt,
     validUntil,
+    templateId: normalizeTemplateId(
+      payload.templateId,
+      fallbackTemplateId,
+    ),
     photoCrop: normalizeCrop(
       payload.photoCrop,
       fallbackCrop,
@@ -380,7 +445,7 @@ function rowToRecord(row: Record<string, unknown>): CertificateRecord {
       offsetX: row.photo_crop_offset_x,
       offsetY: row.photo_crop_offset_y,
     }),
-    templateId: String(row.template_id ?? TEMPLATE_ID),
+    templateId: normalizeTemplateId(row.template_id),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
   };
@@ -415,7 +480,11 @@ export class CertificateRepository {
 
   private readonly generatedDirectory: string;
 
-  private readonly templateDirectory: string;
+  private readonly templatesDirectory: string;
+
+  private readonly singleTemplateDirectory: string | null;
+
+  private readonly defaultTemplateId: string;
 
   private database: DatabaseSync | null = null;
 
@@ -437,13 +506,78 @@ export class CertificateRepository {
       options.storageRoot,
       "generated",
     );
-    this.templateDirectory = options.templateDirectory;
+    this.templatesDirectory = options.templatesDirectory ??
+      path.join(
+        options.storageRoot,
+        "templates",
+      );
+    this.singleTemplateDirectory = options.templateDirectory ?? null;
+    this.defaultTemplateId = normalizeTemplateId(options.defaultTemplateId);
   }
 
   async check(): Promise<void> {
     await this.ensureDirectories();
     await this.getDatabase();
-    await this.readTemplateLayout();
+    await this.readTemplateLayout(this.defaultTemplateId);
+  }
+
+  getDefaultTemplateId(): string {
+    return this.defaultTemplateId;
+  }
+
+  async listTemplates(): Promise<CertificateTemplateDefinition[]> {
+    if (this.singleTemplateDirectory) {
+      return [
+        await this.readTemplateDefinition(this.defaultTemplateId),
+      ];
+    }
+
+    const entries = await readdir(
+      this.templatesDirectory,
+      {
+        withFileTypes: true,
+      },
+    );
+    const templateIds = [
+      ...new Set(
+        entries
+          .filter((entry) =>
+            entry.isDirectory() &&
+            TEMPLATE_ID_PATTERN.test(entry.name),
+          )
+          .map((entry) => normalizeTemplateId(entry.name)),
+      ),
+    ];
+    const definitions = await Promise.all(
+      templateIds
+        .map(async (templateId) => {
+          try {
+            return await this.readTemplateDefinition(templateId);
+          } catch (error) {
+            if (
+              error instanceof Error &&
+              "code" in error &&
+              error.code === "ENOENT"
+            ) {
+              return null;
+            }
+
+            throw error;
+          }
+        }),
+    );
+
+    return definitions
+      .filter((definition): definition is CertificateTemplateDefinition =>
+        Boolean(definition),
+      )
+      .sort(compareTemplates);
+  }
+
+  async getTemplate(
+    templateId = this.defaultTemplateId,
+  ): Promise<CertificateTemplateDefinition> {
+    return this.readTemplateDefinition(templateId);
   }
 
   async list(): Promise<CertificateRecordResponse[]> {
@@ -476,6 +610,7 @@ export class CertificateRepository {
     const now = new Date().toISOString();
     const id = randomUUID();
     const normalizedPayload = normalizeCertificatePayload(payload);
+    await this.assertTemplateExists(normalizedPayload.templateId);
     const pendingPhoto = await this.savePhotoToTemporary(
       id,
       payload,
@@ -484,7 +619,6 @@ export class CertificateRepository {
       id,
       ...normalizedPayload,
       photoFileName: pendingPhoto.photoFileName,
-      templateId: TEMPLATE_ID,
       createdAt: now,
       updatedAt: now,
     };
@@ -527,7 +661,9 @@ export class CertificateRepository {
     const normalizedPayload = normalizeCertificatePayload(
       payload,
       existingRecord.photoCrop,
+      existingRecord.templateId,
     );
+    await this.assertTemplateExists(normalizedPayload.templateId);
     const shouldReplacePhoto =
       Boolean(payload.photoFile) ||
       (typeof payload.photoDataUrl === "string" && Boolean(payload.photoDataUrl));
@@ -637,24 +773,21 @@ export class CertificateRepository {
     }
   }
 
-  async readTemplateLayout(): Promise<CertificateLayout> {
-    const content = await readFile(
-      path.join(
-        this.templateDirectory,
-        "layout.json",
-      ),
-      "utf8",
-    );
+  async readTemplateLayout(
+    templateId = this.defaultTemplateId,
+  ): Promise<CertificateLayout> {
+    const definition = await this.readTemplateDefinition(templateId);
 
-    return JSON.parse(
-      content.replace(/^\uFEFF/, ""),
-    ) as CertificateLayout;
+    return definition.layout;
   }
 
-  getTemplateAssetPath(fileName: string): string {
+  getTemplateAssetPath(
+    fileName: string,
+    templateId = this.defaultTemplateId,
+  ): string {
     return path.join(
-      this.templateDirectory,
-      fileName,
+      this.getTemplateDirectory(templateId),
+      path.basename(fileName),
     );
   }
 
@@ -673,9 +806,10 @@ export class CertificateRepository {
     );
     const outputPath = this.getGeneratedPath(record.id);
     const nameParts = splitFullName(record.fullName);
+    const templateDirectory = this.getTemplateDirectory(record.templateId);
 
     await renderCertificate({
-      templateDirectory: this.templateDirectory,
+      templateDirectory,
       outputPath,
       photoPath: this.getPhotoPath(record.photoFileName),
       photoCrop: record.photoCrop,
@@ -734,6 +868,83 @@ export class CertificateRepository {
     await this.migrateLegacyRegistry(this.database);
 
     return this.database;
+  }
+
+  private getTemplateDirectory(
+    templateId = this.defaultTemplateId,
+  ): string {
+    const normalizedTemplateId = normalizeTemplateId(
+      templateId,
+      this.defaultTemplateId,
+    );
+
+    if (this.singleTemplateDirectory) {
+      if (normalizedTemplateId !== this.defaultTemplateId) {
+        throw new Error(`Certificate template not found: ${normalizedTemplateId}`);
+      }
+
+      return this.singleTemplateDirectory;
+    }
+
+    return path.join(
+      this.templatesDirectory,
+      normalizedTemplateId,
+    );
+  }
+
+  private async readTemplateDefinition(
+    templateId = this.defaultTemplateId,
+  ): Promise<CertificateTemplateDefinition> {
+    const normalizedTemplateId = normalizeTemplateId(
+      templateId,
+      this.defaultTemplateId,
+    );
+    const content = await readFile(
+      path.join(
+        this.getTemplateDirectory(normalizedTemplateId),
+        "layout.json",
+      ),
+      "utf8",
+    );
+    const sourceLayout = JSON.parse(
+      content.replace(/^\uFEFF/, ""),
+    ) as CertificateLayout;
+    const name = typeof sourceLayout.name === "string" && sourceLayout.name.trim()
+      ? normalizeWhitespace(sourceLayout.name)
+      : normalizedTemplateId;
+    const locale = typeof sourceLayout.locale === "string" && sourceLayout.locale.trim()
+      ? normalizeWhitespace(sourceLayout.locale)
+      : "";
+    const layout: CertificateLayout = {
+      ...sourceLayout,
+      id: normalizedTemplateId,
+      name,
+      locale,
+    };
+
+    return {
+      id: normalizedTemplateId,
+      name,
+      locale,
+      isDefault: normalizedTemplateId === this.defaultTemplateId,
+      layout,
+    };
+  }
+
+  private async assertTemplateExists(templateId: string): Promise<void> {
+    try {
+      await this.readTemplateDefinition(templateId);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        throw new Error(`Certificate template not found: ${templateId}`);
+      }
+
+      throw error;
+    }
   }
 
   private migrateDatabase(database: DatabaseSync): void {
@@ -864,9 +1075,7 @@ export class CertificateRepository {
         "Файл фотографії",
       ),
       photoCrop: normalizeCrop(source.photoCrop),
-      templateId: typeof source.templateId === "string" && source.templateId.trim()
-        ? normalizeWhitespace(source.templateId)
-        : TEMPLATE_ID,
+      templateId: normalizeTemplateId(source.templateId),
       createdAt: typeof source.createdAt === "string" && source.createdAt.trim()
         ? source.createdAt
         : new Date().toISOString(),

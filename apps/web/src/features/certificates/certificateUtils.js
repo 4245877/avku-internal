@@ -1,4 +1,8 @@
-import { EMPTY_CROP } from './certificateTypes.js';
+import {
+  DEFAULT_CERTIFICATE_TEMPLATE_ID,
+  EMPTY_CROP,
+  LEGACY_CERTIFICATE_TEMPLATE_ID,
+} from './certificateTypes.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -6,6 +10,16 @@ export function normalizeWhitespace(value) {
   return String(value ?? '')
     .trim()
     .replace(/\s+/g, ' ');
+}
+
+export function normalizeTemplateId(value) {
+  const templateId = normalizeWhitespace(value).toLowerCase();
+
+  if (!templateId || templateId === LEGACY_CERTIFICATE_TEMPLATE_ID) {
+    return DEFAULT_CERTIFICATE_TEMPLATE_ID;
+  }
+
+  return templateId;
 }
 
 export function toInputDate(value) {
@@ -28,13 +42,14 @@ export function getDefaultValidUntil() {
   return toInputDate(date);
 }
 
-export function getEmptyCertificateForm() {
+export function getEmptyCertificateForm(templateId = DEFAULT_CERTIFICATE_TEMPLATE_ID) {
   return {
     id: '',
     fullName: '',
     certificateNumber: '',
     issuedAt: getTodayInputDate(),
     validUntil: getDefaultValidUntil(),
+    templateId: normalizeTemplateId(templateId),
     photoUrl: '',
     photoDataUrl: '',
     photoFile: null,
@@ -53,6 +68,7 @@ export function createFormFromRecord(record) {
     certificateNumber: record.certificateNumber,
     issuedAt: record.issuedAt,
     validUntil: record.validUntil,
+    templateId: normalizeTemplateId(record.templateId),
     photoUrl: record.photoUrl,
     photoDataUrl: '',
     photoFile: null,
@@ -173,6 +189,10 @@ export function validateCertificateForm(form) {
     errors.validUntil = 'Дата завершення дії має бути не раніше дати видачі.';
   }
 
+  if (!normalizeWhitespace(form.templateId)) {
+    errors.templateId = 'Вкажіть шаблон посвідчення.';
+  }
+
   if (!form.photoUrl && !form.photoDataUrl && !form.photoFile) {
     errors.photo = 'Завантажте фотографію.';
   }
@@ -190,6 +210,7 @@ export function buildCertificatePayload(form) {
     certificateNumber: normalizeWhitespace(form.certificateNumber),
     issuedAt: form.issuedAt,
     validUntil: form.validUntil,
+    templateId: normalizeTemplateId(form.templateId),
     photoDataUrl: form.photoFile ? undefined : form.photoDataUrl || undefined,
     photoFile: form.photoFile || undefined,
     photoCrop: form.photoCrop,

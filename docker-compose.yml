@@ -9,7 +9,8 @@ services:
     environment:
       PORT: "3001"
       DATA_ROOT: /data
-      CERTIFICATES_TEMPLATE_DIRECTORY: /app/storage/certificates/templates/volunteer-card-v1
+      CERTIFICATES_TEMPLATES_DIRECTORY: /app/storage/certificates/templates
+      CERTIFICATES_DEFAULT_TEMPLATE_ID: volunteer-card-v1-uk
       CERTIFICATES_LEGACY_REGISTRY_PATH: /app/storage/certificates/registry.json
       NODE_OPTIONS: --no-warnings=ExperimentalWarning
     volumes:

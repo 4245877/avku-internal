@@ -17,7 +17,7 @@ import {
   downloadBlob,
   downloadCertificate,
   fetchCertificates,
-  fetchCertificateTemplate,
+  fetchCertificateTemplates,
   renewCertificate,
   updateCertificate,
 } from '../../features/certificates/certificateApi.js';
@@ -143,7 +143,10 @@ function validatePhotoFile(file) {
 function CertificatesPage() {
   const photoInputRef = useRef(null);
 
-  const [template, setTemplate] = useState(null);
+  const [templateCatalog, setTemplateCatalog] = useState(() => ({
+    defaultId: getEmptyCertificateForm().templateId,
+    templates: [],
+  }));
   const [records, setRecords] = useState([]);
   const [form, setForm] = useState(getEmptyCertificateForm);
   const [savedSnapshot, setSavedSnapshot] = useState('');
@@ -189,6 +192,15 @@ function CertificatesPage() {
     [form.id, records],
   );
   const previewImageUrl = form.photoDataUrl || form.photoUrl;
+  const templateOptions = templateCatalog.templates;
+  const selectedTemplate = useMemo(
+    () =>
+      templateOptions.find((template) => template.id === form.templateId) ||
+      templateOptions.find((template) => template.id === templateCatalog.defaultId) ||
+      templateOptions[0] ||
+      null,
+    [form.templateId, templateCatalog.defaultId, templateOptions],
+  );
   const isAnyActionRunning = Boolean(
     loading || isSaving || exportingFormat || registryAction,
   );
@@ -222,7 +234,7 @@ function CertificatesPage() {
 
     async function loadCertificatesModule() {
       const [templateResult, recordsResult] = await Promise.allSettled([
-        fetchCertificateTemplate(),
+        fetchCertificateTemplates(),
         fetchCertificates(),
       ]);
 
@@ -231,9 +243,11 @@ function CertificatesPage() {
       }
 
       const loadingErrors = [];
+      let defaultTemplateId = getEmptyCertificateForm().templateId;
 
       if (templateResult.status === 'fulfilled') {
-        setTemplate(templateResult.value);
+        setTemplateCatalog(templateResult.value);
+        defaultTemplateId = templateResult.value.defaultId;
 
         if (templateResult.value.warning) {
           loadingErrors.push(templateResult.value.warning);
@@ -262,7 +276,7 @@ function CertificatesPage() {
         );
       }
 
-      setCleanForm(getEmptyCertificateForm());
+      setCleanForm(getEmptyCertificateForm(defaultTemplateId));
 
       if (loadingErrors.length === 0) {
         clearNotice();
@@ -351,9 +365,15 @@ function CertificatesPage() {
       return;
     }
 
-    setCleanForm(getEmptyCertificateForm());
+    setCleanForm(getEmptyCertificateForm(templateCatalog.defaultId));
     clearNotice();
-  }, [clearNotice, confirmUnsavedChanges, isAnyActionRunning, setCleanForm]);
+  }, [
+    clearNotice,
+    confirmUnsavedChanges,
+    isAnyActionRunning,
+    setCleanForm,
+    templateCatalog.defaultId,
+  ]);
 
   const openRecord = useCallback((record) => {
     if (isAnyActionRunning || !confirmUnsavedChanges()) {
@@ -390,7 +410,7 @@ function CertificatesPage() {
         await readFileAsDataUrl(file),
         getPhotoMimeType(file),
       );
-      const defaultPhotoCrop = getEmptyCertificateForm().photoCrop;
+      const defaultPhotoCrop = getEmptyCertificateForm(form.templateId).photoCrop;
 
       setForm((currentForm) => ({
         ...currentForm,
@@ -415,7 +435,7 @@ function CertificatesPage() {
     } finally {
       input.value = '';
     }
-  }, [clearNotice, showNotice]);
+  }, [clearNotice, form.templateId, showNotice]);
 
   const saveForm = useCallback(async () => {
     if (loading || isSaving || registryAction || exportingFormat) {
@@ -607,7 +627,7 @@ function CertificatesPage() {
       );
 
       if (form.id === deleteCandidate.id) {
-        setCleanForm(getEmptyCertificateForm());
+        setCleanForm(getEmptyCertificateForm(templateCatalog.defaultId));
       }
 
       setDeleteCandidate(null);
@@ -626,6 +646,7 @@ function CertificatesPage() {
     isAnyActionRunning,
     setCleanForm,
     showNotice,
+    templateCatalog.defaultId,
   ]);
 
   const exportCurrentRecord = useCallback(async (format) => {
@@ -774,6 +795,7 @@ function CertificatesPage() {
         <div className={styles.editorStack}>
           <CertificateForm
             form={form}
+            templateOptions={templateOptions}
             errors={errors}
             isSaving={isSaving}
             isDirty={isDirty}
@@ -787,7 +809,7 @@ function CertificatesPage() {
             ref={photoInputRef}
             imageUrl={previewImageUrl}
             crop={form.photoCrop}
-            photoFrame={template?.layout?.photo}
+            photoFrame={selectedTemplate?.layout?.photo}
             error={errors.photo}
             onCropChange={updateCrop}
             onPhotoChange={handlePhotoChange}
@@ -796,7 +818,7 @@ function CertificatesPage() {
 
         <CertificatePreview
           form={form}
-          template={template}
+          template={selectedTemplate}
           imageUrl={previewImageUrl}
           isExportDisabled={
             !selectedRecord

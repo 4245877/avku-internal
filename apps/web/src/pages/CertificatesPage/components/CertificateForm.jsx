@@ -2,6 +2,7 @@ import styles from '../CertificatesPage.module.css';
 
 function CertificateForm({
   form,
+  templateOptions = [],
   errors,
   isSaving,
   isDirty,
@@ -29,6 +30,26 @@ function CertificateForm({
       </div>
 
       <div className={styles.formGrid}>
+        <label className={styles.field}>
+          <span>Локалізація</span>
+          <select
+            className={`${styles.input} ${errors.templateId ? styles.inputError : ''}`}
+            value={form.templateId}
+            onChange={(event) => onChange('templateId', event.target.value)}
+            aria-invalid={Boolean(errors.templateId)}
+          >
+            {templateOptions.length === 0 ? (
+              <option value={form.templateId}>UA</option>
+            ) : null}
+            {templateOptions.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name || template.locale || template.id}
+              </option>
+            ))}
+          </select>
+          {errors.templateId ? <small className={styles.fieldError}>{errors.templateId}</small> : null}
+        </label>
+
         <label className={styles.field}>
           <span>ПІБ</span>
           <input

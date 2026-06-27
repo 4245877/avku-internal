@@ -1,7 +1,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CertificateRepository } from "./modules/certificates/certificate-records";
+import {
+  CertificateRepository,
+  DEFAULT_CERTIFICATE_TEMPLATE_ID,
+} from "./modules/certificates/certificate-records";
 import { WarehouseRepository } from "./modules/warehouse/warehouse-records";
 import { LogisticsRepository } from "./modules/logistics/logistics-records";
 
@@ -35,24 +38,29 @@ function getDataRoot(repositoryRoot: string): string {
 }
 
 export function createCertificateRepository(): CertificateRepository {
-  const dataRoot = getDataRoot(getRepositoryRoot());
+  const repositoryRoot = getRepositoryRoot();
+  const dataRoot = getDataRoot(repositoryRoot);
   const storageRoot =
     process.env.CERTIFICATES_STORAGE_ROOT ??
     path.join(
       dataRoot,
       "certificates",
     );
-  const templateDirectory =
-    process.env.CERTIFICATES_TEMPLATE_DIRECTORY ??
+  const templatesDirectory =
+    process.env.CERTIFICATES_TEMPLATES_DIRECTORY ??
     path.join(
-      storageRoot,
+      repositoryRoot,
+      "storage",
+      "certificates",
       "templates",
-      "volunteer-card-v1",
     );
 
   return new CertificateRepository({
     storageRoot,
-    templateDirectory,
+    templatesDirectory,
+    templateDirectory: process.env.CERTIFICATES_TEMPLATE_DIRECTORY,
+    defaultTemplateId: process.env.CERTIFICATES_DEFAULT_TEMPLATE_ID ??
+      DEFAULT_CERTIFICATE_TEMPLATE_ID,
     legacyRegistryPath: process.env.CERTIFICATES_LEGACY_REGISTRY_PATH,
   });
 }

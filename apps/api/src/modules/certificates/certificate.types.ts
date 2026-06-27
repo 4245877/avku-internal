@@ -39,6 +39,8 @@ export interface CertificateTextFieldLayout {
 
 export interface CertificateLayout {
   id: string;
+  name?: string;
+  locale?: string;
 
   canvas: CertificateCanvasLayout;
 

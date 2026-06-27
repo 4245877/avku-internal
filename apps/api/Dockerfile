@@ -30,7 +30,8 @@ FROM base AS runtime
 WORKDIR /app/apps/api
 ENV NODE_ENV=production
 ENV DATA_ROOT=/data
-ENV CERTIFICATES_TEMPLATE_DIRECTORY=/app/storage/certificates/templates/volunteer-card-v1
+ENV CERTIFICATES_TEMPLATES_DIRECTORY=/app/storage/certificates/templates
+ENV CERTIFICATES_DEFAULT_TEMPLATE_ID=volunteer-card-v1-uk
 ENV NODE_OPTIONS=--no-warnings=ExperimentalWarning
 
 COPY --from=deps /app/apps/api/node_modules ./node_modules

@@ -17,7 +17,7 @@ async function main(): Promise<void> {
     "storage",
     "certificates",
     "templates",
-    "volunteer-card-v1",
+    "volunteer-card-v1-uk",
   );
 
   const photoPath = path.join(

@@ -78,6 +78,7 @@ function multipartPartsToPayload(parts: MultipartPart[]): CertificatePayload {
     certificateNumber: fields.get("certificateNumber"),
     issuedAt: fields.get("issuedAt"),
     validUntil: fields.get("validUntil"),
+    templateId: fields.get("templateId"),
     photoCrop: parsePhotoCropField(fields.get("photoCrop")),
     photoFile,
   };

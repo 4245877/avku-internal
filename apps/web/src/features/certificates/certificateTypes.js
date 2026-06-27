@@ -4,6 +4,9 @@ export const EMPTY_CROP = {
   offsetY: 0,
 };
 
+export const DEFAULT_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1-uk';
+export const LEGACY_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1';
+
 /**
  * @typedef {Object} CertificatePhotoCrop
  * @property {number} zoom
@@ -18,6 +21,7 @@ export const EMPTY_CROP = {
  * @property {string} certificateNumber
  * @property {string} issuedAt
  * @property {string} validUntil
+ * @property {string} templateId
  * @property {string} photoUrl
  * @property {CertificatePhotoCrop} photoCrop
  * @property {string} createdAt
@@ -31,6 +35,7 @@ export const EMPTY_CROP = {
  * @property {string} certificateNumber
  * @property {string} issuedAt
  * @property {string} validUntil
+ * @property {string} templateId
  * @property {string} photoUrl
  * @property {string} photoDataUrl
  * @property {File|null} photoFile
