@@ -37,6 +37,45 @@ function getDataRoot(repositoryRoot: string): string {
   );
 }
 
+/**
+ * Resolves the legacy single-template directory override.
+ *
+ * Source of truth for templates is the multi-template catalogue at
+ * `CERTIFICATES_TEMPLATES_DIRECTORY` (plural). The single-template mode is a
+ * legacy escape hatch that pins the API to one template directory; it was
+ * historically named `CERTIFICATES_TEMPLATE_DIRECTORY` (singular), which is one
+ * character away from the plural and easy to set by mistake — that typo would
+ * silently hide every non-default template (e.g. the English card). The
+ * override is therefore exposed under the unambiguous
+ * `CERTIFICATES_LEGACY_SINGLE_TEMPLATE_DIR`; the old singular name still works
+ * but logs a deprecation warning.
+ */
+function resolveLegacySingleTemplateDir(): string | undefined {
+  const renamed = process.env.CERTIFICATES_LEGACY_SINGLE_TEMPLATE_DIR;
+  const deprecated = process.env.CERTIFICATES_TEMPLATE_DIRECTORY;
+
+  if (deprecated) {
+    console.warn(
+      "[certificates] CERTIFICATES_TEMPLATE_DIRECTORY is deprecated and easily " +
+        "confused with CERTIFICATES_TEMPLATES_DIRECTORY. Rename it to " +
+        "CERTIFICATES_LEGACY_SINGLE_TEMPLATE_DIR.",
+    );
+  }
+
+  const singleTemplateDir = renamed ?? deprecated;
+
+  if (singleTemplateDir && process.env.CERTIFICATES_TEMPLATES_DIRECTORY) {
+    console.warn(
+      "[certificates] Both a single-template override and " +
+        "CERTIFICATES_TEMPLATES_DIRECTORY are set. Single-template mode wins, " +
+        "so only the default template will be served. Unset the override to " +
+        "serve the full template catalogue.",
+    );
+  }
+
+  return singleTemplateDir;
+}
+
 export function createCertificateRepository(): CertificateRepository {
   const repositoryRoot = getRepositoryRoot();
   const dataRoot = getDataRoot(repositoryRoot);
@@ -58,7 +97,7 @@ export function createCertificateRepository(): CertificateRepository {
   return new CertificateRepository({
     storageRoot,
     templatesDirectory,
-    templateDirectory: process.env.CERTIFICATES_TEMPLATE_DIRECTORY,
+    legacySingleTemplateDirectory: resolveLegacySingleTemplateDir(),
     defaultTemplateId: process.env.CERTIFICATES_DEFAULT_TEMPLATE_ID ??
       DEFAULT_CERTIFICATE_TEMPLATE_ID,
     legacyRegistryPath: process.env.CERTIFICATES_LEGACY_REGISTRY_PATH,

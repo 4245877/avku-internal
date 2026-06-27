@@ -1,5 +1,6 @@
 import path from "node:path";
 import {
+  access,
   mkdir,
   readdir,
   readFile,
@@ -28,6 +29,14 @@ export const DEFAULT_CERTIFICATE_TEMPLATE_ID = "volunteer-card-v1-uk";
 export const LEGACY_CERTIFICATE_TEMPLATE_ID = "volunteer-card-v1";
 
 const TEMPLATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+/**
+ * Assets a template directory must contain to be considered usable. layout.json
+ * is validated separately (it is parsed); background.png is the minimum image
+ * the renderer cannot work without.
+ */
+const REQUIRED_TEMPLATE_ASSETS = [
+  "background.png",
+] as const;
 const LEGACY_TEMPLATE_ALIASES = new Map([
   [
     LEGACY_CERTIFICATE_TEMPLATE_ID,
@@ -90,8 +99,14 @@ export interface CertificatePhotoFilePayload {
 
 export interface CertificateRepositoryOptions {
   storageRoot: string;
+  /** Root directory of the multi-template catalogue (one sub-folder per template). */
   templatesDirectory?: string;
-  templateDirectory?: string;
+  /**
+   * Legacy single-template override. When set, the API serves only the default
+   * template from this directory and ignores `templatesDirectory`. Kept for
+   * backwards compatibility with single-template deployments.
+   */
+  legacySingleTemplateDirectory?: string;
   defaultTemplateId?: string;
   legacyRegistryPath?: string;
 }
@@ -511,14 +526,24 @@ export class CertificateRepository {
         options.storageRoot,
         "templates",
       );
-    this.singleTemplateDirectory = options.templateDirectory ?? null;
+    this.singleTemplateDirectory = options.legacySingleTemplateDirectory ?? null;
     this.defaultTemplateId = normalizeTemplateId(options.defaultTemplateId);
   }
 
   async check(): Promise<void> {
     await this.ensureDirectories();
     await this.getDatabase();
-    await this.readTemplateLayout(this.defaultTemplateId);
+
+    // The default template is mandatory: fail fast at startup if its layout.json
+    // or required assets are missing/invalid, instead of letting the failure
+    // surface only on the first render request.
+    await this.loadTemplate(this.defaultTemplateId);
+
+    // Validate the rest of the catalogue. Broken non-default templates are
+    // logged and skipped by listTemplates (graceful degradation) so one bad
+    // localisation (e.g. volunteer-card-v1-en) cannot block the API from
+    // starting.
+    await this.listTemplates();
   }
 
   getDefaultTemplateId(): string {
@@ -527,9 +552,7 @@ export class CertificateRepository {
 
   async listTemplates(): Promise<CertificateTemplateDefinition[]> {
     if (this.singleTemplateDirectory) {
-      return [
-        await this.readTemplateDefinition(this.defaultTemplateId),
-      ];
+      return this.collectTemplates([this.defaultTemplateId]);
     }
 
     const entries = await readdir(
@@ -542,29 +565,41 @@ export class CertificateRepository {
       ...new Set(
         entries
           .filter((entry) =>
+            // Directories with names outside the id pattern (e.g. a stray
+            // "volunteer-card-v1 ENG" with spaces/uppercase) are ignored here.
             entry.isDirectory() &&
             TEMPLATE_ID_PATTERN.test(entry.name),
           )
           .map((entry) => normalizeTemplateId(entry.name)),
       ),
     ];
-    const definitions = await Promise.all(
-      templateIds
-        .map(async (templateId) => {
-          try {
-            return await this.readTemplateDefinition(templateId);
-          } catch (error) {
-            if (
-              error instanceof Error &&
-              "code" in error &&
-              error.code === "ENOENT"
-            ) {
-              return null;
-            }
 
-            throw error;
-          }
-        }),
+    return this.collectTemplates(templateIds);
+  }
+
+  /**
+   * Loads each template defensively: a single broken template (missing/invalid
+   * layout.json or a missing required asset) is logged and excluded rather than
+   * failing the whole catalogue. This keeps GET /templates and startup resilient
+   * to one corrupted localisation.
+   */
+  private async collectTemplates(
+    templateIds: string[],
+  ): Promise<CertificateTemplateDefinition[]> {
+    const definitions = await Promise.all(
+      templateIds.map(async (templateId) => {
+        try {
+          return await this.loadTemplate(templateId);
+        } catch (error) {
+          console.warn(
+            `[certificates] Skipping broken template "${templateId}": ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+
+          return null;
+        }
+      }),
     );
 
     return definitions
@@ -929,6 +964,36 @@ export class CertificateRepository {
       isDefault: normalizedTemplateId === this.defaultTemplateId,
       layout,
     };
+  }
+
+  /**
+   * Reads and fully validates a template: its layout.json must exist and parse,
+   * and every required asset (background.png) must be present. Throws if the
+   * template is unusable.
+   */
+  private async loadTemplate(
+    templateId = this.defaultTemplateId,
+  ): Promise<CertificateTemplateDefinition> {
+    const definition = await this.readTemplateDefinition(templateId);
+
+    await this.assertRequiredTemplateAssets(definition.id);
+
+    return definition;
+  }
+
+  private async assertRequiredTemplateAssets(
+    templateId: string,
+  ): Promise<void> {
+    for (const asset of REQUIRED_TEMPLATE_ASSETS) {
+      try {
+        await access(this.getTemplateAssetPath(asset, templateId));
+      } catch {
+        // Keep the message path-free: it may reach API responses/logs.
+        throw new Error(
+          `Template "${templateId}" is missing required asset: ${asset}`,
+        );
+      }
+    }
   }
 
   private async assertTemplateExists(templateId: string): Promise<void> {

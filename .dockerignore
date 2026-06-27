@@ -1,0 +1,38 @@
+# Build-context excludes. The repository root is the Docker build context for
+# both infra/node/Dockerfile and apps/api/Dockerfile (see docker-compose*.yml).
+# Nothing here is needed inside an image: the API Dockerfile only copies
+# apps/api/{src,package.json,pnpm-*} and storage/certificates/templates.
+
+# Dependencies are installed inside the image, never copied in.
+**/node_modules
+
+# Version control & local tooling.
+.git
+.github
+.agents
+.tools
+
+# Design sources — not used at runtime (see design/certificates/README.md).
+design
+
+# Frontend build artifacts.
+**/dist
+**/.vite
+apps/web/.vite-cert-check
+apps/web/*.log
+apps/web/certificates-screenshot.png
+
+# Personal / runtime certificate data must never be baked into an image.
+storage/certificates/*.sqlite
+storage/certificates/*.sqlite-*
+storage/certificates/photos
+storage/certificates/generated
+storage/warehouse/*.sqlite
+storage/warehouse/*.sqlite-*
+storage/logistics/*.sqlite
+storage/logistics/*.sqlite-*
+storage/backups
+
+# Local environment files.
+.env
+.env.*

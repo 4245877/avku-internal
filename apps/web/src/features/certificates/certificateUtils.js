@@ -22,6 +22,30 @@ export function normalizeTemplateId(value) {
   return templateId;
 }
 
+const TEMPLATE_LOCALE_LABELS = {
+  uk: 'Українська',
+  en: 'English',
+};
+
+/**
+ * Human-friendly label for the localisation <select>: prefer a known
+ * language name, then the template's own name/locale, never the raw id.
+ */
+export function getTemplateLabel(template) {
+  if (!template) {
+    return '';
+  }
+
+  const locale = normalizeWhitespace(template.locale).toLowerCase();
+
+  return (
+    TEMPLATE_LOCALE_LABELS[locale] ||
+    normalizeWhitespace(template.name) ||
+    template.locale ||
+    template.id
+  );
+}
+
 export function toInputDate(value) {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, '0');

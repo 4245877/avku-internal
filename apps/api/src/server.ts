@@ -18,7 +18,7 @@ import {
   applyCors,
   sendError,
 } from "./http/responses";
-import { resolveErrorStatusCode } from "./http/errors";
+import { sanitizeError } from "./http/errors";
 
 async function dispatchRequest(
   request: IncomingMessage,
@@ -72,10 +72,21 @@ async function dispatchRequest(
   );
 }
 
-export function createCertificateApiServer(): http.Server {
-  const certificateRepository = createCertificateRepository();
-  const warehouseRepository = createWarehouseRepository();
-  const logisticsRepository = createLogisticsRepository();
+export interface CertificateApiRepositories {
+  certificateRepository: CertificateRepository;
+  warehouseRepository: WarehouseRepository;
+  logisticsRepository: LogisticsRepository;
+}
+
+export function createCertificateApiServer(
+  repositories?: CertificateApiRepositories,
+): http.Server {
+  const certificateRepository =
+    repositories?.certificateRepository ?? createCertificateRepository();
+  const warehouseRepository =
+    repositories?.warehouseRepository ?? createWarehouseRepository();
+  const logisticsRepository =
+    repositories?.logisticsRepository ?? createLogisticsRepository();
 
   return http.createServer((request, response) => {
     applyCors(
@@ -90,10 +101,21 @@ export function createCertificateApiServer(): http.Server {
       warehouseRepository,
       logisticsRepository,
     ).catch((error: unknown) => {
+      const sanitized = sanitizeError(error);
+
+      // Keep the detailed error (absolute paths, system codes, stack) in the
+      // server logs only; the client receives a neutral, sanitized message.
+      if (sanitized.internal) {
+        console.error(
+          `Unhandled API error (${request.method} ${request.url}):`,
+          error,
+        );
+      }
+
       sendError(
         response,
-        resolveErrorStatusCode(error),
-        error,
+        sanitized.statusCode,
+        sanitized.message,
       );
     });
   });

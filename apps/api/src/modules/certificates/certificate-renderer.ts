@@ -485,15 +485,19 @@ export async function renderCertificate(
     "stamp-overlay.png",
   );
 
+  // Only surface non-sensitive identifiers in error messages: these bubble up
+  // to API responses, so absolute filesystem paths must never be embedded here.
+  const templateId = path.basename(input.templateDirectory);
+
   if (!(await fileExists(backgroundPath))) {
     throw new Error(
-      `Не найден фон шаблона: ${backgroundPath}`,
+      `Не найден фон шаблона «${templateId}».`,
     );
   }
 
   if (!(await fileExists(input.photoPath))) {
     throw new Error(
-      `Не найдена фотография: ${input.photoPath}`,
+      "Не найдена фотография посвідчення.",
     );
   }
 

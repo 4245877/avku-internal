@@ -1,3 +1,4 @@
+import { getTemplateLabel } from '../../../features/certificates/certificateUtils.js';
 import styles from '../CertificatesPage.module.css';
 
 function CertificateForm({
@@ -39,11 +40,11 @@ function CertificateForm({
             aria-invalid={Boolean(errors.templateId)}
           >
             {templateOptions.length === 0 ? (
-              <option value={form.templateId}>UA</option>
+              <option value={form.templateId}>Українська</option>
             ) : null}
             {templateOptions.map((template) => (
               <option key={template.id} value={template.id}>
-                {template.name || template.locale || template.id}
+                {getTemplateLabel(template)}
               </option>
             ))}
           </select>

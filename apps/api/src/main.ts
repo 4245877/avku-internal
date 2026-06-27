@@ -10,17 +10,30 @@ import {
 import { createCertificateApiServer } from "./server";
 
 async function main(): Promise<void> {
+  const certificateRepository = createCertificateRepository();
+  const warehouseRepository = createWarehouseRepository();
+  const logisticsRepository = createLogisticsRepository();
+
+  // Validate storage and templates before accepting traffic. The default
+  // certificate template is mandatory, so a missing/broken default fails fast
+  // here instead of on the first render; broken non-default templates (e.g. a
+  // damaged English card) are logged and skipped, not fatal.
+  await certificateRepository.check();
+  await warehouseRepository.check();
+  await logisticsRepository.check();
+
   if (process.argv.includes("--check")) {
-    await createCertificateRepository().check();
-    await createWarehouseRepository().check();
-    await createLogisticsRepository().check();
     console.log(
       "Certificates, warehouse and logistics API storage check passed.",
     );
     return;
   }
 
-  createCertificateApiServer().listen(
+  createCertificateApiServer({
+    certificateRepository,
+    warehouseRepository,
+    logisticsRepository,
+  }).listen(
     PORT,
     () => {
       console.log(`AVKU API is listening on http://localhost:${PORT}`);

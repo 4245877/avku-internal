@@ -54,15 +54,13 @@ export function sendJson(
 export function sendError(
   response: ServerResponse,
   statusCode: number,
-  error: unknown,
+  message: string,
 ): void {
   sendJson(
     response,
     statusCode,
     {
-      error: error instanceof Error
-        ? error.message
-        : "Ошибка обработки запроса.",
+      error: message,
     },
   );
 }
