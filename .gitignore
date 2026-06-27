@@ -44,3 +44,11 @@ storage/backups/
 # Local tool / pnpm cache
 .tools/pnpm-store/
 .tools/**/pnpm-store/
+
+# Local tools and caches
+.tools/
+
+# Vite check/build artifacts
+apps/web/.vite-cert-check/
+apps/web/vite-*.log
+apps/web/certificates-screenshot.png
