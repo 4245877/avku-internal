@@ -8,6 +8,17 @@
   margin-inline: auto;
   padding: var(--space-10) var(--space-12) var(--space-12);
   animation: pageReveal var(--duration-reveal) var(--ease-out) both;
+
+  /* The global muted/secondary tokens sit ~2.5:1 on frost cards, but these
+     pages lean on them for meaningful labels, codes and metadata. Darken
+     them locally so every label clears WCAG AA without restyling the app. */
+  --color-text-muted: #5e7488;
+  --color-text-secondary: #54697c;
+}
+
+:global([data-theme='dark']) .page {
+  --color-text-muted: #8aa8c0;
+  --color-text-secondary: #7a9cb5;
 }
 
 @keyframes pageReveal {
@@ -91,9 +102,28 @@
 }
 
 .primaryButton {
+  position: relative;
+  overflow: hidden;
   color: var(--frost-surface);
   background: var(--btn-primary-bg);
   box-shadow: var(--btn-shadow);
+}
+
+/* Signature ice sheen sweep — mirrors the design-system .btn-primary */
+.primaryButton::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(168, 221, 247, 0.35),
+    transparent
+  );
+  transition: left var(--duration-reveal) var(--ease-out);
 }
 
 .primaryButton:hover {
@@ -101,6 +131,22 @@
   background: var(--btn-primary-hover);
   box-shadow: var(--btn-shadow-hover);
   transform: translateY(var(--btn-lift));
+}
+
+.primaryButton:hover::before {
+  left: 100%;
+}
+
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible,
+.smallButton:focus-visible,
+.smallDangerButton:focus-visible,
+.dangerButton:focus-visible,
+.segmentedButton:focus-visible,
+.noticeCloseButton:focus-visible,
+.manifestRemoveButton:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
 }
 
 .secondaryButton,
@@ -118,7 +164,7 @@
 }
 
 .smallButton {
-  min-height: 34px;
+  min-height: var(--btn-height-sm);
   padding: 0 var(--space-3);
   font-size: var(--text-xs);
 }
@@ -139,6 +185,14 @@
   border: 1px solid var(--card-border);
   border-radius: var(--card-radius);
   box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--duration-base) var(--ease-out),
+    box-shadow var(--duration-base) var(--ease-out);
+}
+
+.summaryCard:hover {
+  border-color: var(--color-border-medium);
+  box-shadow: var(--shadow-md);
 }
 
 .summaryCard span {
@@ -215,10 +269,10 @@
 .filterSelect {
   width: 100%;
   height: var(--input-height);
-  padding: 0 var(--space-3);
+  padding: 0 var(--input-padding-x);
   color: var(--input-text);
   background: var(--input-bg);
-  border: 1px solid var(--input-border);
+  border: 1.5px solid var(--input-border);
   border-radius: var(--input-radius);
   outline: 0;
   transition:
@@ -230,10 +284,27 @@
   color: var(--input-placeholder);
 }
 
+.searchInput:hover:not(:focus),
+.filterSelect:hover:not(:focus) {
+  border-color: var(--color-accent-hover);
+}
+
 .searchInput:focus,
 .filterSelect:focus {
   border-color: var(--input-border-focus);
   box-shadow: var(--shadow-ice);
+}
+
+/* Styled chevron so selects match the design-system .form-select
+   instead of falling back to the native OS control. */
+.filterSelect,
+select.fieldInput {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: var(--space-10);
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236E8599' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-4) center;
 }
 
 .tableWrap {
@@ -277,10 +348,25 @@
   transition: background-color var(--duration-fast) var(--ease-out);
 }
 
-.dataTable tbody tr:hover td,
-.dataTable .activeRow td {
+.dataTable tbody tr:hover td {
   color: var(--color-text-primary);
   background: var(--table-row-hover);
+}
+
+.dataTable tbody tr:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
+/* The selected row must read differently from a merely hovered one:
+   a stronger ice wash plus an accent rail on the leading cell. */
+.dataTable .activeRow td {
+  color: var(--color-text-primary);
+  background: color-mix(in srgb, var(--ice-deep) 13%, transparent);
+}
+
+.dataTable .activeRow td:first-child {
+  box-shadow: inset 3px 0 0 var(--ice-deep);
 }
 
 .dataTable tbody tr:last-child td {
@@ -320,7 +406,7 @@
   align-items: center;
   justify-content: center;
   width: fit-content;
-  padding: 4px 9px;
+  padding: var(--badge-padding);
   font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
   border: 1px solid transparent;
@@ -591,7 +677,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 34px;
+  min-height: var(--btn-height-sm);
   padding: 0 var(--space-3);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
@@ -698,6 +784,7 @@
   justify-content: center;
   padding: var(--space-6);
   background: var(--overlay-bg);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
   backdrop-filter: blur(10px) saturate(1.2);
   animation: warehouseModalFade var(--duration-base) var(--ease-out) both;
 }
@@ -722,21 +809,27 @@
 .dialogHeader {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
   padding-bottom: var(--space-4);
   margin-bottom: var(--space-5);
   border-bottom: 1px solid var(--color-border-light);
 }
 
+/* Spacing is owned by the flex gap above; clear child margins so the
+   header rhythm stays even instead of stacking gap + margins. */
+.dialogHeader .eyebrow {
+  margin-bottom: 0;
+}
+
 .dialogHeader h2 {
-  margin: var(--space-1) 0 0;
+  margin: 0;
   font-family: var(--font-display);
   font-size: var(--text-xl);
   letter-spacing: var(--tracking-tight);
 }
 
 .dialogSubtitle {
-  margin: var(--space-2) 0 0;
+  margin: 0;
   color: var(--color-text-muted);
   font-size: var(--text-xs);
 }
@@ -771,15 +864,19 @@
 .fieldInput {
   width: 100%;
   height: var(--input-height);
-  padding: 0 var(--space-3);
+  padding: 0 var(--input-padding-x);
   color: var(--input-text);
   background: var(--input-bg);
-  border: 1px solid var(--input-border);
+  border: 1.5px solid var(--input-border);
   border-radius: var(--input-radius);
   outline: 0;
   transition:
     border-color var(--duration-base) var(--ease-out),
     box-shadow var(--duration-base) var(--ease-out);
+}
+
+.fieldInput:hover:not(:focus) {
+  border-color: var(--color-accent-hover);
 }
 
 .fieldInput:focus {
@@ -801,10 +898,10 @@
 .fieldTextarea {
   width: 100%;
   min-height: 84px;
-  padding: var(--space-3);
+  padding: var(--space-3) var(--input-padding-x);
   color: var(--input-text);
   background: var(--input-bg);
-  border: 1px solid var(--input-border);
+  border: 1.5px solid var(--input-border);
   border-radius: var(--input-radius);
   outline: 0;
   font: inherit;
@@ -812,6 +909,10 @@
   transition:
     border-color var(--duration-base) var(--ease-out),
     box-shadow var(--duration-base) var(--ease-out);
+}
+
+.fieldTextarea:hover:not(:focus) {
+  border-color: var(--color-accent-hover);
 }
 
 .fieldTextarea:focus {
@@ -854,7 +955,7 @@
 }
 
 .manifestRemoveButton:disabled {
-  opacity: 0.45;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
@@ -891,7 +992,7 @@
 }
 
 .segmentedButton {
-  min-height: 36px;
+  min-height: var(--btn-height-sm);
   padding: 0 var(--space-2);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
@@ -946,7 +1047,7 @@
 .smallButton:disabled,
 .dangerButton:disabled,
 .segmentedButton:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
@@ -1022,6 +1123,101 @@
     grid-template-columns: 1fr;
   }
 
+  /* ── STACKED DATA TABLE ──────────────────────────────────
+     Below 768px a wide multi-column table forces endless
+     horizontal scrolling, so each row collapses into a labelled
+     card. Column headers move into per-cell data-label prefixes. */
+  .tableWrap {
+    overflow-x: visible;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .dataTable {
+    min-width: 0;
+    font-size: var(--text-sm);
+  }
+
+  .dataTable thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .dataTable tbody,
+  .dataTable tr,
+  .dataTable td {
+    display: block;
+    width: 100%;
+  }
+
+  .dataTable tr {
+    margin-bottom: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--card-bg);
+    border: 1px solid var(--table-border);
+    border-radius: var(--radius-lg);
+  }
+
+  .dataTable tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .dataTable td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
+    text-align: right;
+    border-bottom: 1px solid var(--color-border-light);
+  }
+
+  .dataTable tbody tr:hover td,
+  .dataTable .activeRow td {
+    background: transparent;
+  }
+
+  .dataTable td:last-child {
+    border-bottom: 0;
+  }
+
+  .dataTable td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-2xs);
+    font-weight: var(--weight-medium);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    text-align: left;
+  }
+
+  /* Leading cell becomes the card's title block */
+  .dataTable td:first-child {
+    flex-direction: column;
+    align-items: stretch;
+    padding-top: 0;
+    text-align: left;
+  }
+
+  .dataTable td:first-child::before {
+    display: none;
+  }
+
+  /* Selected row keeps its accent as a rail on the whole card */
+  .dataTable .activeRow {
+    border-color: var(--ice-deep);
+    box-shadow: inset 3px 0 0 var(--ice-deep);
+  }
+
+  .dataTable .activeRow td:first-child {
+    box-shadow: none;
+  }
+
   .panelHeader,
   .detailHeader {
     align-items: stretch;
@@ -1094,6 +1290,10 @@
 
   .primaryButton:hover {
     transform: none;
+  }
+
+  .primaryButton:hover::before {
+    left: -100%;
   }
 
   .modalBackdrop,

@@ -38,3 +38,8 @@ storage/warehouse/*.sqlite-*
 storage/logistics/*.sqlite
 storage/logistics/*.sqlite-*
 storage/backups/
+
+
+
+# Local tool / pnpm cache
+.tools/pnpm-store/

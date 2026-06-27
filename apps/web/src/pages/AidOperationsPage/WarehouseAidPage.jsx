@@ -472,22 +472,35 @@ function WarehouseAidPage() {
                       }
                       key={item.id}
                       onClick={() => setSelectedId(item.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedId(item.id);
+                        }
+                      }}
+                      tabIndex={0}
+                      aria-current={
+                        selectedItem && item.id === selectedItem.id
+                          ? 'true'
+                          : undefined
+                      }
+                      aria-label={`Позиція ${item.name}, ${item.code}`}
                     >
-                      <td>
+                      <td data-label="Позиція">
                         <span className={styles.mainCell}>
                           <strong>{item.name}</strong>
                           <span>{item.code}</span>
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Категорія">
                         <span className={styles.categoryBadge}>
                           {item.category}
                         </span>
                       </td>
-                      <td className={styles.nowrap}>
+                      <td className={styles.nowrap} data-label="Кількість">
                         {item.quantity} {item.unit}
                       </td>
-                      <td>
+                      <td data-label="Стан">
                         <span
                           className={`${styles.statusBadge} ${
                             styles[`status-${status.tone}`]
@@ -499,9 +512,9 @@ function WarehouseAidPage() {
                           {item.condition || '—'}
                         </div>
                       </td>
-                      <td>{item.location || '—'}</td>
-                      <td>{getReserveLabel(item)}</td>
-                      <td>
+                      <td data-label="Місце зберігання">{item.location || '—'}</td>
+                      <td data-label="Резерв">{getReserveLabel(item)}</td>
+                      <td data-label="Видати зараз">
                         <span className={styles.availability}>
                           <strong>
                             {item.availableNow} {item.unit}

@@ -485,8 +485,21 @@ function LogisticsTransfersPage() {
                       }
                       key={transfer.id}
                       onClick={() => setSelectedId(transfer.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setSelectedId(transfer.id);
+                        }
+                      }}
+                      tabIndex={0}
+                      aria-current={
+                        selectedTransfer && transfer.id === selectedTransfer.id
+                          ? 'true'
+                          : undefined
+                      }
+                      aria-label={`Передача ${transfer.code}, ${transfer.recipient}`}
                     >
-                      <td>
+                      <td data-label="Передача">
                         <span className={styles.mainCell}>
                           <strong>{transfer.code}</strong>
                           <span>
@@ -494,11 +507,13 @@ function LogisticsTransfersPage() {
                           </span>
                         </span>
                       </td>
-                      <td>{transfer.route}</td>
-                      <td>{transfer.recipient}</td>
-                      <td>{transfer.driver}</td>
-                      <td className={styles.nowrap}>{transfer.transferDate}</td>
-                      <td>
+                      <td data-label="Маршрут">{transfer.route}</td>
+                      <td data-label="Отримувач">{transfer.recipient}</td>
+                      <td data-label="Водій / волонтер">{transfer.driver}</td>
+                      <td className={styles.nowrap} data-label="Дата">
+                        {transfer.transferDate}
+                      </td>
+                      <td data-label="Статус">
                         <span
                           className={`${styles.statusBadge} ${
                             styles[`status-${status.tone}`]
@@ -507,7 +522,7 @@ function LogisticsTransfersPage() {
                           {status.label}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Акт">
                         <span
                           className={`${styles.fileBadge} ${getFileBadgeClass(
                             act.tone,
@@ -516,7 +531,7 @@ function LogisticsTransfersPage() {
                           {act.label}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Фото">
                         <span
                           className={`${styles.fileBadge} ${getFileBadgeClass(
                             photo.tone,
@@ -525,7 +540,7 @@ function LogisticsTransfersPage() {
                           {photo.label}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Зв'язки">
                         <span className={styles.mutedCell}>
                           {transfer.requestId || '—'}
                           <br />
