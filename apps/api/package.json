@@ -1,12 +1,19 @@
 {
+  "name": "@avku/api",
+  "private": true,
+  "type": "module",
   "scripts": {
     "start": "tsx src/main.ts",
-    "check": "tsx src/main.ts --check"
+    "check": "tsx src/main.ts --check",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "sharp": "^0.35.1"
   },
   "devDependencies": {
-    "tsx": "^4.22.4"
+    "@types/node": "^22.10.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7.0"
   }
 }

@@ -8,14 +8,14 @@ services:
     command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm start"
     environment:
       PORT: "3001"
-      CERTIFICATES_STORAGE_ROOT: /data/certificates
+      DATA_ROOT: /data
       CERTIFICATES_TEMPLATE_DIRECTORY: /app/storage/certificates/templates/volunteer-card-v1
       CERTIFICATES_LEGACY_REGISTRY_PATH: /app/storage/certificates/registry.json
       NODE_OPTIONS: --no-warnings=ExperimentalWarning
     volumes:
       - ./:/app
       - api-node-modules:/app/apps/api/node_modules
-      - certificates-data:/data/certificates
+      - app-data:/data
     ports:
       - "3001:3001"
 
@@ -47,6 +47,6 @@ services:
       - web
 
 volumes:
-  certificates-data:
+  app-data:
   api-node-modules:
   web-node-modules:

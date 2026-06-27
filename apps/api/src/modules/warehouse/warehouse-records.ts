@@ -1,8 +1,12 @@
-import path from "node:path";
-import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
+import {
+  getNumber,
+  openSqliteDatabase,
+  resolveDatabasePath,
+  runInTransaction,
+} from "../../db/sqlite";
 import type {
   WarehouseItem,
   WarehouseItemPayload,
@@ -212,13 +216,6 @@ function rowToMovement(row: Record<string, unknown>): WarehouseMovement {
   };
 }
 
-function getNumber(
-  row: Record<string, unknown> | undefined,
-  key: string,
-): number {
-  return Number(row?.[key] ?? 0);
-}
-
 function toRepositoryError(error: unknown): Error {
   if (error instanceof Error) {
     if (
@@ -244,7 +241,7 @@ export class WarehouseRepository {
 
   constructor(options: WarehouseRepositoryOptions) {
     this.storageRoot = options.storageRoot;
-    this.databasePath = path.join(
+    this.databasePath = resolveDatabasePath(
       options.storageRoot,
       "warehouse.sqlite",
     );
@@ -303,10 +300,10 @@ export class WarehouseRepository {
     const now = new Date().toISOString();
     const id = randomUUID();
     const database = await this.getDatabase();
-    let createdItem: WarehouseItem | null = null;
+    let createdItem: WarehouseItem;
 
     try {
-      await this.runInTransaction(database, async () => {
+      createdItem = await runInTransaction(database, async () => {
         const code = this.generateCode(database, normalized.category);
         const item: WarehouseItem = {
           id,
@@ -326,13 +323,14 @@ export class WarehouseRepository {
           meta: `Початковий залишок: ${normalized.quantity} ${normalized.unit}`,
           createdAt: now,
         });
-        createdItem = item;
+
+        return item;
       });
     } catch (error) {
       throw toRepositoryError(error);
     }
 
-    return this.get((createdItem as WarehouseItem).id);
+    return this.get(createdItem.id);
   }
 
   async update(
@@ -343,7 +341,7 @@ export class WarehouseRepository {
     const database = await this.getDatabase();
 
     try {
-      await this.runInTransaction(database, async () => {
+      await runInTransaction(database, async () => {
         const existing = this.findItem(database, id);
         const updated: WarehouseItem = {
           ...existing,
@@ -363,7 +361,7 @@ export class WarehouseRepository {
   async remove(id: string): Promise<void> {
     const database = await this.getDatabase();
 
-    await this.runInTransaction(database, async () => {
+    await runInTransaction(database, async () => {
       this.findItem(database, id);
       database.prepare(`
         DELETE FROM warehouse_items
@@ -378,7 +376,7 @@ export class WarehouseRepository {
   ): Promise<WarehouseItemResponse> {
     const database = await this.getDatabase();
 
-    await this.runInTransaction(database, async () => {
+    await runInTransaction(database, async () => {
       const existing = this.findItem(database, id);
       const { item, movement } = this.applyMovement(existing, payload);
 
@@ -523,19 +521,15 @@ export class WarehouseRepository {
       return this.database;
     }
 
-    await mkdir(this.storageRoot, { recursive: true });
+    this.database = await openSqliteDatabase({
+      storageRoot: this.storageRoot,
+      databasePath: this.databasePath,
+      migrate: (database) => {
+        this.migrateDatabase(database);
+      },
+    });
 
-    const database = new DatabaseSync(this.databasePath);
-
-    database.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA foreign_keys = ON;
-      PRAGMA busy_timeout = 5000;
-    `);
-    this.migrateDatabase(database);
-    this.database = database;
-
-    return database;
+    return this.database;
   }
 
   private migrateDatabase(database: DatabaseSync): void {
@@ -620,29 +614,6 @@ export class WarehouseRepository {
         meta: `Початковий залишок: ${seed.quantity} ${seed.unit}`,
         createdAt: now,
       });
-    }
-  }
-
-  private async runInTransaction<T>(
-    database: DatabaseSync,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    database.exec("BEGIN IMMEDIATE");
-
-    try {
-      const result = await operation();
-
-      database.exec("COMMIT");
-
-      return result;
-    } catch (error) {
-      try {
-        database.exec("ROLLBACK");
-      } catch {
-        // Keep the original failure visible.
-      }
-
-      throw error;
     }
   }
 

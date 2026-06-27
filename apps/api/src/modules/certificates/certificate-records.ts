@@ -10,6 +10,11 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import sharp from "sharp";
 
+import {
+  openSqliteDatabase,
+  runInTransaction,
+} from "../../db/sqlite";
+
 import { renderCertificate } from "./certificate-renderer";
 import { createPdfFromPng } from "./certificate-pdf";
 import type {
@@ -486,7 +491,7 @@ export class CertificateRepository {
     const database = await this.getDatabase();
 
     try {
-      await this.runInTransaction(
+      await runInTransaction(
         database,
         async () => {
           await rename(
@@ -540,7 +545,7 @@ export class CertificateRepository {
     };
 
     try {
-      await this.runInTransaction(
+      await runInTransaction(
         database,
         async () => {
           if (pendingPhoto) {
@@ -581,17 +586,14 @@ export class CertificateRepository {
 
   async renew(id: string): Promise<CertificateRecordResponse> {
     const database = await this.getDatabase();
-    let updatedRecord: CertificateRecord | null = null;
-
-    await this.runInTransaction(
+    const updatedRecord = await runInTransaction(
       database,
       async () => {
         const record = this.findRecordInDatabase(
           database,
           id,
         );
-
-        updatedRecord = {
+        const updated: CertificateRecord = {
           ...record,
           validUntil: addOneYear(record.validUntil),
           updatedAt: new Date().toISOString(),
@@ -599,22 +601,22 @@ export class CertificateRepository {
 
         this.updateRecord(
           database,
-          updatedRecord,
+          updated,
         );
+
+        return updated;
       },
     );
 
-    return toCertificateResponse(updatedRecord as CertificateRecord);
+    return toCertificateResponse(updatedRecord);
   }
 
   async remove(id: string): Promise<void> {
     const database = await this.getDatabase();
-    let removedRecord: CertificateRecord | null = null;
-
-    await this.runInTransaction(
+    const removedRecord = await runInTransaction(
       database,
       async () => {
-        removedRecord = this.findRecordInDatabase(
+        const record = this.findRecordInDatabase(
           database,
           id,
         );
@@ -622,6 +624,8 @@ export class CertificateRepository {
           DELETE FROM certificate_records
           WHERE id = ?
         `).run(id);
+
+        return record;
       },
     );
 
@@ -720,18 +724,16 @@ export class CertificateRepository {
 
     await this.ensureDirectories();
 
-    const database = new DatabaseSync(this.databasePath);
+    this.database = await openSqliteDatabase({
+      storageRoot: path.dirname(this.databasePath),
+      databasePath: this.databasePath,
+      migrate: (database) => {
+        this.migrateDatabase(database);
+      },
+    });
+    await this.migrateLegacyRegistry(this.database);
 
-    database.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA foreign_keys = ON;
-      PRAGMA busy_timeout = 5000;
-    `);
-    this.migrateDatabase(database);
-    this.database = database;
-    await this.migrateLegacyRegistry(database);
-
-    return database;
+    return this.database;
   }
 
   private migrateDatabase(database: DatabaseSync): void {
@@ -785,7 +787,7 @@ export class CertificateRepository {
       return;
     }
 
-    await this.runInTransaction(
+    await runInTransaction(
       database,
       async () => {
         for (const record of legacyRecords) {
@@ -872,29 +874,6 @@ export class CertificateRepository {
         ? source.updatedAt
         : new Date().toISOString(),
     };
-  }
-
-  private async runInTransaction<T>(
-    database: DatabaseSync,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    database.exec("BEGIN IMMEDIATE");
-
-    try {
-      const result = await operation();
-
-      database.exec("COMMIT");
-
-      return result;
-    } catch (error) {
-      try {
-        database.exec("ROLLBACK");
-      } catch {
-        // Keep the original failure visible.
-      }
-
-      throw error;
-    }
   }
 
   private insertRecord(

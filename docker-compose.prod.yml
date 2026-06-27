@@ -1,23 +1,17 @@
 services:
   api:
-    image: avku-node:22-bookworm-fonts
+    image: avku-api:latest
     build:
       context: .
-      dockerfile: infra/node/Dockerfile
-    working_dir: /app/apps/api
-    command: sh -lc "corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm start"
+      dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: "3001"
-      CERTIFICATES_STORAGE_ROOT: /data/certificates
-      CERTIFICATES_TEMPLATE_DIRECTORY: /app/storage/certificates/templates/volunteer-card-v1
-      CERTIFICATES_LEGACY_REGISTRY_PATH: /app/storage/certificates/registry.json
+      DATA_ROOT: /data
       NODE_OPTIONS: --no-warnings=ExperimentalWarning
     volumes:
-      - ./:/app
-      - api-node-modules:/app/apps/api/node_modules
-      - certificates-data:/data/certificates
+      - app-data:/data
 
   web:
     image: avku-node:22-bookworm-fonts
@@ -47,6 +41,5 @@ services:
       - web
 
 volumes:
-  certificates-data:
-  api-node-modules:
+  app-data:
   web-node-modules:

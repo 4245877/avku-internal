@@ -1,8 +1,12 @@
-import path from "node:path";
-import { mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
+import {
+  getNumber,
+  openSqliteDatabase,
+  resolveDatabasePath,
+  runInTransaction,
+} from "../../db/sqlite";
 import type {
   DocumentState,
   LogisticsEvent,
@@ -341,13 +345,6 @@ function rowToEvent(row: Record<string, unknown>): LogisticsEvent {
   };
 }
 
-function getNumber(
-  row: Record<string, unknown> | undefined,
-  key: string,
-): number {
-  return Number(row?.[key] ?? 0);
-}
-
 function toRepositoryError(error: unknown): Error {
   if (error instanceof Error) {
     if (
@@ -373,7 +370,7 @@ export class LogisticsRepository {
 
   constructor(options: LogisticsRepositoryOptions) {
     this.storageRoot = options.storageRoot;
-    this.databasePath = path.join(
+    this.databasePath = resolveDatabasePath(
       options.storageRoot,
       "logistics.sqlite",
     );
@@ -434,7 +431,7 @@ export class LogisticsRepository {
     const database = await this.getDatabase();
 
     try {
-      await this.runInTransaction(database, async () => {
+      await runInTransaction(database, async () => {
         const { code, seq } = this.generateCode(database);
         const transfer: Transfer = {
           id,
@@ -470,7 +467,7 @@ export class LogisticsRepository {
     const database = await this.getDatabase();
 
     try {
-      await this.runInTransaction(database, async () => {
+      await runInTransaction(database, async () => {
         const existing = this.findTransfer(database, id);
         const updated: Transfer = {
           ...existing,
@@ -490,7 +487,7 @@ export class LogisticsRepository {
   async remove(id: string): Promise<void> {
     const database = await this.getDatabase();
 
-    await this.runInTransaction(database, async () => {
+    await runInTransaction(database, async () => {
       this.findTransfer(database, id);
       database.prepare(`
         DELETE FROM logistics_transfers
@@ -505,7 +502,7 @@ export class LogisticsRepository {
   ): Promise<TransferResponse> {
     const database = await this.getDatabase();
 
-    await this.runInTransaction(database, async () => {
+    await runInTransaction(database, async () => {
       const existing = this.findTransfer(database, id);
       const { transfer, event } = this.applyEvent(existing, payload);
 
@@ -643,19 +640,15 @@ export class LogisticsRepository {
       return this.database;
     }
 
-    await mkdir(this.storageRoot, { recursive: true });
+    this.database = await openSqliteDatabase({
+      storageRoot: this.storageRoot,
+      databasePath: this.databasePath,
+      migrate: (database) => {
+        this.migrateDatabase(database);
+      },
+    });
 
-    const database = new DatabaseSync(this.databasePath);
-
-    database.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA foreign_keys = ON;
-      PRAGMA busy_timeout = 5000;
-    `);
-    this.migrateDatabase(database);
-    this.database = database;
-
-    return database;
+    return this.database;
   }
 
   private migrateDatabase(database: DatabaseSync): void {
@@ -756,29 +749,6 @@ export class LogisticsRepository {
         meta: `Маршрут: ${seed.route}`,
         createdAt: now,
       });
-    }
-  }
-
-  private async runInTransaction<T>(
-    database: DatabaseSync,
-    operation: () => Promise<T>,
-  ): Promise<T> {
-    database.exec("BEGIN IMMEDIATE");
-
-    try {
-      const result = await operation();
-
-      database.exec("COMMIT");
-
-      return result;
-    } catch (error) {
-      try {
-        database.exec("ROLLBACK");
-      } catch {
-        // Keep the original failure visible.
-      }
-
-      throw error;
     }
   }
 

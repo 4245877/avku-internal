@@ -5,9 +5,9 @@ import {
   readFile,
 } from "node:fs/promises";
 
-import sharp, {
-  type OverlayOptions,
-} from "sharp";
+import sharp from "sharp";
+
+type OverlayOptions = sharp.OverlayOptions;
 
 import type {
   CertificateLayout,
