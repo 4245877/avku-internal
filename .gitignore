@@ -38,6 +38,7 @@ storage/warehouse/*.sqlite-*
 storage/logistics/*.sqlite
 storage/logistics/*.sqlite-*
 storage/backups/
+runtime/
 
 
 
@@ -52,3 +53,5 @@ storage/backups/
 apps/web/.vite-cert-check/
 apps/web/vite-*.log
 apps/web/certificates-screenshot.png
+
+.pnpm-store/

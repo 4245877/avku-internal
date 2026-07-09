@@ -1,45 +1,108 @@
 services:
   api:
-    image: avku-api:latest
+    image: avku-internal-api:latest
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
+    env_file:
+      - ./.env
     environment:
-      NODE_ENV: production
-      PORT: "3001"
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${AVKU_API_PORT:-3001}
       DATA_ROOT: /data
       NODE_OPTIONS: --no-warnings=ExperimentalWarning
     volumes:
-      - app-data:/data
+      - ./runtime/data:/data
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - avku_internal
 
   web:
-    image: avku-node:22-bookworm-fonts
+    image: avku-internal-node:22-bookworm-fonts
     build:
       context: .
       dockerfile: infra/node/Dockerfile
     working_dir: /app/apps/web
-    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm run build && pnpm run preview -- --host 0.0.0.0 --port 5173"
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm run build && pnpm exec vite preview --host 0.0.0.0 --port 5173"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
+    env_file:
+      - ./.env
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-production}
+      VITE_API_URL: ${AVKU_WEB_API_URL:-/api}
     volumes:
       - ./:/app
       - web-node-modules:/app/apps/web/node_modules
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    expose:
+      - "5173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - avku_internal
 
   nginx:
     image: nginx:1.27-alpine
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
     volumes:
       - ./infra/nginx/app.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "80:80"
+      - "${AVKU_BIND_IP:-192.168.0.151}:${AVKU_HTTP_PORT:-18080}:80"
     depends_on:
-      - api
-      - web
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - avku_internal
+
+networks:
+  avku_internal:
+    driver: bridge
 
 volumes:
-  app-data:
   web-node-modules:
