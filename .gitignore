@@ -20,6 +20,8 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+# Токен Cloudflare Tunnel (шаблон .env.cloudflare.example — в git)
+.env.cloudflare
 
 # Системные файлы
 .DS_Store

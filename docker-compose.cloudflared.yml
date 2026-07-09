@@ -1,0 +1,42 @@
+# Cloudflare Tunnel для внешнего доступа к avku-internal через Cloudflare Access.
+#
+# Отдельный compose-проект, полностью изолированный от SKUFnya:
+#   - не публикует НИ ОДНОГО порта на хосте;
+#   - подключается только к существующей сети avku-internal;
+#   - соединение с Cloudflare исходящее (outbound), порты на роутере не нужны.
+#
+# Запуск (ТОЛЬКО после настройки туннеля в Cloudflare и создания .env.cloudflare):
+#   docker compose -p avku-cloudflared -f docker-compose.cloudflared.yml --env-file .env.cloudflare up -d
+#
+# Остановка/откат (без -v, volumes здесь нет):
+#   docker compose -p avku-cloudflared -f docker-compose.cloudflared.yml down
+#
+# Проверка после запуска:
+#   docker logs avku-cloudflared-cloudflared-1 --tail 20
+#   bash scripts/verify-access.sh avku.<домен>
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    environment:
+      # Токен берётся из .env.cloudflare (chmod 600, файл в .gitignore).
+      # Значение задаётся при создании туннеля в Cloudflare Zero Trust.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in .env.cloudflare}
+    networks:
+      - avku_internal
+
+networks:
+  avku_internal:
+    external: true
+    name: avku-internal_avku_internal
