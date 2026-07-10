@@ -71,6 +71,8 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export interface CertificateRecord {
   id: string;
   fullName: string;
+  firstNameEn: string;
+  lastNameEn: string;
   certificateNumber: string;
   issuedAt: string;
   validUntil: string;
@@ -82,6 +84,7 @@ export interface CertificateRecord {
 }
 
 export interface CertificateRecordResponse extends CertificateRecord {
+  fullNameEn: string;
   photoUrl: string;
   exportUrls: {
     png: string;
@@ -91,6 +94,8 @@ export interface CertificateRecordResponse extends CertificateRecord {
 
 export interface CertificatePayload {
   fullName?: unknown;
+  firstNameEn?: unknown;
+  lastNameEn?: unknown;
   certificateNumber?: unknown;
   issuedAt?: unknown;
   validUntil?: unknown;
@@ -144,6 +149,8 @@ export interface CertificateTemplateDefinition {
 
 interface NormalizedCertificatePayload {
   fullName: string;
+  firstNameEn: string;
+  lastNameEn: string;
   certificateNumber: string;
   issuedAt: string;
   validUntil: string;
@@ -250,6 +257,22 @@ function normalizeRequiredText(
   }
 
   return normalizedValue;
+}
+
+function normalizeOptionalText(
+  value: unknown,
+  fieldName: string,
+  fallback = "",
+): string {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`${fieldName}: значення має бути текстом.`);
+  }
+
+  return normalizeWhitespace(value);
 }
 
 function normalizeCrop(
@@ -432,6 +455,13 @@ function normalizeCertificatePayload(
   payload: CertificatePayload,
   fallbackCrop: CertificatePhotoCrop = DEFAULT_CROP,
   fallbackTemplateId = DEFAULT_CERTIFICATE_TEMPLATE_ID,
+  fallbackEnglishName: Pick<
+    CertificateRecord,
+    "firstNameEn" | "lastNameEn"
+  > = {
+    firstNameEn: "",
+    lastNameEn: "",
+  },
 ): NormalizedCertificatePayload {
   const fullName = normalizeRequiredText(
     payload.fullName,
@@ -451,6 +481,16 @@ function normalizeCertificatePayload(
 
   return {
     fullName,
+    firstNameEn: normalizeOptionalText(
+      payload.firstNameEn,
+      "Ім'я англійською",
+      fallbackEnglishName.firstNameEn,
+    ),
+    lastNameEn: normalizeOptionalText(
+      payload.lastNameEn,
+      "Прізвище англійською",
+      fallbackEnglishName.lastNameEn,
+    ),
     certificateNumber,
     issuedAt,
     validUntil,
@@ -492,6 +532,8 @@ function rowToRecord(row: Record<string, unknown>): CertificateRecord {
   return {
     id: String(row.id ?? ""),
     fullName: String(row.full_name ?? ""),
+    firstNameEn: String(row.first_name_en ?? ""),
+    lastNameEn: String(row.last_name_en ?? ""),
     certificateNumber: String(row.certificate_number ?? ""),
     issuedAt: String(row.issued_at ?? ""),
     validUntil: String(row.valid_until ?? ""),
@@ -539,6 +581,9 @@ export function toCertificateResponse(
 
   return {
     ...record,
+    fullNameEn: [record.firstNameEn, record.lastNameEn]
+      .filter(Boolean)
+      .join(" "),
     photoUrl: `/api/certificates/photos/${encodedPhoto}`,
     exportUrls: {
       png: `/api/certificates/${encodedId}/export.png`,
@@ -691,8 +736,10 @@ export class CertificateRepository {
 
       whereClause =
         "WHERE (full_name LIKE ? ESCAPE '\\' OR " +
+        "first_name_en LIKE ? ESCAPE '\\' OR " +
+        "last_name_en LIKE ? ESCAPE '\\' OR " +
         "certificate_number LIKE ? ESCAPE '\\')";
-      parameters.push(pattern, pattern);
+      parameters.push(pattern, pattern, pattern, pattern);
     }
 
     let limitClause = "";
@@ -791,6 +838,7 @@ export class CertificateRepository {
       payload,
       existingRecord.photoCrop,
       existingRecord.templateId,
+      existingRecord,
     );
     await this.assertTemplateExists(normalizedPayload.templateId);
     const shouldReplacePhoto =
@@ -927,15 +975,36 @@ export class CertificateRepository {
     );
   }
 
-  async renderPng(id: string): Promise<string> {
+  async renderPng(
+    id: string,
+    templateId?: string,
+  ): Promise<string> {
     const database = await this.getDatabase();
     const record = this.findRecordInDatabase(
       database,
       id,
     );
-    const outputPath = this.getGeneratedPath(record.id);
-    const nameParts = splitFullName(record.fullName);
-    const templateDirectory = this.getTemplateDirectory(record.templateId);
+    const selectedTemplateId = normalizeTemplateId(
+      templateId,
+      record.templateId,
+    );
+    const template = await this.getTemplate(selectedTemplateId);
+    const outputPath = this.getGeneratedPath(
+      record.id,
+      selectedTemplateId,
+    );
+    const nameParts = template.locale.toLowerCase() === "en" &&
+        record.firstNameEn && record.lastNameEn
+      ? {
+        // The English artwork prints the given name on the first line and the
+        // surname on the second. RenderCertificateInput keeps legacy field
+        // names tied to the Ukrainian surname-first layout, so map explicitly.
+        lastName: record.firstNameEn,
+        firstName: record.lastNameEn,
+        middleName: "",
+      }
+      : splitFullName(record.fullName);
+    const templateDirectory = this.getTemplateDirectory(selectedTemplateId);
 
     try {
       await renderCertificate({
@@ -965,9 +1034,15 @@ export class CertificateRepository {
     return outputPath;
   }
 
-  async renderPdf(id: string): Promise<Buffer> {
+  async renderPdf(
+    id: string,
+    templateId?: string,
+  ): Promise<Buffer> {
     return createPdfFromPng(
-      await this.renderPng(id),
+      await this.renderPng(
+        id,
+        templateId,
+      ),
     );
   }
 
@@ -1125,6 +1200,8 @@ export class CertificateRepository {
       CREATE TABLE IF NOT EXISTS certificate_records (
         id TEXT PRIMARY KEY NOT NULL,
         full_name TEXT NOT NULL CHECK (length(trim(full_name)) > 0),
+        first_name_en TEXT NOT NULL DEFAULT '',
+        last_name_en TEXT NOT NULL DEFAULT '',
         certificate_number TEXT NOT NULL COLLATE NOCASE UNIQUE
           CHECK (length(trim(certificate_number)) > 0),
         issued_at TEXT NOT NULL
@@ -1149,8 +1226,29 @@ export class CertificateRepository {
       CREATE INDEX IF NOT EXISTS idx_certificate_records_valid_until
         ON certificate_records(valid_until);
 
-      PRAGMA user_version = 1;
     `);
+
+    const columns = new Set(
+      (database.prepare("PRAGMA table_info(certificate_records)").all() as
+        Record<string, unknown>[])
+        .map((column) => String(column.name ?? "")),
+    );
+
+    if (!columns.has("first_name_en")) {
+      database.exec(
+        "ALTER TABLE certificate_records " +
+        "ADD COLUMN first_name_en TEXT NOT NULL DEFAULT ''",
+      );
+    }
+
+    if (!columns.has("last_name_en")) {
+      database.exec(
+        "ALTER TABLE certificate_records " +
+        "ADD COLUMN last_name_en TEXT NOT NULL DEFAULT ''",
+      );
+    }
+
+    database.exec("PRAGMA user_version = 2");
   }
 
   private async migrateLegacyRegistry(database: DatabaseSync): Promise<void> {
@@ -1237,6 +1335,14 @@ export class CertificateRepository {
         source.fullName,
         "ПІБ",
       ),
+      firstNameEn: normalizeOptionalText(
+        source.firstNameEn,
+        "Ім'я англійською",
+      ),
+      lastNameEn: normalizeOptionalText(
+        source.lastNameEn,
+        "Прізвище англійською",
+      ),
       certificateNumber: normalizeRequiredText(
         source.certificateNumber,
         "Номер посвідчення",
@@ -1266,6 +1372,8 @@ export class CertificateRepository {
       INSERT INTO certificate_records (
         id,
         full_name,
+        first_name_en,
+        last_name_en,
         certificate_number,
         issued_at,
         valid_until,
@@ -1277,10 +1385,12 @@ export class CertificateRepository {
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.fullName,
+      record.firstNameEn,
+      record.lastNameEn,
       record.certificateNumber,
       record.issuedAt,
       record.validUntil,
@@ -1302,6 +1412,8 @@ export class CertificateRepository {
       UPDATE certificate_records
       SET
         full_name = ?,
+        first_name_en = ?,
+        last_name_en = ?,
         certificate_number = ?,
         issued_at = ?,
         valid_until = ?,
@@ -1314,6 +1426,8 @@ export class CertificateRepository {
       WHERE id = ?
     `).run(
       record.fullName,
+      record.firstNameEn,
+      record.lastNameEn,
       record.certificateNumber,
       record.issuedAt,
       record.validUntil,
@@ -1360,10 +1474,17 @@ export class CertificateRepository {
     }
   }
 
-  private getGeneratedPath(id: string): string {
+  private getGeneratedPath(
+    id: string,
+    templateId?: string,
+  ): string {
+    const suffix = templateId
+      ? `-${normalizeTemplateId(templateId)}`
+      : "";
+
     return path.join(
       this.generatedDirectory,
-      `${id}.png`,
+      `${id}${suffix}.png`,
     );
   }
 

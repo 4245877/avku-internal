@@ -294,7 +294,10 @@ export async function handleCertificateRequest(
     }
 
     if (request.method === "GET" && action === "export.png") {
-      const filePath = await repository.renderPng(id);
+      const filePath = await repository.renderPng(
+        id,
+        url.searchParams.get("templateId") ?? undefined,
+      );
       const content = await readFile(filePath);
 
       response.writeHead(
@@ -310,7 +313,10 @@ export async function handleCertificateRequest(
     }
 
     if (request.method === "GET" && action === "export.pdf") {
-      const content = await repository.renderPdf(id);
+      const content = await repository.renderPdf(
+        id,
+        url.searchParams.get("templateId") ?? undefined,
+      );
 
       response.writeHead(
         200,

@@ -70,6 +70,8 @@ export function getEmptyCertificateForm(templateId = DEFAULT_CERTIFICATE_TEMPLAT
   return {
     id: '',
     fullName: '',
+    firstNameEn: '',
+    lastNameEn: '',
     certificateNumber: '',
     issuedAt: getTodayInputDate(),
     validUntil: getDefaultValidUntil(),
@@ -89,6 +91,8 @@ export function createFormFromRecord(record) {
   return {
     id: record.id,
     fullName: record.fullName,
+    firstNameEn: record.firstNameEn || '',
+    lastNameEn: record.lastNameEn || '',
     certificateNumber: record.certificateNumber,
     issuedAt: record.issuedAt,
     validUntil: record.validUntil,
@@ -199,6 +203,16 @@ export function validateCertificateForm(form) {
     errors.fullName = 'Вкажіть ПІБ.';
   }
 
+  if (normalizeTemplateId(form.templateId).endsWith('-en')) {
+    if (!normalizeWhitespace(form.firstNameEn)) {
+      errors.firstNameEn = "Вкажіть ім'я англійською.";
+    }
+
+    if (!normalizeWhitespace(form.lastNameEn)) {
+      errors.lastNameEn = 'Вкажіть прізвище англійською.';
+    }
+  }
+
   if (!normalizeWhitespace(form.certificateNumber)) {
     errors.certificateNumber = 'Вкажіть номер посвідчення.';
   }
@@ -231,6 +245,8 @@ export function hasValidationErrors(errors) {
 export function buildCertificatePayload(form) {
   return {
     fullName: normalizeWhitespace(form.fullName),
+    firstNameEn: normalizeWhitespace(form.firstNameEn),
+    lastNameEn: normalizeWhitespace(form.lastNameEn),
     certificateNumber: normalizeWhitespace(form.certificateNumber),
     issuedAt: form.issuedAt,
     validUntil: form.validUntil,

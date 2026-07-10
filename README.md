@@ -1,3 +1,8 @@
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d --build
+
+
+
 # avku-internal
 
 Internal AVKU monorepo for operational modules: certificates, warehouse aid and logistics transfers. The API is a Node.js/TypeScript HTTP server without Express; the frontend is a React/Vite application.

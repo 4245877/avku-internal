@@ -295,8 +295,13 @@ function CertificatePreview({
     [form.photoCrop, imageSize, layout],
   );
   const nameParts = useMemo(
-    () => splitFullName(form.fullName),
-    [form.fullName],
+    () => template?.locale?.toLowerCase() === 'en'
+      ? {
+        lastName: form.firstNameEn,
+        firstAndMiddleName: form.lastNameEn,
+      }
+      : splitFullName(form.fullName),
+    [form.firstNameEn, form.fullName, form.lastNameEn, template?.locale],
   );
 
   return (

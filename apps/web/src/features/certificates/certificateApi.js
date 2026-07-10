@@ -108,6 +108,8 @@ function hasPhotoFile(payload) {
 
 function appendCertificateFields(formData, payload) {
   formData.append('fullName', payload.fullName ?? '');
+  formData.append('firstNameEn', payload.firstNameEn ?? '');
+  formData.append('lastNameEn', payload.lastNameEn ?? '');
   formData.append('certificateNumber', payload.certificateNumber ?? '');
   formData.append('issuedAt', payload.issuedAt ?? '');
   formData.append('validUntil', payload.validUntil ?? '');

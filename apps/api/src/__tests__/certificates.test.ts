@@ -81,6 +81,8 @@ async function api(
 function baseRecordPayload(templateId: string): Record<string, unknown> {
   return {
     fullName: "Шевченко Тарас Григорович",
+    firstNameEn: "Taras",
+    lastNameEn: "Shevchenko",
     certificateNumber: nextCertificateNumber(),
     issuedAt: "2026-06-19",
     validUntil: "2027-06-19",
@@ -235,8 +237,17 @@ test("create via JSON stores templateId=en and read returns it", async () => {
   );
 
   assert.equal(created.status, 201);
-  const record = created.json as { id: string; templateId: string };
+  const record = created.json as {
+    id: string;
+    templateId: string;
+    firstNameEn: string;
+    lastNameEn: string;
+    fullNameEn: string;
+  };
   assert.equal(record.templateId, EN);
+  assert.equal(record.firstNameEn, "Taras");
+  assert.equal(record.lastNameEn, "Shevchenko");
+  assert.equal(record.fullNameEn, "Taras Shevchenko");
 
   const fetched = await api("GET", `/api/certificates/${record.id}`);
   assert.equal(fetched.status, 200);
@@ -335,6 +346,20 @@ test("PNG/PDF export uses the stored template, not the default", async () => {
   assert.equal(pdfBytes.subarray(0, 5).toString("latin1"), "%PDF-");
 });
 
+test("a uk record can be rendered with the en template without changing it", async () => {
+  const record = (await api("POST", "/api/certificates", baseRecordPayload(UK)))
+    .json as { id: string; templateId: string };
+  const rendered = await fetch(
+    `${baseUrl}/api/certificates/${record.id}/export.png?templateId=${EN}`,
+  );
+
+  assert.equal(rendered.status, 200);
+  assert.ok((await rendered.arrayBuffer()).byteLength > 0);
+
+  const fetched = await api("GET", `/api/certificates/${record.id}`);
+  assert.equal((fetched.json as { templateId: string }).templateId, UK);
+});
+
 test("updating a record preserves the stored templateId when omitted", async () => {
   const created = (await api("POST", "/api/certificates", baseRecordPayload(EN)))
     .json as { id: string; certificateNumber: string; templateId: string };
@@ -348,7 +373,14 @@ test("updating a record preserves the stored templateId when omitted", async () 
   });
 
   assert.equal(updated.status, 200);
-  assert.equal((updated.json as { templateId: string }).templateId, EN);
+  const updatedRecord = updated.json as {
+    templateId: string;
+    firstNameEn: string;
+    lastNameEn: string;
+  };
+  assert.equal(updatedRecord.templateId, EN);
+  assert.equal(updatedRecord.firstNameEn, "Taras");
+  assert.equal(updatedRecord.lastNameEn, "Shevchenko");
 });
 
 test("concurrent creates all succeed (write transactions are serialized)", async () => {

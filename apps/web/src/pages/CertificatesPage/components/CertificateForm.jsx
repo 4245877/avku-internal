@@ -64,6 +64,34 @@ function CertificateForm({
         </label>
 
         <label className={styles.field}>
+          <span>Ім'я англійською</span>
+          <input
+            className={`${styles.input} ${errors.firstNameEn ? styles.inputError : ''}`}
+            value={form.firstNameEn}
+            onChange={(event) => onChange('firstNameEn', event.target.value)}
+            placeholder="First name"
+            aria-invalid={Boolean(errors.firstNameEn)}
+          />
+          {errors.firstNameEn ? (
+            <small className={styles.fieldError}>{errors.firstNameEn}</small>
+          ) : null}
+        </label>
+
+        <label className={styles.field}>
+          <span>Прізвище англійською</span>
+          <input
+            className={`${styles.input} ${errors.lastNameEn ? styles.inputError : ''}`}
+            value={form.lastNameEn}
+            onChange={(event) => onChange('lastNameEn', event.target.value)}
+            placeholder="Last name"
+            aria-invalid={Boolean(errors.lastNameEn)}
+          />
+          {errors.lastNameEn ? (
+            <small className={styles.fieldError}>{errors.lastNameEn}</small>
+          ) : null}
+        </label>
+
+        <label className={styles.field}>
           <span>Номер посвідчення</span>
           <input
             className={`${styles.input} ${errors.certificateNumber ? styles.inputError : ''}`}

@@ -18,6 +18,9 @@ export const LEGACY_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1';
  * @typedef {Object} CertificateRecord
  * @property {string} id
  * @property {string} fullName
+ * @property {string} firstNameEn
+ * @property {string} lastNameEn
+ * @property {string} fullNameEn
  * @property {string} certificateNumber
  * @property {string} issuedAt
  * @property {string} validUntil
@@ -32,6 +35,8 @@ export const LEGACY_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1';
  * @typedef {Object} CertificateFormValue
  * @property {string} id
  * @property {string} fullName
+ * @property {string} firstNameEn
+ * @property {string} lastNameEn
  * @property {string} certificateNumber
  * @property {string} issuedAt
  * @property {string} validUntil
