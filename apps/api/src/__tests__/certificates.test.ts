@@ -350,3 +350,77 @@ test("updating a record preserves the stored templateId when omitted", async () 
   assert.equal(updated.status, 200);
   assert.equal((updated.json as { templateId: string }).templateId, EN);
 });
+
+test("concurrent creates all succeed (write transactions are serialized)", async () => {
+  // Regression guard: writes share one synchronous SQLite connection whose
+  // BEGIN IMMEDIATE is held across an async photo rename. Without serialization
+  // an overlapping write fails with "cannot start a transaction within a
+  // transaction". Fire several at once and require every one to persist.
+  const concurrency = 8;
+  const responses = await Promise.all(
+    Array.from({ length: concurrency }, () =>
+      api("POST", "/api/certificates", baseRecordPayload(UK)),
+    ),
+  );
+
+  for (const response of responses) {
+    assert.equal(
+      response.status,
+      201,
+      `expected 201, got ${response.status}: ${JSON.stringify(response.json)}`,
+    );
+  }
+
+  const ids = new Set(
+    responses.map((response) => (response.json as { id: string }).id),
+  );
+  assert.equal(ids.size, concurrency, "every concurrent create got a unique id");
+});
+
+test("GET /api/certificates supports search and limit", async () => {
+  const marker = `Пошуковий-${Date.now()}`;
+  const payload = { ...baseRecordPayload(UK), fullName: marker };
+  const created = (await api("POST", "/api/certificates", payload)).json as {
+    id: string;
+  };
+
+  const found = await api(
+    "GET",
+    `/api/certificates?search=${encodeURIComponent(marker)}`,
+  );
+  assert.equal(found.status, 200);
+  const matches = found.json as { id: string; fullName: string }[];
+  assert.ok(
+    matches.some((record) => record.id === created.id),
+    "search returns the matching record",
+  );
+  assert.ok(
+    matches.every((record) => record.fullName.includes(marker)),
+    "search only returns matching records",
+  );
+
+  const limited = await api("GET", "/api/certificates?limit=1");
+  assert.equal(limited.status, 200);
+  assert.equal((limited.json as unknown[]).length, 1, "limit caps the result set");
+});
+
+test("rejects a photo below the minimum dimension", async () => {
+  const tinyPhoto = await sharp({
+    create: {
+      width: 50,
+      height: 50,
+      channels: 3,
+      background: { r: 10, g: 20, b: 30 },
+    },
+  })
+    .png()
+    .toBuffer();
+
+  const response = await api("POST", "/api/certificates", {
+    ...baseRecordPayload(UK),
+    photoDataUrl: `data:image/png;base64,${tinyPhoto.toString("base64")}`,
+  });
+
+  assert.equal(response.status, 400);
+  assert.match((response.json as { error: string }).error, /Мінімальний розмір/);
+});

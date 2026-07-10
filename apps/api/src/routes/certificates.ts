@@ -217,10 +217,19 @@ export async function handleCertificateRequest(
   }
 
   if (request.method === "GET" && pathname === "/api/certificates") {
+    // All query parameters are optional; without them the full list is
+    // returned, preserving the original contract for existing clients.
     sendJson(
       response,
       200,
-      await repository.list(),
+      await repository.list({
+        search:
+          url.searchParams.get("search") ??
+          url.searchParams.get("q") ??
+          undefined,
+        limit: url.searchParams.get("limit") ?? undefined,
+        offset: url.searchParams.get("offset") ?? undefined,
+      }),
     );
     return;
   }

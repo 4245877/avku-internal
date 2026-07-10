@@ -204,14 +204,38 @@ You can override paths:
 DATA_ROOT=/path/to/data BACKUP_ROOT=/path/to/backups ./infra/scripts/backup-db.sh
 ```
 
+Each SQLite database is captured as a single, self-contained snapshot (the WAL
+is folded in) using `sqlite3 .backup`, or `node:sqlite` VACUUM INTO when
+`sqlite3` is not installed, and is then verified with `PRAGMA integrity_check`
+before the backup is considered successful. This means a restored
+`*.sqlite` file never depends on `-wal`/`-shm` sidecars. If neither `sqlite3`
+nor `node` is available the script fails loudly instead of writing a fragile
+raw copy.
+
 There is no dedicated restore script yet. To restore manually:
 
 1. Stop the API process or container.
-2. Copy each backed-up SQLite file back to its matching storage root under `/var/lib/avku-internal/data`.
+2. Copy each backed-up `*.sqlite` file back to its matching storage root under `/var/lib/avku-internal/data` (a single file per database — no sidecars).
 3. If the backup contains `certificates/photos.tar.gz` or `certificates/generated.tar.gz`, extract them into `/var/lib/avku-internal/data/certificates`.
 4. Start the API again and run `pnpm check` from `apps/api`, or check `/api/health`.
 
 For Docker production, the host paths above are the source of truth because `/data` is a bind mount, not a Docker named volume.
+
+## Access Control
+
+The API and web services perform **no application-level authentication** by
+design: access is controlled entirely at the network edge.
+
+- In production the stack is bound to the LAN address only
+  (`AVKU_BIND_IP`, e.g. `192.168.0.151:18080`); the `api` and `web` containers
+  are `expose`-only and never published to the host directly — all traffic goes
+  through nginx.
+- External access is expected to be fronted by **Cloudflare Access**
+  (see `docs/cloudflare-access-setup.md`).
+
+This is an accepted decision for an internal tool. If the service is ever
+exposed beyond the LAN/Cloudflare Access perimeter, add an authentication layer
+(e.g. nginx Basic Auth or an API token) before doing so.
 
 ## Implemented Modules
 

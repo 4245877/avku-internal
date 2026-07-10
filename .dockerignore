@@ -1,7 +1,7 @@
 # Build-context excludes. The repository root is the Docker build context for
 # both infra/node/Dockerfile and apps/api/Dockerfile (see docker-compose*.yml).
 # Nothing here is needed inside an image: the API Dockerfile only copies
-# apps/api/{src,package.json,pnpm-*} and storage/certificates/templates.
+# apps/api/{src,package.json,pnpm-*,tsconfig.json} and storage/certificates/templates.
 
 # Dependencies are installed inside the image, never copied in.
 **/node_modules

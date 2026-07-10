@@ -1,4 +1,17 @@
 #!/usr/bin/env sh
+#
+# Consistent backup of the AVKU SQLite databases + certificate photos/generated.
+#
+# Each database is snapshotted into a single self-contained file (WAL folded in)
+# via `sqlite3 .backup` or, if sqlite3 is absent, `node:sqlite` VACUUM INTO, and
+# then verified with PRAGMA integrity_check. Restore is therefore just:
+#
+#   cp <backup>/certificates/certificates.sqlite <DATA_ROOT>/certificates/
+#   tar -xzf <backup>/certificates/photos.tar.gz    -C <DATA_ROOT>/certificates/
+#   tar -xzf <backup>/certificates/generated.tar.gz -C <DATA_ROOT>/certificates/
+#
+# (stop the API first; the snapshot has no -wal/-shm sidecars to carry along).
+#
 set -eu
 
 DATA_ROOT=${DATA_ROOT:-/var/lib/avku-internal/data}
@@ -58,6 +71,66 @@ copy_file() {
   BACKED_UP=1
 }
 
+# Produce a single, consistent snapshot of a (possibly live, WAL-mode) SQLite
+# database. Prefers `sqlite3 .backup`; falls back to node's built-in `node:sqlite`
+# VACUUM INTO. Both fold the WAL into one self-contained file, so a restore never
+# depends on -wal/-shm sidecars being copied alongside it.
+snapshot_database() {
+  snapshot_source=$1
+  snapshot_target=$2
+
+  if command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 "$snapshot_source" ".backup '$snapshot_target'"
+    return $?
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    SNAPSHOT_SRC="$snapshot_source" SNAPSHOT_DST="$snapshot_target" node -e '
+      const { DatabaseSync } = require("node:sqlite");
+      const q = String.fromCharCode(39);
+      const db = new DatabaseSync(process.env.SNAPSHOT_SRC);
+      try {
+        db.exec("PRAGMA busy_timeout = 5000");
+        db.exec("VACUUM INTO " + q + process.env.SNAPSHOT_DST.split(q).join(q + q) + q);
+      } finally {
+        db.close();
+      }
+    '
+    return $?
+  fi
+
+  return 2
+}
+
+# Fail the backup unless the produced snapshot passes PRAGMA integrity_check.
+verify_snapshot() {
+  verify_path=$1
+  verify_label=$2
+  verify_result=""
+
+  if command -v sqlite3 >/dev/null 2>&1; then
+    verify_result=$(sqlite3 "$verify_path" "PRAGMA integrity_check;" 2>/dev/null | head -n1)
+  elif command -v node >/dev/null 2>&1; then
+    verify_result=$(VERIFY_PATH="$verify_path" node -e '
+      const { DatabaseSync } = require("node:sqlite");
+      const db = new DatabaseSync(process.env.VERIFY_PATH);
+      try {
+        const row = db.prepare("PRAGMA integrity_check").get();
+        console.log(Object.values(row)[0]);
+      } finally {
+        db.close();
+      }
+    ' 2>/dev/null)
+  else
+    warn "cannot verify $verify_label backup: no sqlite3/node available"
+    return 0
+  fi
+
+  if [ "$verify_result" != "ok" ]; then
+    fail "integrity check failed for $verify_label backup ($verify_path): ${verify_result:-unknown}"
+  fi
+}
+
 backup_database() {
   storage_root=$1
   file_name=$2
@@ -81,18 +154,23 @@ backup_database() {
   mkdir -p "$target_directory" ||
     fail "failed to create backup directory: $target_directory"
 
-  if command -v sqlite3 >/dev/null 2>&1; then
-    sqlite3 "$database_path" ".backup '$target_path'" ||
-      fail "sqlite3 backup failed for $database_path"
+  snapshot_database "$database_path" "$target_path"
+  snapshot_status=$?
+
+  if [ "$snapshot_status" -eq 0 ]; then
+    verify_snapshot "$target_path" "$label"
+  elif [ "$snapshot_status" -eq 2 ]; then
+    # No consistent-snapshot tool available. A raw copy of a live WAL database is
+    # only restorable if ALL of .sqlite/-wal/-shm are kept together, and can be
+    # torn if the API writes mid-copy — restoring the bare .sqlite silently
+    # yields an EMPTY database. Refuse rather than create a misleading backup.
+    fail "neither sqlite3 nor node is available to take a consistent snapshot of $database_path. Install sqlite3 (or run where node is available), or stop the API and copy .sqlite + -wal + -shm together."
   else
-    warn "sqlite3 is not installed; copying $database_path with WAL/SHM sidecars. Stop the API first for a consistent backup."
-    copy_file "$database_path" "$target_path"
-    [ -f "$database_path-wal" ] && copy_file "$database_path-wal" "$target_path-wal"
-    [ -f "$database_path-shm" ] && copy_file "$database_path-shm" "$target_path-shm"
+    fail "consistent snapshot failed for $database_path"
   fi
 
   BACKED_UP=1
-  echo "Backed up $database_path"
+  echo "Backed up $database_path -> $target_path (verified)"
 }
 
 backup_certificates_file() {

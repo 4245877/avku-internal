@@ -29,16 +29,71 @@ async function main(): Promise<void> {
     return;
   }
 
-  createCertificateApiServer({
+  const server = createCertificateApiServer({
     certificateRepository,
     warehouseRepository,
     logisticsRepository,
-  }).listen(
+  });
+
+  server.listen(
     PORT,
     () => {
       console.log(`AVKU API is listening on http://localhost:${PORT}`);
     },
   );
+
+  installProcessSafetyNets(server);
+}
+
+/**
+ * Long-running production safety nets:
+ *  - graceful shutdown on SIGTERM/SIGINT so a deploy/restart drains in-flight
+ *    requests instead of dropping them mid-write;
+ *  - last-resort handlers so an unexpected rejection/exception is logged (and
+ *    the process exits deliberately) rather than crashing with an opaque
+ *    default trace.
+ */
+function installProcessSafetyNets(server: import("node:http").Server): void {
+  let shuttingDown = false;
+
+  const shutdown = (signal: NodeJS.Signals): void => {
+    if (shuttingDown) {
+      return;
+    }
+
+    shuttingDown = true;
+    console.log(`Received ${signal}, shutting down gracefully…`);
+
+    // Stop accepting new connections and let active ones finish.
+    server.close((error) => {
+      if (error) {
+        console.error("Error during server shutdown:", error);
+        process.exit(1);
+      }
+
+      process.exit(0);
+    });
+
+    // Failsafe: don't hang forever if a connection refuses to close.
+    const forceExit = setTimeout(() => {
+      console.error("Graceful shutdown timed out, forcing exit.");
+      process.exit(1);
+    }, 10_000);
+
+    forceExit.unref();
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+
+  process.on("unhandledRejection", (reason) => {
+    console.error("Unhandled promise rejection:", reason);
+  });
+
+  process.on("uncaughtException", (error) => {
+    console.error("Uncaught exception:", error);
+    process.exit(1);
+  });
 }
 
 function isMainModule(): boolean {

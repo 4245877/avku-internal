@@ -49,6 +49,15 @@ const DEFAULT_CROP: CertificatePhotoCrop = {
   offsetY: 0,
 };
 const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
+/**
+ * Dimension guardrails. The renderer composes the photo into a 377×519 slot; a
+ * degenerate image (e.g. 1×1) passes a format check but then crashes the render
+ * pipeline with a raw libvips error. Rejecting it at upload keeps the "a record
+ * can always be exported" invariant during mass filling. The upper bound guards
+ * against decompression bombs whose byte size is still under MAX_PHOTO_SIZE_BYTES.
+ */
+const MIN_PHOTO_DIMENSION = 200;
+const MAX_PHOTO_DIMENSION = 10000;
 const SUPPORTED_PHOTO_FORMATS = new Set([
   "jpeg",
   "png",
@@ -95,6 +104,20 @@ export interface CertificatePhotoFilePayload {
   content: Buffer;
   fileName?: string;
   contentType?: string;
+}
+
+/**
+ * Optional server-side filtering/pagination for the certificate list. All
+ * fields are optional; an empty query returns every record (unchanged legacy
+ * behaviour), so existing clients are unaffected.
+ */
+export interface CertificateListQuery {
+  /** Case-sensitive substring match on full name or certificate number. */
+  search?: string;
+  /** Max rows to return. Accepts raw query strings; ignored unless a positive integer. */
+  limit?: number | string;
+  /** Rows to skip; only applied together with `limit`. Accepts raw query strings. */
+  offset?: number | string;
 }
 
 export interface CertificateRepositoryOptions {
@@ -307,6 +330,24 @@ async function validatePhotoBuffer(
     throw new Error("Фотографія має бути справним файлом PNG, JPEG або WebP.");
   }
 
+  if (
+    metadata.width < MIN_PHOTO_DIMENSION ||
+    metadata.height < MIN_PHOTO_DIMENSION
+  ) {
+    throw new Error(
+      `Фотографія замала. Мінімальний розмір — ${MIN_PHOTO_DIMENSION}×${MIN_PHOTO_DIMENSION} пікселів.`,
+    );
+  }
+
+  if (
+    metadata.width > MAX_PHOTO_DIMENSION ||
+    metadata.height > MAX_PHOTO_DIMENSION
+  ) {
+    throw new Error(
+      `Фотографія завелика. Максимальний розмір — ${MAX_PHOTO_DIMENSION}×${MAX_PHOTO_DIMENSION} пікселів.`,
+    );
+  }
+
   return {
     content,
     extension: getExtensionForImageFormat(metadata.format),
@@ -470,6 +511,26 @@ function getCount(row: Record<string, unknown> | undefined): number {
   return Number(row?.total ?? 0);
 }
 
+/**
+ * Coerces an untrusted list-query bound into a safe positive integer, or
+ * `undefined` when it is missing/invalid (so the caller falls back to "no
+ * limit"/"no offset").
+ */
+function toPositiveInteger(value: unknown): number | undefined {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  return parsed;
+}
+
 export function toCertificateResponse(
   record: CertificateRecord,
 ): CertificateRecordResponse {
@@ -615,13 +676,46 @@ export class CertificateRepository {
     return this.readTemplateDefinition(templateId);
   }
 
-  async list(): Promise<CertificateRecordResponse[]> {
+  async list(
+    query: CertificateListQuery = {},
+  ): Promise<CertificateRecordResponse[]> {
     const database = await this.getDatabase();
+    const parameters: (string | number)[] = [];
+    let whereClause = "";
+    const search = typeof query.search === "string" ? query.search.trim() : "";
+
+    if (search) {
+      // Escape LIKE wildcards so a literal "%" / "_" in the query is not
+      // treated as a pattern. Substring match on name and number.
+      const pattern = `%${search.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+
+      whereClause =
+        "WHERE (full_name LIKE ? ESCAPE '\\' OR " +
+        "certificate_number LIKE ? ESCAPE '\\')";
+      parameters.push(pattern, pattern);
+    }
+
+    let limitClause = "";
+    const limit = toPositiveInteger(query.limit);
+
+    if (limit !== undefined) {
+      limitClause = " LIMIT ?";
+      parameters.push(limit);
+
+      const offset = toPositiveInteger(query.offset);
+
+      if (offset !== undefined) {
+        limitClause += " OFFSET ?";
+        parameters.push(offset);
+      }
+    }
+
     const rows = database.prepare(`
       SELECT *
       FROM certificate_records
-      ORDER BY updated_at DESC, id DESC
-    `).all() as Record<string, unknown>[];
+      ${whereClause}
+      ORDER BY updated_at DESC, id DESC${limitClause}
+    `).all(...parameters) as Record<string, unknown>[];
 
     return rows
       .map(rowToRecord)
@@ -843,16 +937,30 @@ export class CertificateRepository {
     const nameParts = splitFullName(record.fullName);
     const templateDirectory = this.getTemplateDirectory(record.templateId);
 
-    await renderCertificate({
-      templateDirectory,
-      outputPath,
-      photoPath: this.getPhotoPath(record.photoFileName),
-      photoCrop: record.photoCrop,
-      ...nameParts,
-      certificateNumber: record.certificateNumber,
-      issuedAt: record.issuedAt,
-      validUntil: record.validUntil,
-    });
+    try {
+      await renderCertificate({
+        templateDirectory,
+        outputPath,
+        photoPath: this.getPhotoPath(record.photoFileName),
+        photoCrop: record.photoCrop,
+        ...nameParts,
+        certificateNumber: record.certificateNumber,
+        issuedAt: record.issuedAt,
+        validUntil: record.validUntil,
+      });
+    } catch (error) {
+      // Missing files (ENOENT etc.) carry a `code` and are sanitized upstream
+      // into a clean 404/500. Everything else here is a low-level rendering
+      // failure (e.g. a raw libvips/libpng message) that must never reach the
+      // client verbatim.
+      if (error instanceof Error && "code" in error) {
+        throw error;
+      }
+
+      throw new Error(
+        "Не вдалося згенерувати зображення посвідчення. Перевірте фотографію та повторіть спробу.",
+      );
+    }
 
     return outputPath;
   }

@@ -45,7 +45,7 @@ ENV NODE_OPTIONS=--no-warnings=ExperimentalWarning
 # does not exist on a fresh volume, making the one-time migration a no-op). To
 # bootstrap-migrate an old registry.json, mount it and set that variable.
 COPY --from=deps /app/apps/api/node_modules ./node_modules
-COPY apps/api/package.json apps/api/pnpm-workspace.yaml ./
+COPY apps/api/package.json apps/api/pnpm-workspace.yaml apps/api/tsconfig.json ./
 COPY apps/api/src ./src
 COPY storage/certificates/templates /app/storage/certificates/templates
 
