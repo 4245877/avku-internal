@@ -21,7 +21,7 @@ services:
       DATA_ROOT: /data
       NODE_OPTIONS: --no-warnings=ExperimentalWarning
     volumes:
-      - ./runtime/data:/data
+      - /var/lib/avku-internal/data:/data
     expose:
       - "3001"
     healthcheck:

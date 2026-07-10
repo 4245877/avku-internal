@@ -115,12 +115,12 @@ AVKU_ACCESS_AUD=<aud-тег приложения>
 
   Примечание: cloudflared ходит в `nginx:80`, т.е. через тот же server-блок.
   Чтобы не затереть заголовки туннельного трафика, добавляется ВТОРОЙ
-  server-блок `server_name avku.<домен>;` без затирания (запросы из туннеля
-  приходят с Host = avku.<домен>, запросы из LAN — с Host = 192.168.0.151).
+  server-блок `server_name internal.avku.org;` без затирания (запросы из туннеля
+  приходят с Host = internal.avku.org, запросы из LAN — с Host = 192.168.0.151).
   Итоговая схема:
 
   ```nginx
-  # server-блок 1: server_name avku.<домен>  — трафик из туннеля,
+  # server-блок 1: server_name internal.avku.org  — трафик из туннеля,
   #   Cf-заголовки пропускаются как есть (их выставил Cloudflare).
   # server-блок 2: default_server (_)        — LAN,
   #   Cf-заголовки затираются.
@@ -132,12 +132,12 @@ AVKU_ACCESS_AUD=<aud-тег приложения>
 
 - `apps/web`: запрос `GET /api/me` при загрузке; если `email != null` —
   показать email и кнопку «Выйти» → переход на
-  `https://avku.<домен>/cdn-cgi/access/logout`.
+  `https://internal.avku.org/cdn-cgi/access/logout`.
   В LAN-режиме (`local: true`) ничего не показывать.
 
 ## Logout
 
-- Основной механизм: `https://avku.<домен>/cdn-cgi/access/logout`
+- Основной механизм: `https://internal.avku.org/cdn-cgi/access/logout`
   (завершает сессию Cloudflare Access; своих сессий у приложения нет,
   поэтому этого достаточно).
 - Session Duration в Access-приложении ограничивает время жизни сессии
@@ -159,7 +159,7 @@ AVKU_ACCESS_AUD=<aud-тег приложения>
      `curl -H "Cf-Access-Authenticated-User-Email: fake@x.com" http://192.168.0.151:18080/api/me`
      → email по-прежнему null (заголовок затёрт nginx);
    - Внешне после Google-входа: `/api/me` → ваш email;
-   - `bash scripts/verify-access.sh avku.<домен>`.
+   - `bash scripts/verify-access.sh internal.avku.org`.
 
 ## Откат Фазы 2
 

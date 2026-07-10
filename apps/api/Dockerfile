@@ -50,4 +50,4 @@ COPY apps/api/src ./src
 COPY storage/certificates/templates /app/storage/certificates/templates
 
 EXPOSE 3001
-CMD ["pnpm", "start"]
+CMD ["sh", "-lc", "umask 027 && exec pnpm start"]

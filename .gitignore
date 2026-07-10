@@ -29,6 +29,7 @@ Thumbs.db
 # Generated certificates and personal photos
 storage/certificates/*.sqlite
 storage/certificates/*.sqlite-*
+storage/certificates/registry.json
 storage/certificates/photos/*
 !storage/certificates/photos/.gitkeep
 storage/certificates/generated/*

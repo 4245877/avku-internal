@@ -12,8 +12,9 @@ import { LogisticsRepository } from "./modules/logistics/logistics-records";
  * Centralised runtime configuration: HTTP port and the storage roots that back
  * each repository. Storage layout is unified under a single `DATA_ROOT` with
  * per-domain subdirectories, while keeping the historical per-domain env
- * overrides and default paths (`<repo>/storage/<domain>`) for backwards
- * compatibility with existing SQLite files.
+ * overrides. Local runs still default to `<repo>/storage`, but production must
+ * set DATA_ROOT explicitly so runtime data cannot silently be created inside
+ * the repository.
  */
 
 export const PORT = Number(
@@ -27,13 +28,29 @@ function getRepositoryRoot(): string {
   );
 }
 
+function readEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+
+  return value && value !== "" ? value : undefined;
+}
+
 function getDataRoot(repositoryRoot: string): string {
-  return (
-    process.env.DATA_ROOT ??
-    path.join(
-      repositoryRoot,
-      "storage",
-    )
+  const dataRoot = readEnv("DATA_ROOT");
+
+  if (dataRoot) {
+    return dataRoot;
+  }
+
+  if (readEnv("NODE_ENV") === "production") {
+    throw new Error(
+      "DATA_ROOT must be set when NODE_ENV=production. Use DATA_ROOT=/data " +
+        "inside Docker or DATA_ROOT=/var/lib/avku-internal/data on the host.",
+    );
+  }
+
+  return path.join(
+    repositoryRoot,
+    "storage",
   );
 }
 
@@ -51,8 +68,8 @@ function getDataRoot(repositoryRoot: string): string {
  * but logs a deprecation warning.
  */
 function resolveLegacySingleTemplateDir(): string | undefined {
-  const renamed = process.env.CERTIFICATES_LEGACY_SINGLE_TEMPLATE_DIR;
-  const deprecated = process.env.CERTIFICATES_TEMPLATE_DIRECTORY;
+  const renamed = readEnv("CERTIFICATES_LEGACY_SINGLE_TEMPLATE_DIR");
+  const deprecated = readEnv("CERTIFICATES_TEMPLATE_DIRECTORY");
 
   if (deprecated) {
     console.warn(
@@ -64,7 +81,7 @@ function resolveLegacySingleTemplateDir(): string | undefined {
 
   const singleTemplateDir = renamed ?? deprecated;
 
-  if (singleTemplateDir && process.env.CERTIFICATES_TEMPLATES_DIRECTORY) {
+  if (singleTemplateDir && readEnv("CERTIFICATES_TEMPLATES_DIRECTORY")) {
     console.warn(
       "[certificates] Both a single-template override and " +
         "CERTIFICATES_TEMPLATES_DIRECTORY are set. Single-template mode wins, " +
@@ -80,13 +97,13 @@ export function createCertificateRepository(): CertificateRepository {
   const repositoryRoot = getRepositoryRoot();
   const dataRoot = getDataRoot(repositoryRoot);
   const storageRoot =
-    process.env.CERTIFICATES_STORAGE_ROOT ??
+    readEnv("CERTIFICATES_STORAGE_ROOT") ??
     path.join(
       dataRoot,
       "certificates",
     );
   const templatesDirectory =
-    process.env.CERTIFICATES_TEMPLATES_DIRECTORY ??
+    readEnv("CERTIFICATES_TEMPLATES_DIRECTORY") ??
     path.join(
       repositoryRoot,
       "storage",
@@ -98,16 +115,16 @@ export function createCertificateRepository(): CertificateRepository {
     storageRoot,
     templatesDirectory,
     legacySingleTemplateDirectory: resolveLegacySingleTemplateDir(),
-    defaultTemplateId: process.env.CERTIFICATES_DEFAULT_TEMPLATE_ID ??
+    defaultTemplateId: readEnv("CERTIFICATES_DEFAULT_TEMPLATE_ID") ??
       DEFAULT_CERTIFICATE_TEMPLATE_ID,
-    legacyRegistryPath: process.env.CERTIFICATES_LEGACY_REGISTRY_PATH,
+    legacyRegistryPath: readEnv("CERTIFICATES_LEGACY_REGISTRY_PATH"),
   });
 }
 
 export function createWarehouseRepository(): WarehouseRepository {
   const dataRoot = getDataRoot(getRepositoryRoot());
   const storageRoot =
-    process.env.WAREHOUSE_STORAGE_ROOT ??
+    readEnv("WAREHOUSE_STORAGE_ROOT") ??
     path.join(
       dataRoot,
       "warehouse",
@@ -121,7 +138,7 @@ export function createWarehouseRepository(): WarehouseRepository {
 export function createLogisticsRepository(): LogisticsRepository {
   const dataRoot = getDataRoot(getRepositoryRoot());
   const storageRoot =
-    process.env.LOGISTICS_STORAGE_ROOT ??
+    readEnv("LOGISTICS_STORAGE_ROOT") ??
     path.join(
       dataRoot,
       "logistics",

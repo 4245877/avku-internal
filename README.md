@@ -25,8 +25,6 @@ infra/
 storage/
   certificates/
     templates/            versioned certificate templates
-    photos/               runtime certificate photos, ignored by git
-    generated/            runtime generated certificate PNG files, ignored by git
 design/                   design sources for certificate templates
 docker-compose.yml        local Docker composition
 docker-compose.prod.yml   production-oriented Docker composition
@@ -61,7 +59,7 @@ API variables:
 | --- | --- | --- |
 | `PORT` | `3001` | HTTP port. |
 | `API_PORT` | unset | Legacy fallback for `PORT`. |
-| `DATA_ROOT` | `<repo>/storage` | Root for runtime data. |
+| `DATA_ROOT` | `<repo>/storage` locally, required in production | Root for runtime data. Production must set this explicitly; Docker uses `/data`. |
 | `CERTIFICATES_STORAGE_ROOT` | `$DATA_ROOT/certificates` | Certificate SQLite DB, photos and generated files. |
 | `CERTIFICATES_TEMPLATES_DIRECTORY` | `<repo>/storage/certificates/templates` | Multi-template certificate catalog. |
 | `CERTIFICATES_DEFAULT_TEMPLATE_ID` | `volunteer-card-v1-uk` | Default certificate template. |
@@ -142,7 +140,7 @@ Production-oriented composition:
 docker compose -f docker-compose.prod.yml up --build -d
 ```
 
-The production compose exposes Nginx on port `80`. API runtime data is stored in the Docker volume `app-data` mounted at `/data`.
+The production compose exposes Nginx on `AVKU_HTTP_PORT` (`18080` by default in `.env`). API runtime data is mounted from the host path `/var/lib/avku-internal/data` to `/data`; the API environment sets `DATA_ROOT=/data`.
 
 ## Runtime Data
 
@@ -154,12 +152,35 @@ storage/certificates/photos/
 storage/certificates/generated/
 storage/warehouse/warehouse.sqlite
 storage/logistics/logistics.sqlite
-storage/backups/
 ```
 
 SQLite WAL/SHM sidecar files may appear next to each database. Runtime databases, uploaded photos, generated certificate files and backups are ignored by git. Certificate templates under `storage/certificates/templates/` are versioned and are required by the API.
 
-In Docker, the API uses `DATA_ROOT=/data`. In `docker-compose.yml` and `docker-compose.prod.yml`, `/data` is backed by the `app-data` volume.
+Production runtime data must not live inside the repository. The host layout is:
+
+```text
+/var/lib/avku-internal/data/
+/var/lib/avku-internal/data/certificates/
+/var/lib/avku-internal/data/warehouse/
+/var/lib/avku-internal/data/logistics/
+/var/backups/avku-internal/
+```
+
+Inside the API container this same data root is `/data`. Certificate templates are not runtime data; they stay versioned under `storage/certificates/templates/` and are baked into the API image.
+
+Create production directories before starting the stack. The API image currently has no explicit `USER`, so standard Docker runs it as UID/GID `0:0`; if a future image sets `USER`, replace `0:0` with the value returned by the inspect command below.
+
+```bash
+docker image inspect avku-internal-api:latest --format '{{.Config.User}}'
+
+sudo install -d -o 0 -g 0 -m 0750 /var/lib/avku-internal/data
+sudo install -d -o 0 -g 0 -m 0750 /var/lib/avku-internal/data/certificates
+sudo install -d -o 0 -g 0 -m 0750 /var/lib/avku-internal/data/warehouse
+sudo install -d -o 0 -g 0 -m 0750 /var/lib/avku-internal/data/logistics
+sudo install -d -o 0 -g 0 -m 0700 /var/backups/avku-internal
+```
+
+Before migrating existing SQLite files, stop the API or use `sqlite3 .backup`. If copying files directly, copy the main database and any `-wal` and `-shm` files together. Do not delete the old `runtime/data` or `storage` directories until the new stack has started, health checks pass, records/photos/PNG/PDF export work, and data survives a container recreate.
 
 ## Backup And Restore
 
@@ -169,28 +190,28 @@ Create a backup:
 ./infra/scripts/backup-db.sh
 ```
 
-By default, backups are written to `storage/backups/<UTC timestamp>/`. The script backs up:
+By default, backups are read from `DATA_ROOT=/var/lib/avku-internal/data` and written to `BACKUP_ROOT=/var/backups/avku-internal/<UTC timestamp>/`. The script backs up:
 
-- `certificates.sqlite`
-- `warehouse.sqlite`
-- `logistics.sqlite`
-- legacy `registry.json`, if present
+- `certificates/certificates.sqlite`
+- `warehouse/warehouse.sqlite`
+- `logistics/logistics.sqlite`
+- `certificates/registry.json`, if present
 - certificate `photos/` and `generated/` archives, if present
 
 You can override paths:
 
 ```bash
-DATA_ROOT=/data BACKUP_ROOT=/backup ./infra/scripts/backup-db.sh
+DATA_ROOT=/path/to/data BACKUP_ROOT=/path/to/backups ./infra/scripts/backup-db.sh
 ```
 
 There is no dedicated restore script yet. To restore manually:
 
 1. Stop the API process or container.
-2. Copy the backed-up SQLite files back to their storage roots.
-3. If the backup contains `photos.tar.gz` or `generated.tar.gz`, extract them into the certificate storage root.
+2. Copy each backed-up SQLite file back to its matching storage root under `/var/lib/avku-internal/data`.
+3. If the backup contains `certificates/photos.tar.gz` or `certificates/generated.tar.gz`, extract them into `/var/lib/avku-internal/data/certificates`.
 4. Start the API again and run `pnpm check` from `apps/api`, or check `/api/health`.
 
-For Docker, copy the backup files into the `app-data` volume paths that correspond to `/data/certificates`, `/data/warehouse` and `/data/logistics`.
+For Docker production, the host paths above are the source of truth because `/data` is a bind mount, not a Docker named volume.
 
 ## Implemented Modules
 
