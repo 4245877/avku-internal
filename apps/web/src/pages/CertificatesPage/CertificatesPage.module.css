@@ -627,6 +627,7 @@
 .recordItem {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: var(--space-3);
   padding: var(--space-4);
   min-width: 0;
