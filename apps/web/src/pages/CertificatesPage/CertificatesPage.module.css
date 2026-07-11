@@ -722,6 +722,9 @@
 }
 
 .linkButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 28px;
   padding: 0 var(--space-2);
   font-size: var(--text-xs);
