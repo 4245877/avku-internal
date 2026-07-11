@@ -24,9 +24,9 @@
   --color-bg-sidebar:    #162539;
 
   --color-text-primary:   var(--void);
-  --color-text-secondary: var(--ash-mist);
+  --color-text-secondary: #4F677B;   /* AA (≈4.6:1) on frost — was ash-mist #6E8599 */
   --color-text-inverse:   var(--frost-surface);
-  --color-text-muted:     #8AA3B5;
+  --color-text-muted:     #647E92;   /* AA (≈3.4:1) for placeholders/help — was #8AA3B5 */
   --color-text-accent:    var(--ice-deep);
 
   --color-accent-primary: var(--ice-deep);
@@ -108,9 +108,9 @@
   --shadow-md:  0 4px 16px rgba(11, 17, 28, 0.1),  0 0 0 0.5px rgba(44,95,138,0.12);
   --shadow-lg:  0 8px 28px rgba(11, 17, 28, 0.13), 0 0 0 0.5px rgba(44,95,138,0.15);
   --shadow-xl:  0 16px 48px rgba(11, 17, 28, 0.18);
-  --shadow-ice: 0 0 0 3px rgba(168, 221, 247, 0.25);   /* focus ring */
+  --shadow-ice: 0 0 0 3px rgba(44, 95, 138, 0.30);   /* focus ring — ice-deep for AA contrast on frost */
 
-  --focus-outline: 2px solid var(--ice-whisper);
+  --focus-outline: 2px solid var(--ice-deep);
   --focus-outline-offset: 2px;
 
   /* ── SIDEBAR ─────────────────────────────────────────── */
@@ -174,7 +174,7 @@
   --btn-lift:            -1px;   /* hover translateY */
 
   --btn-height-sm:  32px;
-  --btn-height-md:  40px;
+  --btn-height-md:  42px;   /* matches --input-height so buttons align with fields in a row */
   --btn-height-lg:  48px;
   --btn-radius:     var(--radius-md);
   --btn-font-size:  var(--text-sm);
@@ -256,9 +256,13 @@
   --color-bg-sidebar:    #0C1520;
 
   --color-text-primary:  #DCE9F5;
-  --color-text-secondary:#7A9CB5;
-  --color-text-muted:    #4D6E84;
+  --color-text-secondary:#93B4CC;   /* raised from #7A9CB5 for AA on dark cards */
+  --color-text-muted:    #6E90A6;   /* raised from #4D6E84 (was ≈3.0:1) */
   --color-text-accent:   var(--ice-whisper);
+
+  /* Focus indicator flips to the pale ice-whisper on dark surfaces */
+  --focus-outline: 2px solid var(--ice-whisper);
+  --shadow-ice:    0 0 0 3px rgba(168, 221, 247, 0.25);
 
   --color-success:        #62C99A;
   --color-success-bg:     rgba(58, 158, 116, 0.16);
@@ -285,7 +289,7 @@
   --input-bg:           #0F1D2E;
   --input-border:       rgba(168, 221, 247, 0.14);
   --input-text:         #D4E8F5;
-  --input-placeholder:  #3E5E74;
+  --input-placeholder:  #5E809A;   /* raised from #3E5E74 for legibility */
 
   --topbar-bg:          rgba(11, 17, 28, 0.88);
   --topbar-border:      rgba(168, 221, 247, 0.08);

@@ -262,8 +262,14 @@
 }
 
 .themeToggleIcon {
-  font-size: var(--text-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
+}
+
+.themeToggleIcon svg {
+  display: block;
 }
 
 .sidebarFooter {

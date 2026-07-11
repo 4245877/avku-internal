@@ -261,7 +261,7 @@
   min-width: 0;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-xs);
   position: relative;
   overflow: hidden;
@@ -308,6 +308,9 @@
   line-height: 1;
   color: var(--color-text-primary);
   letter-spacing: 0;
+  /* Cormorant ships oldstyle figures by default — force lining + tabular so
+     KPI digits sit on the baseline and align by column. */
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -415,7 +418,7 @@
   flex-direction: column;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--card-radius);
   padding: var(--card-padding);
   box-shadow: var(--card-shadow);
   position: relative;
@@ -696,6 +699,8 @@
   color: var(--color-text-secondary);
   line-height: var(--leading-snug);
   overflow-wrap: anywhere;
+  /* Numbers (№) and dates align on the baseline and by column. */
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .recordControls {
