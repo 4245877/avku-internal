@@ -302,7 +302,7 @@
   --sidebar-text:        #5E8097;
   --sidebar-text-active: var(--ice-whisper);
   --sidebar-border:      rgba(168, 221, 247, 0.06);
-  --sidebar-icon:        #3D5C72;
+  --sidebar-icon:        #6A879C;   /* raised from #3D5C72 (≈2.7:1) for legibility */
 
   --shadow-md:  0 4px 20px rgba(0, 0, 0, 0.4);
   --shadow-lg:  0 8px 32px rgba(0, 0, 0, 0.5);

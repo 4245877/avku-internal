@@ -794,7 +794,8 @@
 
 .status-muted {
   background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
+  /* primary (not secondary): 11px uppercase badges need the extra contrast */
+  color: var(--color-text-primary);
   border-color: var(--color-border-medium);
 }
 
@@ -1292,7 +1293,6 @@
 
   .headerActions {
     width: 100%;
-    justify-content: stretch;
   }
 
   .headerActions .primaryButton,

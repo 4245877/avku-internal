@@ -51,8 +51,8 @@
     line-height: var(--leading-normal, 1.65);
     color: var(--color-text-primary, #0b111c);
     background:
-      radial-gradient(circle at top left, rgba(168, 221, 247, 0.16), transparent 34rem),
-      radial-gradient(circle at bottom right, rgba(44, 95, 138, 0.10), transparent 30rem),
+      radial-gradient(circle at top left, rgba(168, 221, 247, 0.22), transparent 34rem),
+      radial-gradient(circle at bottom right, rgba(44, 95, 138, 0.14), transparent 30rem),
       var(--color-bg-primary, #f4f7fb);
     /* clip (not hidden) contains stray horizontal overflow without turning
        <body> into a scroll container — which can break position: sticky. */
@@ -71,16 +71,39 @@
     pointer-events: none;
     background-image:
       linear-gradient(120deg, rgba(255, 255, 255, 0.18), transparent 34%),
-      radial-gradient(circle at 18% 24%, rgba(168, 221, 247, 0.08), transparent 28rem),
-      radial-gradient(circle at 86% 72%, rgba(44, 95, 138, 0.07), transparent 32rem);
+      radial-gradient(circle at 18% 24%, rgba(168, 221, 247, 0.11), transparent 28rem),
+      radial-gradient(circle at 86% 72%, rgba(44, 95, 138, 0.10), transparent 32rem);
     opacity: 0.9;
+  }
+
+  /* Frosted grain — concentrated in the corners, fades out toward the centre.
+     Static (no animation); gently textures the otherwise flat background so it
+     reads as iced glass rather than plain grey. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23f)'/%3E%3C/svg%3E");
+    background-size: 200px 200px;
+    opacity: 0.5;
+    mix-blend-mode: soft-light;
+    -webkit-mask-image: radial-gradient(130% 115% at 50% 45%, transparent 50%, #000 100%);
+            mask-image: radial-gradient(130% 115% at 50% 45%, transparent 50%, #000 100%);
   }
 
   [data-theme="dark"] body {
     background:
-      radial-gradient(circle at top left, rgba(168, 221, 247, 0.08), transparent 34rem),
-      radial-gradient(circle at bottom right, rgba(44, 95, 138, 0.12), transparent 30rem),
+      radial-gradient(circle at top left, rgba(168, 221, 247, 0.11), transparent 34rem),
+      radial-gradient(circle at bottom right, rgba(44, 95, 138, 0.16), transparent 30rem),
       var(--color-bg-primary, #111c2b);
+  }
+
+  /* Grain reads a touch stronger over the darker canvas. */
+  [data-theme="dark"] body::after {
+    opacity: 0.6;
   }
 
   /* ── DOCUMENT STRUCTURE ───────────────────────────────── */
@@ -573,7 +596,8 @@
       background: #fff !important;
     }
 
-    body::before {
+    body::before,
+    body::after {
       display: none !important;
     }
 

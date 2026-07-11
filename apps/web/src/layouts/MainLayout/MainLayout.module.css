@@ -300,6 +300,7 @@
 }
 
 .statusIndicator {
+  position: relative;
   width: 8px;
   height: 8px;
   flex-shrink: 0;
@@ -307,6 +308,16 @@
   background: var(--color-success);
   border-radius: var(--radius-full);
   box-shadow: 0 0 0 4px rgba(58, 158, 116, 0.12);
+}
+
+/* Living "online" pulse — a soft glacial ripple over the steady green dot.
+   glacialPulse lives in globals.css; prefers-reduced-motion (reset.css) stops it. */
+.statusIndicator::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: glacialPulse 2.8s ease-in-out infinite;
 }
 
 .content {
@@ -445,5 +456,16 @@
 
   .navigationText strong {
     font-size: var(--text-xs);
+  }
+}
+
+/* Local copy of the shared glacial ripple (see globals.css) — kept in-module so
+   CSS-module scoping always resolves the animation-name on .statusIndicator. */
+@keyframes glacialPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(168, 221, 247, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(168, 221, 247, 0);
   }
 }
