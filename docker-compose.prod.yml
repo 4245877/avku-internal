@@ -34,40 +34,36 @@ services:
       - avku_internal
 
   web:
-    image: avku-internal-node:22-bookworm-fonts
+    image: avku-internal-web:latest
     build:
       context: .
-      dockerfile: infra/node/Dockerfile
-    working_dir: /app/apps/web
-    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm run build && pnpm exec vite preview --host 0.0.0.0 --port 5173"
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Baked into the bundle at build time; same-origin /api behind nginx.
+        VITE_API_URL: ${AVKU_WEB_API_URL:-/api}
     init: true
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
     restart: unless-stopped
-    env_file:
-      - ./.env
-    environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      VITE_API_URL: ${AVKU_WEB_API_URL:-/api}
-    volumes:
-      - ./:/app
-      - web-node-modules:/app/apps/web/node_modules
-    depends_on:
-      api:
-        condition: service_healthy
+    # No env_file and no repository bind-mount: the static bundle is baked into
+    # the image, so this network-facing container never sees .env.cloudflare, the
+    # git history or the rest of the repo. It also runs as the non-root `nginx`
+    # user (uid 101) from the base image.
     expose:
-      - "5173"
+      - "8080"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 60s
+      start_period: 20s
     networks:
       - avku_internal
 
@@ -103,6 +99,3 @@ services:
 networks:
   avku_internal:
     driver: bridge
-
-volumes:
-  web-node-modules:

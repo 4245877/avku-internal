@@ -734,11 +734,18 @@ export class WarehouseRepository {
 }
 
 function toCsvCell(value: string): string {
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
+  // Neutralise spreadsheet formula injection: cells whose text a spreadsheet
+  // would evaluate as a formula (leading = + - @, or a leading tab/CR that some
+  // parsers strip before re-reading the next character) get an apostrophe
+  // prefix so Excel/LibreOffice/Sheets render them as literal text instead of
+  // executing them. The prefix is applied before the RFC-4180 quoting below.
+  const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+
+  if (/[",\r\n]/.test(guarded)) {
+    return `"${guarded.replace(/"/g, '""')}"`;
   }
 
-  return value;
+  return guarded;
 }
 
 interface WarehouseSeedItem {

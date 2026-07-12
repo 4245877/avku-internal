@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [
     react(),
   ],
+  preview: {
+    allowedHosts: ['internal.avku.org'],
+  },
   server: {
     proxy: {
       '/api': {

@@ -58,6 +58,11 @@ const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
  */
 const MIN_PHOTO_DIMENSION = 200;
 const MAX_PHOTO_DIMENSION = 10000;
+// Hard pixel ceiling handed to sharp/libvips so a decompression bomb is refused
+// during decode — before the width/height guardrails below can even read the
+// metadata — rather than being allowed to allocate memory first. Matches the
+// dimension cap (10000×10000 = 100 MP); any legitimate photo stays well under it.
+const MAX_PHOTO_PIXELS = MAX_PHOTO_DIMENSION * MAX_PHOTO_DIMENSION;
 const SUPPORTED_PHOTO_FORMATS = new Set([
   "jpeg",
   "png",
@@ -339,7 +344,9 @@ async function validatePhotoBuffer(
   let metadata: sharp.Metadata;
 
   try {
-    metadata = await sharp(content).metadata();
+    metadata = await sharp(content, {
+      limitInputPixels: MAX_PHOTO_PIXELS,
+    }).metadata();
   } catch {
     throw new Error("Не вдалося прочитати фотографію. Завантажте справний файл PNG, JPEG або WebP.");
   }

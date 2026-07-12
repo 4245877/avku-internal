@@ -1,8 +1,16 @@
 # План Фазы 2: привязка Google-аккаунта к сотруднику в avku-internal
 
-Статус: ПЛАН, код не написан, ничего не применено. Реализуется после запуска
-туннеля (Фаза 1) и по отдельному подтверждению, т.к. требует правки
-`infra/nginx/app.conf` и пересборки контейнера api.
+Статус: РЕАЛИЗОВАНО В КОДЕ (2026-07-12). На месте: middleware
+`apps/api/src/http/access-auth.ts` (проверка JWT через `jose`), репозиторий
+`employees`, маршрут `GET /api/me`, правки `server.ts` / `config.ts` /
+`main.ts`, гигиена Cf-заголовков в `infra/nginx/app.conf` и тесты
+`src/__tests__/access-auth.test.ts`.
+
+Механизм ВЫКЛЮЧЕН по умолчанию: активируется, только когда в `.env` заданы
+`AVKU_ACCESS_TEAM_DOMAIN` и `AVKU_ACCESS_AUD`, а контейнер api пересобран. До
+активации поведение прежнее (LAN — доверенный локальный доступ, `/api/me`
+отдаёт `{"email":null,"local":true}`); внешний трафик всё равно закрыт
+Cloudflare Access на краю. Как включить — см. «Порядок внедрения» ниже.
 
 ## Зачем нужна Фаза 2
 
@@ -104,27 +112,32 @@ AVKU_ACCESS_AUD=<aud-тег приложения>
 - `apps/api/src/config.ts` — createEmployeeRepository, чтение
   AVKU_ACCESS_TEAM_DOMAIN / AVKU_ACCESS_AUD.
 - `apps/api/package.json` — зависимость `jose`.
-- `infra/nginx/app.conf` — гигиена заголовков: nginx на LAN-входе затирает
-  клиентские Cf-заголовки, чтобы их нельзя было подделать из локальной сети:
+- `infra/nginx/app.conf` — гигиена заголовков: клиентские Cf-заголовки
+  пропускаются в api только для трафика из туннеля и затираются на LAN. Вместо
+  двух server-блоков используется `map` по `$host` (один server-блок, меньше
+  дублирования):
 
   ```nginx
-  # внутри location /api/ и location /
-  proxy_set_header Cf-Access-Jwt-Assertion "";
-  proxy_set_header Cf-Access-Authenticated-User-Email "";
+  # http-контекст
+  map $host $cf_access_jwt {
+      internal.avku.org $http_cf_access_jwt_assertion;   # туннель — пропустить
+      default           "";                              # LAN — затереть
+  }
+  map $host $cf_access_email {
+      internal.avku.org $http_cf_access_authenticated_user_email;
+      default           "";
+  }
+
+  # внутри location /api/
+  proxy_set_header Cf-Access-Jwt-Assertion $cf_access_jwt;
+  proxy_set_header Cf-Access-Authenticated-User-Email $cf_access_email;
   ```
 
-  Примечание: cloudflared ходит в `nginx:80`, т.е. через тот же server-блок.
-  Чтобы не затереть заголовки туннельного трафика, добавляется ВТОРОЙ
-  server-блок `server_name internal.avku.org;` без затирания (запросы из туннеля
-  приходят с Host = internal.avku.org, запросы из LAN — с Host = 192.168.0.151).
-  Итоговая схема:
-
-  ```nginx
-  # server-блок 1: server_name internal.avku.org  — трафик из туннеля,
-  #   Cf-заголовки пропускаются как есть (их выставил Cloudflare).
-  # server-блок 2: default_server (_)        — LAN,
-  #   Cf-заголовки затираются.
-  ```
+  cloudflared ходит в `nginx:80` с Host = internal.avku.org, запросы из LAN
+  приходят с Host = 192.168.0.151. Пустое значение заставляет nginx вовсе не
+  передавать заголовок. Это defense-in-depth: даже если злоумышленник в LAN
+  подделает `Host: internal.avku.org` и протащит свой заголовок, backend всё
+  равно отвергнет невалидную подпись JWT.
 
 - `.env` — две новые переменные (см. выше).
 
@@ -144,14 +157,23 @@ AVKU_ACCESS_AUD=<aud-тег приложения>
   (рекомендация: 24 часа).
 - Принудительный logout сотрудника: Revoke sessions в Zero Trust.
 
-## Порядок внедрения (после подтверждения)
+## Порядок внедрения
 
-1. Код: access-auth.ts, employees, /api/me, правки server.ts/config.ts,
-   тесты в `apps/api/src/__tests__`.
-2. Правка `infra/nginx/app.conf` (двухблочная схема).
-3. `.env`: добавить AVKU_ACCESS_TEAM_DOMAIN и AVKU_ACCESS_AUD.
-4. Пересборка ТОЛЬКО своего проекта:
-   `docker compose -p avku-internal -f docker-compose.prod.yml up -d --build api nginx`
+1. ~~Код: access-auth.ts, employees, /api/me, правки server.ts/config.ts,
+   тесты.~~ Готово.
+2. ~~Правка `infra/nginx/app.conf` (гигиена Cf-заголовков через `map`).~~ Готово.
+3. `.env`: добавить две переменные (значение AUD — из Zero Trust → Access →
+   Applications → avku-internal → Overview → Application Audience (AUD) Tag):
+
+   ```
+   AVKU_ACCESS_TEAM_DOMAIN=avku.cloudflareaccess.com
+   AVKU_ACCESS_AUD=<aud-тег приложения>
+   ```
+
+4. Пересборка ТОЛЬКО своего проекта (api пересобрать обязательно — образ
+   пересобирается со свежим кодом; web/nginx — если катите вместе с новой
+   статической сборкой web):
+   `docker compose -p avku-internal -f docker-compose.prod.yml up -d --build api web nginx`
    (SKUFnya не затрагивается; проверка `grep skufnya` до и после).
 5. Проверки:
    - LAN: `curl http://192.168.0.151:18080/api/me` → `{"email":null,"local":true}`;

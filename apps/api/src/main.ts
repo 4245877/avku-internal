@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   PORT,
   createCertificateRepository,
+  createEmployeeRepository,
   createLogisticsRepository,
   createWarehouseRepository,
 } from "./config";
@@ -13,6 +14,7 @@ async function main(): Promise<void> {
   const certificateRepository = createCertificateRepository();
   const warehouseRepository = createWarehouseRepository();
   const logisticsRepository = createLogisticsRepository();
+  const employeeRepository = createEmployeeRepository();
 
   // Validate storage and templates before accepting traffic. The default
   // certificate template is mandatory, so a missing/broken default fails fast
@@ -21,6 +23,7 @@ async function main(): Promise<void> {
   await certificateRepository.check();
   await warehouseRepository.check();
   await logisticsRepository.check();
+  await employeeRepository.check();
 
   if (process.argv.includes("--check")) {
     console.log(
@@ -33,6 +36,7 @@ async function main(): Promise<void> {
     certificateRepository,
     warehouseRepository,
     logisticsRepository,
+    employeeRepository,
   });
 
   server.listen(

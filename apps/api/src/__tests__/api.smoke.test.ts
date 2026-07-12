@@ -42,6 +42,32 @@ async function api(
   };
 }
 
+// `fetch` forbids setting the `Origin` header, so drive CORS checks through the
+// low-level client where an arbitrary Origin can actually be sent.
+function rawRequest(
+  method: string,
+  pathname: string,
+  headers: Record<string, string>,
+): Promise<{ status: number; headers: http.IncomingHttpHeaders }> {
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      `${baseUrl}${pathname}`,
+      { method, headers },
+      (response) => {
+        response.resume();
+        response.on("end", () =>
+          resolve({
+            status: response.statusCode ?? 0,
+            headers: response.headers,
+          }),
+        );
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 before(async () => {
   dataRoot = await mkdtemp(path.join(tmpdir(), "avku-api-smoke-"));
   process.env.DATA_ROOT = dataRoot;
@@ -154,4 +180,44 @@ test("unknown route yields 404", async () => {
 
   assert.equal(status, 404);
   assert.deepEqual(json, { error: "Маршрут не найден." });
+});
+
+test("CORS withholds cross-origin access from an unlisted Origin", async () => {
+  const simple = await rawRequest("GET", "/api/warehouse", {
+    Origin: "https://evil.example",
+  });
+
+  assert.equal(simple.status, 200);
+  // The unauthenticated API must not hand its data to a page on another origin:
+  // with no allowlist configured, no Access-Control-Allow-Origin is emitted.
+  assert.equal(simple.headers["access-control-allow-origin"], undefined);
+
+  const preflight = await rawRequest("OPTIONS", "/api/warehouse", {
+    Origin: "https://evil.example",
+    "Access-Control-Request-Method": "DELETE",
+  });
+
+  assert.equal(preflight.headers["access-control-allow-origin"], undefined);
+  assert.equal(preflight.headers["access-control-allow-methods"], undefined);
+});
+
+test("CSV export neutralises spreadsheet formula injection", async () => {
+  const created = await api("POST", "/api/warehouse", {
+    name: '=HYPERLINK("http://evil.example","x")',
+    category: "Тест",
+    unit: "шт.",
+    quantity: 1,
+    availableNow: 1,
+  });
+
+  assert.equal(created.status, 201);
+
+  const response = await fetch(`${baseUrl}/api/warehouse/export.csv`);
+  const csv = await response.text();
+
+  // The formula is defused with a leading apostrophe...
+  assert.ok(csv.includes("'=HYPERLINK("));
+  // ...and never survives as a cell a spreadsheet would evaluate, i.e. a "="
+  // directly after a line start, a delimiter, or an opening quote.
+  assert.ok(!/(^|[",])=HYPERLINK/m.test(csv));
 });

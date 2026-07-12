@@ -12,6 +12,7 @@ RUN apt-get update \
     fontconfig \
     fonts-liberation \
     fonts-roboto \
+    gosu \
   && rm -rf /var/lib/apt/lists/*
 COPY infra/node/fonts.conf /etc/fonts/local.conf
 RUN fc-cache -f
@@ -48,6 +49,20 @@ COPY --from=deps /app/apps/api/node_modules ./node_modules
 COPY apps/api/package.json apps/api/pnpm-workspace.yaml apps/api/tsconfig.json ./
 COPY apps/api/src ./src
 COPY storage/certificates/templates /app/storage/certificates/templates
+COPY apps/api/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# Make the entrypoint executable and hand the app tree to the unprivileged
+# `node` user. Repo files are copied in as root with restrictive (0640) modes,
+# so without this the non-root runtime user could not even read package.json.
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+  && chown -R node:node /app
 
 EXPOSE 3001
-CMD ["sh", "-lc", "umask 027 && exec pnpm start"]
+# The container starts as root only so the entrypoint can make the /data volume
+# writable; it then drops to the unprivileged `node` user (via gosu) for the
+# actual server process, so nothing long-running runs as root.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# Run tsx directly via node instead of `pnpm start`: this avoids invoking the
+# corepack/pnpm shim at every startup (which would otherwise reach out to the
+# npm registry to fetch a package manager), keeping start-up offline and free of
+# extra supply-chain surface. Matches the loader used by the test script.
+CMD ["node", "--import", "tsx", "src/main.ts"]

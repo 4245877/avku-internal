@@ -7,6 +7,11 @@ import {
 } from "./modules/certificates/certificate-records";
 import { WarehouseRepository } from "./modules/warehouse/warehouse-records";
 import { LogisticsRepository } from "./modules/logistics/logistics-records";
+import { EmployeeRepository } from "./modules/employees/employee-records";
+import {
+  type AccessAuthenticator,
+  createAccessAuthenticator,
+} from "./http/access-auth";
 
 /**
  * Centralised runtime configuration: HTTP port and the storage roots that back
@@ -146,5 +151,33 @@ export function createLogisticsRepository(): LogisticsRepository {
 
   return new LogisticsRepository({
     storageRoot,
+  });
+}
+
+export function createEmployeeRepository(): EmployeeRepository {
+  const dataRoot = getDataRoot(getRepositoryRoot());
+  const storageRoot =
+    readEnv("EMPLOYEES_STORAGE_ROOT") ??
+    path.join(
+      dataRoot,
+      "employees",
+    );
+
+  return new EmployeeRepository({
+    storageRoot,
+  });
+}
+
+/**
+ * Builds the Cloudflare Access authenticator from the environment. When
+ * `AVKU_ACCESS_TEAM_DOMAIN` / `AVKU_ACCESS_AUD` are unset the authenticator is
+ * disabled and every request is treated as trusted local access — the
+ * pre-Phase-2 behaviour, which stays safe because external traffic is gated by
+ * Cloudflare Access at the edge.
+ */
+export function createAccessAuthenticatorFromEnv(): AccessAuthenticator {
+  return createAccessAuthenticator({
+    teamDomain: readEnv("AVKU_ACCESS_TEAM_DOMAIN"),
+    audience: readEnv("AVKU_ACCESS_AUD"),
   });
 }
