@@ -1,0 +1,327 @@
+{
+  "startedAt": "2026-07-20T18:30:54.719Z",
+  "marks": [
+    {
+      "label": "select 28cb614b-5884-4ee3-9dab-21c8c953ff6a (Федоренко Людмила Григорівна)",
+      "atMs": 660
+    },
+    {
+      "label": "select e8078e5d-64b9-4e4b-81b8-c313fae79221 (Кожуховська Діана Юріївна)",
+      "atMs": 1396
+    },
+    {
+      "label": "select 3e2d8569-b12b-47fd-bbae-9fe86aefb1a3 (Ничипоренко Тетяна Володимирівна)",
+      "atMs": 1709
+    },
+    {
+      "label": "select 9686e7a8-4aeb-448a-a36b-3d269f6555b6 (Гусакова Надія Петрівна)",
+      "atMs": 2039
+    },
+    {
+      "label": "select a4cd4a1e-b414-4a3f-9ecd-5bf3441d3751 (Акопян Світлана Василівна)",
+      "atMs": 2361
+    },
+    {
+      "label": "select 39a5242c-19f4-4a20-a217-003a84617fda (Воскобійник Наталія Іванівна)",
+      "atMs": 2677
+    },
+    {
+      "label": "select 9c971651-8f28-4f9f-bbcf-6e018f7604b5 (Пилипчук Сергій Вікторович)",
+      "atMs": 3012
+    },
+    {
+      "label": "select 2c698658-0f64-4204-b9f7-2930c9851974 (Заяць Ніна Михайлівна)",
+      "atMs": 3367
+    },
+    {
+      "label": "select b28a6282-e92d-4e72-9008-2178895e256e (Руденко Людмила Кузьмівна)",
+      "atMs": 3708
+    },
+    {
+      "label": "select 53e221d2-5bee-4a79-82d7-279f9df9ac54 (Чорний Олег Борисович)",
+      "atMs": 4019
+    },
+    {
+      "label": "select 16e10c5a-f604-41c1-838b-405dd883b623 (Чорна Любов Федорівна)",
+      "atMs": 4333
+    },
+    {
+      "label": "select 8aaa5256-6635-454e-8b6d-f4d7eda9c016 (Кралівець Віра Анатоліївна)",
+      "atMs": 4605
+    },
+    {
+      "label": "select 84a3e5d8-b781-4bc5-8846-d98a0abd01db (Ільницька Ірина Олексіївна)",
+      "atMs": 4908
+    },
+    {
+      "label": "select b5865c70-14fc-46e7-933d-6e806a607777 (Наконечна Раїса Миколаївна)",
+      "atMs": 5263
+    },
+    {
+      "label": "select 06121bbb-d9e4-409f-b4ee-d3d8daa91c68 (Повшедна Світлана Іванівна)",
+      "atMs": 5574
+    },
+    {
+      "label": "select 758bc966-33bd-405e-b22c-e0b958b0a0f7 (Поцілуєнко Людмила Степанівна)",
+      "atMs": 5873
+    },
+    {
+      "label": "select a9f3f5f8-244a-4b47-a4aa-79a6eb4a260b (Продавець Віра Анатоліївна)",
+      "atMs": 6206
+    },
+    {
+      "label": "select 3a3e5f44-cc71-4f16-907f-2a9db45a477b (Грядунова Алла Анатоліївна)",
+      "atMs": 6529
+    },
+    {
+      "label": "select af2008c6-ad97-4afe-a627-cec5a46f4309 (Кожуховський Віктор Федосійович)",
+      "atMs": 6826
+    },
+    {
+      "label": "select 4a5dd5a2-a912-41c8-a9c1-e3a70c9102e6 (Кравченко Галина Єфремівна)",
+      "atMs": 7148
+    }
+  ],
+  "entries": [
+    {
+      "recordId": "28cb614b-5884-4ee3-9dab-21c8c953ff6a",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/28cb614b-5884-4ee3-9dab-21c8c953ff6a-1783975715000.jpg?w=1200",
+      "startMs": 1215,
+      "endMs": 5024,
+      "durationMs": 3809,
+      "status": 200,
+      "outcome": "finished",
+      "failure": null,
+      "inFlightAtStart": 0,
+      "fromCache": false
+    },
+    {
+      "recordId": "e8078e5d-64b9-4e4b-81b8-c313fae79221",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/e8078e5d-64b9-4e4b-81b8-c313fae79221-1783975715127.jpg?w=1200",
+      "startMs": 1544,
+      "endMs": null,
+      "durationMs": null,
+      "status": 200,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 1,
+      "fromCache": false
+    },
+    {
+      "recordId": "3e2d8569-b12b-47fd-bbae-9fe86aefb1a3",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/3e2d8569-b12b-47fd-bbae-9fe86aefb1a3-1783975714788.jpg?w=1200",
+      "startMs": 1851,
+      "endMs": null,
+      "durationMs": null,
+      "status": 200,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 2,
+      "fromCache": false
+    },
+    {
+      "recordId": "9686e7a8-4aeb-448a-a36b-3d269f6555b6",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/9686e7a8-4aeb-448a-a36b-3d269f6555b6-1783975715615.jpg?w=1200",
+      "startMs": 2176,
+      "endMs": null,
+      "durationMs": null,
+      "status": 200,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 3,
+      "fromCache": false
+    },
+    {
+      "recordId": "a4cd4a1e-b414-4a3f-9ecd-5bf3441d3751",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/a4cd4a1e-b414-4a3f-9ecd-5bf3441d3751-1783975715219.jpg?w=1200",
+      "startMs": 2494,
+      "endMs": null,
+      "durationMs": null,
+      "status": 200,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 4,
+      "fromCache": false
+    },
+    {
+      "recordId": "39a5242c-19f4-4a20-a217-003a84617fda",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/39a5242c-19f4-4a20-a217-003a84617fda-1783975715060.jpg?w=1200",
+      "startMs": 2821,
+      "endMs": null,
+      "durationMs": null,
+      "status": 200,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 5,
+      "fromCache": false
+    },
+    {
+      "recordId": "9c971651-8f28-4f9f-bbcf-6e018f7604b5",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/9c971651-8f28-4f9f-bbcf-6e018f7604b5-1783975714389.jpg?w=1200",
+      "startMs": 3179,
+      "endMs": null,
+      "durationMs": null,
+      "status": 200,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 6,
+      "fromCache": false
+    },
+    {
+      "recordId": "2c698658-0f64-4204-b9f7-2930c9851974",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/2c698658-0f64-4204-b9f7-2930c9851974-1783975713860.jpg?w=1200",
+      "startMs": 3512,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 7,
+      "fromCache": false
+    },
+    {
+      "recordId": "b28a6282-e92d-4e72-9008-2178895e256e",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/b28a6282-e92d-4e72-9008-2178895e256e-1783975714116.jpg?w=1200",
+      "startMs": 3841,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 8,
+      "fromCache": false
+    },
+    {
+      "recordId": "53e221d2-5bee-4a79-82d7-279f9df9ac54",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/53e221d2-5bee-4a79-82d7-279f9df9ac54-1783975713993.jpg?w=1200",
+      "startMs": 4161,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 9,
+      "fromCache": false
+    },
+    {
+      "recordId": "16e10c5a-f604-41c1-838b-405dd883b623",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/16e10c5a-f604-41c1-838b-405dd883b623-1783975714294.jpg?w=1200",
+      "startMs": 4437,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 10,
+      "fromCache": false
+    },
+    {
+      "recordId": "8aaa5256-6635-454e-8b6d-f4d7eda9c016",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/8aaa5256-6635-454e-8b6d-f4d7eda9c016-1783975715298.jpg?w=1200",
+      "startMs": 4741,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 11,
+      "fromCache": false
+    },
+    {
+      "recordId": "84a3e5d8-b781-4bc5-8846-d98a0abd01db",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/84a3e5d8-b781-4bc5-8846-d98a0abd01db-1783975714936.jpg?w=1200",
+      "startMs": 5060,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 11,
+      "fromCache": false
+    },
+    {
+      "recordId": "b5865c70-14fc-46e7-933d-6e806a607777",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/b5865c70-14fc-46e7-933d-6e806a607777-1783975714701.jpg?w=1200",
+      "startMs": 5403,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 12,
+      "fromCache": false
+    },
+    {
+      "recordId": "06121bbb-d9e4-409f-b4ee-d3d8daa91c68",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/06121bbb-d9e4-409f-b4ee-d3d8daa91c68-1783975714599.jpg?w=1200",
+      "startMs": 5704,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 13,
+      "fromCache": false
+    },
+    {
+      "recordId": "758bc966-33bd-405e-b22c-e0b958b0a0f7",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/758bc966-33bd-405e-b22c-e0b958b0a0f7-1783975714535.jpg?w=1200",
+      "startMs": 6028,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 14,
+      "fromCache": false
+    },
+    {
+      "recordId": "a9f3f5f8-244a-4b47-a4aa-79a6eb4a260b",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/a9f3f5f8-244a-4b47-a4aa-79a6eb4a260b-1783975714853.jpg?w=1200",
+      "startMs": 6344,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 15,
+      "fromCache": false
+    },
+    {
+      "recordId": "3a3e5f44-cc71-4f16-907f-2a9db45a477b",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/3a3e5f44-cc71-4f16-907f-2a9db45a477b-1783975714469.jpg?w=1200",
+      "startMs": 6635,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 16,
+      "fromCache": false
+    },
+    {
+      "recordId": "af2008c6-ad97-4afe-a627-cec5a46f4309",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/af2008c6-ad97-4afe-a627-cec5a46f4309-1783975715677.jpg?w=1200",
+      "startMs": 6969,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 17,
+      "fromCache": false
+    },
+    {
+      "recordId": "4a5dd5a2-a912-41c8-a9c1-e3a70c9102e6",
+      "url": "http://192.168.0.151:18080/api/certificates/photos/4a5dd5a2-a912-41c8-a9c1-e3a70c9102e6-1783975715549.jpg?w=1200",
+      "startMs": 7276,
+      "endMs": null,
+      "durationMs": null,
+      "status": null,
+      "outcome": "pending",
+      "failure": null,
+      "inFlightAtStart": 18,
+      "fromCache": false
+    }
+  ]
+}

@@ -17,6 +17,13 @@ export const EMPTY_CROP = {
   rotation: 0,
 };
 
+/**
+ * Width requested for on-screen photo previews. The photo frame is 377px wide
+ * in template space, so this leaves room to zoom in without shipping the
+ * multi-megabyte original; exports still render from the stored file.
+ */
+export const PHOTO_PREVIEW_WIDTH = 1200;
+
 export const DEFAULT_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1-uk';
 export const LEGACY_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1';
 

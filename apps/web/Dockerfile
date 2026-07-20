@@ -21,6 +21,12 @@ ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
 
 COPY apps/web/package.json apps/web/pnpm-lock.yaml ./
+# @playwright/test is a dev-only E2E dependency. The build stage still installs
+# it (the lockfile is installed whole, and `--prod` would drop vite itself), but
+# this stops its postinstall from pulling ~400MB of browser binaries into a
+# layer the bundle never needs. The runtime stage below copies only `dist/`, so
+# neither Playwright nor a browser reaches the shipped image either way.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN pnpm install --frozen-lockfile
 # node_modules / dist / logs are excluded by .dockerignore, so this brings in
 # only the sources needed to build (index.html, vite.config.js, src/).

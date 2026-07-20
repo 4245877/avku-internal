@@ -3,7 +3,9 @@ import {
   type ServerResponse,
 } from "node:http";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+
+import sharp from "sharp";
 
 import type {
   CertificateRepository,
@@ -44,6 +46,93 @@ function getImageContentType(fileName: string): string {
   }
 
   return "image/png";
+}
+
+// Editor previews only ever paint the photo into a 377x519 frame, so the stored
+// original (routinely 3000px / several MB) is orders of magnitude larger than
+// needed. Serving a downscaled variant keeps the cropper responsive over the
+// Cloudflare tunnel, where a multi-megabyte photo per record switch is the
+// difference between an instant preview and a blank frame for several seconds.
+// Exports are unaffected: the renderer reads the original file from disk.
+const MAX_PREVIEW_WIDTH = 1600;
+const PREVIEW_CACHE_LIMIT = 160;
+
+type PreviewEntry = {
+  body: Buffer;
+  contentType: string;
+};
+
+const previewCache = new Map<string, PreviewEntry>();
+
+function rememberPreview(key: string, entry: PreviewEntry): void {
+  // Small insertion-ordered LRU: re-inserting on read/write keeps hot photos in.
+  previewCache.delete(key);
+  previewCache.set(key, entry);
+
+  while (previewCache.size > PREVIEW_CACHE_LIMIT) {
+    const oldestKey = previewCache.keys().next().value;
+
+    if (oldestKey === undefined) {
+      break;
+    }
+
+    previewCache.delete(oldestKey);
+  }
+}
+
+function parsePreviewWidth(value: string | null): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  const width = Number(value);
+
+  if (!Number.isFinite(width) || width <= 0) {
+    return null;
+  }
+
+  return Math.min(Math.round(width), MAX_PREVIEW_WIDTH);
+}
+
+/**
+ * Downscaled JPEG for on-screen use, cached per (file, width, mtime) so a photo
+ * is re-encoded once rather than on every request. `withoutEnlargement` keeps
+ * small originals untouched; `rotate()` bakes in EXIF orientation so the preview
+ * matches what the renderer produces.
+ */
+async function readPhotoPreview(
+  photoPath: string,
+  width: number,
+): Promise<PreviewEntry> {
+  const { mtimeMs } = await stat(photoPath);
+  const cacheKey = `${photoPath}:${width}:${mtimeMs}`;
+  const cached = previewCache.get(cacheKey);
+
+  if (cached) {
+    rememberPreview(cacheKey, cached);
+    return cached;
+  }
+
+  const body = await sharp(photoPath)
+    .rotate()
+    .resize({
+      width,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({
+      quality: 82,
+      mozjpeg: true,
+    })
+    .toBuffer();
+  const entry: PreviewEntry = {
+    body,
+    contentType: "image/jpeg",
+  };
+
+  rememberPreview(cacheKey, entry);
+
+  return entry;
 }
 
 function getTemplateAssetUrl(
@@ -203,19 +292,39 @@ export async function handleCertificateRequest(
 
   if (request.method === "GET" && photoMatch) {
     const fileName = photoMatch[1];
-    const content = await readFile(
-      repository.getPhotoPath(fileName),
-    );
+    const photoPath = repository.getPhotoPath(fileName);
+    // `?w=` asks for a downscaled preview; without it the original is served, so
+    // existing links and any consumer needing full resolution keep working.
+    const previewWidth = parsePreviewWidth(url.searchParams.get("w"));
+
+    if (previewWidth === null) {
+      const content = await readFile(photoPath);
+
+      response.writeHead(
+        200,
+        {
+          "Content-Type": getImageContentType(fileName),
+          "Content-Length": content.length,
+          "Cache-Control": "private, max-age=60",
+        },
+      );
+      response.end(content);
+      return;
+    }
+
+    const preview = await readPhotoPreview(photoPath, previewWidth);
 
     response.writeHead(
       200,
       {
-        "Content-Type": getImageContentType(fileName),
-        "Content-Length": content.length,
-        "Cache-Control": "private, max-age=60",
+        "Content-Type": preview.contentType,
+        "Content-Length": preview.body.length,
+        // A preview is derived from an immutable stored file at a fixed width,
+        // so it can be cached far longer than the original's short TTL.
+        "Cache-Control": "private, max-age=86400",
       },
     );
-    response.end(content);
+    response.end(preview.body);
     return;
   }
 

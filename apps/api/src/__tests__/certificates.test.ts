@@ -436,6 +436,80 @@ test("GET /api/certificates supports search and limit", async () => {
   assert.equal((limited.json as unknown[]).length, 1, "limit caps the result set");
 });
 
+/**
+ * The editor paints photos into a 377px frame, so it asks for `?w=` rather than
+ * pulling the stored original (routinely 3000px / several MB) across the tunnel
+ * on every record switch. The original must stay reachable for exports.
+ */
+test("photo endpoint serves a downscaled preview for ?w= and the original without it", async () => {
+  const largePhoto = await sharp({
+    create: {
+      width: 2400,
+      height: 3200,
+      channels: 3,
+      background: { r: 90, g: 140, b: 200 },
+    },
+  })
+    .png()
+    .toBuffer();
+
+  const created = await api("POST", "/api/certificates", {
+    ...baseRecordPayload(UK),
+    photoDataUrl: `data:image/png;base64,${largePhoto.toString("base64")}`,
+  });
+
+  assert.equal(created.status, 201);
+
+  const { photoUrl } = created.json as { photoUrl: string };
+
+  const original = await fetch(`${baseUrl}${photoUrl}`);
+  const originalBody = Buffer.from(await original.arrayBuffer());
+  assert.equal(original.status, 200);
+
+  const originalMeta = await sharp(originalBody).metadata();
+  assert.equal(originalMeta.width, 2400, "the unqualified URL keeps full resolution");
+
+  const preview = await fetch(`${baseUrl}${photoUrl}?w=1200`);
+  const previewBody = Buffer.from(await preview.arrayBuffer());
+  assert.equal(preview.status, 200);
+  assert.equal(preview.headers.get("content-type"), "image/jpeg");
+
+  const previewMeta = await sharp(previewBody).metadata();
+  assert.equal(previewMeta.width, 1200, "preview is resized to the requested width");
+  assert.ok(
+    previewBody.length < originalBody.length / 4,
+    `preview (${previewBody.length}B) should be far smaller than the original (${originalBody.length}B)`,
+  );
+});
+
+test("photo preview never enlarges a small original and caps the requested width", async () => {
+  const created = await api("POST", "/api/certificates", baseRecordPayload(UK));
+  assert.equal(created.status, 201);
+
+  const { photoUrl } = created.json as { photoUrl: string };
+
+  // The stored photo is 600px wide; asking for more must not upscale it.
+  const enlarged = await fetch(`${baseUrl}${photoUrl}?w=4000`);
+  const enlargedMeta = await sharp(Buffer.from(await enlarged.arrayBuffer())).metadata();
+
+  assert.equal(enlarged.status, 200);
+  assert.equal(enlargedMeta.width, 600, "small originals are served at their own size");
+
+  // A nonsensical width falls back to the original rather than erroring.
+  const invalid = await fetch(`${baseUrl}${photoUrl}?w=abc`);
+  assert.equal(invalid.status, 200);
+});
+
+test("repeated preview requests return identical bytes from the cache", async () => {
+  const created = await api("POST", "/api/certificates", baseRecordPayload(UK));
+  const { photoUrl } = created.json as { photoUrl: string };
+
+  const first = Buffer.from(await (await fetch(`${baseUrl}${photoUrl}?w=300`)).arrayBuffer());
+  const second = Buffer.from(await (await fetch(`${baseUrl}${photoUrl}?w=300`)).arrayBuffer());
+
+  assert.ok(first.equals(second), "a cached preview is byte-identical");
+});
+
 test("rejects a photo below the minimum dimension", async () => {
   const tinyPhoto = await sharp({
     create: {

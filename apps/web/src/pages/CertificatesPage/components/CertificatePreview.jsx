@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   formatDate,
-  getImageSize,
   getPhotoPlacement,
   splitFullName,
 } from '../../../features/certificates/certificateUtils.js';
+import { usePhotoImage } from '../../../features/certificates/usePhotoImage.js';
 import styles from '../CertificatesPage.module.css';
 
 const DEFAULT_PHOTO_BLEED = 2;
@@ -248,7 +248,7 @@ function CertificatePreview({
 }) {
   const previewRef = useRef(null);
   const [previewWidth, setPreviewWidth] = useState(380);
-  const [imageSize, setImageSize] = useState(null);
+  const { size: imageSize } = usePhotoImage(imageUrl);
   const layout = template?.layout;
   const assets = template?.assets;
 
@@ -269,26 +269,6 @@ function CertificatePreview({
 
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    getImageSize(imageUrl)
-      .then((size) => {
-        if (isMounted) {
-          setImageSize(size);
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setImageSize(null);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [imageUrl]);
 
   const photoPlacement = useMemo(
     () => (layout ? getPhotoPlacement(imageSize, getPhotoFrameForPlacement(layout.photo), form.photoCrop) : null),

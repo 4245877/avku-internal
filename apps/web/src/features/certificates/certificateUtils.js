@@ -4,6 +4,7 @@ import {
   LEGACY_CERTIFICATE_TEMPLATE_ID,
   MAX_ZOOM,
   MIN_ZOOM,
+  PHOTO_PREVIEW_WIDTH,
 } from './certificateTypes.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -460,24 +461,25 @@ export function getEffectiveResolution(imageSize, frame, crop) {
   return 1 / (getCoverScale(imageSize, frame, safeCrop.rotation) * safeCrop.zoom);
 }
 
-export function getImageSize(source) {
-  return new Promise((resolve, reject) => {
-    if (!source) {
-      resolve(null);
-      return;
-    }
+/**
+ * Editor-sized variant of a stored photo. The cropper and preview paint into a
+ * ~377px frame, so the stored original (often 3000px / several megabytes) only
+ * costs bandwidth; `?w=` asks the API for a downscaled copy instead. Data URLs
+ * (a photo just picked from disk) and absolute third-party URLs are returned
+ * untouched — there is no API to resize them.
+ */
+export function getPhotoPreviewUrl(source, width = PHOTO_PREVIEW_WIDTH) {
+  const url = String(source ?? '');
 
-    const image = new Image();
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) {
+    return url;
+  }
 
-    image.onload = () => {
-      resolve({
-        width: image.naturalWidth,
-        height: image.naturalHeight,
-      });
-    };
-    image.onerror = reject;
-    image.src = source;
-  });
+  if (!/\/api\/certificates\/photos\//.test(url)) {
+    return url;
+  }
+
+  return `${url}${url.includes('?') ? '&' : '?'}w=${Math.round(width)}`;
 }
 
 export function splitFullName(value) {

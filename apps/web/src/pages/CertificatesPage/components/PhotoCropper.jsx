@@ -19,10 +19,10 @@ import {
   clampCrop,
   getCropBounds,
   getEffectiveResolution,
-  getImageSize,
   getPhotoPlacement,
   normalizeRotation,
 } from '../../../features/certificates/certificateUtils.js';
+import { usePhotoImage } from '../../../features/certificates/usePhotoImage.js';
 import styles from '../CertificatesPage.module.css';
 
 const COARSE_NUDGE = 10;
@@ -41,6 +41,24 @@ const FACE_GUIDE = {
   eyeLine: 40,
 };
 
+/**
+ * The frame is empty for three different reasons and they are not
+ * interchangeable: a record with no photo, a photo still arriving, and a photo
+ * that failed. Reporting all three as «Фото не вибрано» made a slow load look
+ * like a record that had lost its photo.
+ */
+function getPlaceholderText(photoStatus) {
+  if (photoStatus === 'loading') {
+    return 'Завантаження фото…';
+  }
+
+  if (photoStatus === 'error') {
+    return 'Не вдалося завантажити фото';
+  }
+
+  return 'Фото не вибрано';
+}
+
 const PhotoCropper = forwardRef(function PhotoCropper({
   imageUrl,
   crop,
@@ -51,28 +69,8 @@ const PhotoCropper = forwardRef(function PhotoCropper({
 }, inputRef) {
   const frameRef = useRef(null);
   const dragStateRef = useRef(null);
-  const [imageSize, setImageSize] = useState(null);
   const [showGuides, setShowGuides] = useState(true);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    getImageSize(imageUrl)
-      .then((size) => {
-        if (isMounted) {
-          setImageSize(size);
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setImageSize(null);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [imageUrl]);
+  const { status: photoStatus, size: imageSize } = usePhotoImage(imageUrl);
 
   const safeCrop = useMemo(
     () => clampCrop(crop, imageSize, photoFrame),
@@ -254,7 +252,9 @@ const PhotoCropper = forwardRef(function PhotoCropper({
             {imageUrl && photoPlacement ? (
               <img className={styles.cropImage} src={imageUrl} alt="" style={photoPlacement} draggable="false" />
             ) : (
-              <span className={styles.cropPlaceholder}>Фото не вибрано</span>
+              <span className={styles.cropPlaceholder}>
+                {getPlaceholderText(photoStatus)}
+              </span>
             )}
 
             {isReady && showGuides ? (

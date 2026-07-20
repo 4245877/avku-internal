@@ -8,6 +8,7 @@ import {
   createFormFromRecord,
   getCertificateStatus,
   getEmptyCertificateForm,
+  getPhotoPreviewUrl,
   hasValidationErrors,
   validateCertificateForm,
 } from '../../features/certificates/certificateUtils.js';
@@ -195,7 +196,12 @@ function CertificatesPage() {
     () => records.find((record) => record.id === form.id) ?? null,
     [form.id, records],
   );
-  const previewImageUrl = form.photoDataUrl || form.photoUrl;
+  // A freshly picked file is already in memory as a data URL; a stored photo is
+  // fetched at editor size rather than at its full original resolution.
+  const previewImageUrl = useMemo(
+    () => form.photoDataUrl || getPhotoPreviewUrl(form.photoUrl),
+    [form.photoDataUrl, form.photoUrl],
+  );
   const templateOptions = templateCatalog.templates;
   const selectedTemplate = useMemo(
     () =>

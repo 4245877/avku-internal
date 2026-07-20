@@ -58,3 +58,10 @@ apps/web/vite-*.log
 apps/web/certificates-screenshot.png
 
 .pnpm-store/
+
+# Playwright E2E artifacts: traces, HAR/network logs, HTML report.
+apps/web/e2e-results/
+apps/web/e2e-report/
+# Cloudflare Access session state. Never commit — it is a bearer credential.
+**/*.storageState.json
+apps/web/.auth/
