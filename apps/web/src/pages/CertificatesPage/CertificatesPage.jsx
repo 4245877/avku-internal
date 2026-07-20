@@ -18,6 +18,7 @@ import {
   downloadCertificate,
   fetchCertificates,
   fetchCertificateTemplates,
+  printCertificateSheet,
   renewCertificate,
   updateCertificate,
 } from '../../features/certificates/certificateApi.js';
@@ -28,6 +29,7 @@ import DeleteCertificateDialog from './components/DeleteCertificateDialog.jsx';
 import PhotoCropper from './components/PhotoCropper.jsx';
 import styles from './CertificatesPage.module.css';
 
+const MAX_PRINT_SHEET_CARDS = 4;
 const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_PHOTO_TYPES = new Set([
   'image/jpeg',
@@ -159,6 +161,8 @@ function CertificatesPage() {
   const [registryAction, setRegistryAction] = useState(null);
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [shouldOpenPhotoPicker, setShouldOpenPhotoPicker] = useState(false);
+  const [printSelection, setPrintSelection] = useState([]);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const statusSummary = useMemo(() => {
     return records.reduce(
@@ -202,7 +206,7 @@ function CertificatesPage() {
     [form.templateId, templateCatalog.defaultId, templateOptions],
   );
   const isAnyActionRunning = Boolean(
-    loading || isSaving || exportingFormat || registryAction,
+    loading || isSaving || exportingFormat || registryAction || isPrinting,
   );
 
   const showNotice = useCallback((type, text) => {
@@ -692,6 +696,69 @@ function CertificatesPage() {
     showNotice,
   ]);
 
+  useEffect(() => {
+    setPrintSelection((currentSelection) => {
+      const availableIds = new Set(records.map((record) => record.id));
+      const nextSelection = currentSelection.filter((id) => availableIds.has(id));
+
+      return nextSelection.length === currentSelection.length
+        ? currentSelection
+        : nextSelection;
+    });
+  }, [records]);
+
+  const togglePrintSelection = useCallback((record) => {
+    setPrintSelection((currentSelection) => {
+      if (currentSelection.includes(record.id)) {
+        return currentSelection.filter((id) => id !== record.id);
+      }
+
+      if (currentSelection.length >= MAX_PRINT_SHEET_CARDS) {
+        showNotice(
+          'warning',
+          `На один аркуш A4 можна вибрати не більше ${MAX_PRINT_SHEET_CARDS} посвідчень.`,
+        );
+        return currentSelection;
+      }
+
+      return [...currentSelection, record.id];
+    });
+  }, [showNotice]);
+
+  const clearPrintSelection = useCallback(() => {
+    setPrintSelection([]);
+  }, []);
+
+  const printSelectedSheet = useCallback(async () => {
+    if (isAnyActionRunning) {
+      return;
+    }
+
+    if (printSelection.length === 0) {
+      showNotice('warning', 'Виберіть від одного до чотирьох посвідчень для друку.');
+      return;
+    }
+
+    setIsPrinting(true);
+
+    try {
+      const blob = await printCertificateSheet(printSelection);
+
+      downloadBlob(blob, 'posvidchennya-a4.pdf');
+      showNotice(
+        'success',
+        'Аркуш A4 сформовано: лицьовий бік — основна мова, зворотний — англійська.',
+      );
+    } catch (error) {
+      showNotice(
+        'error',
+        getErrorMessage(error, 'Не вдалося сформувати аркуш для друку.'),
+      );
+    } finally {
+      setIsPrinting(false);
+    }
+  }, [isAnyActionRunning, printSelection, showNotice]);
+
   const noticeClassName = notice
     ? [styles.notice, styles[NOTICE_STYLE_BY_TYPE[notice.type]]]
       .filter(Boolean)
@@ -785,6 +852,13 @@ function CertificatesPage() {
           loading={loading}
           loadError={registryLoadError}
           actionState={registryAction}
+          printSelection={printSelection}
+          maxPrintCards={MAX_PRINT_SHEET_CARDS}
+          isPrinting={isPrinting}
+          isActionRunning={isAnyActionRunning}
+          onTogglePrint={togglePrintSelection}
+          onClearPrint={clearPrintSelection}
+          onPrintSheet={printSelectedSheet}
           onOpen={openRecord}
           onRenew={renewRecord}
           onReplacePhoto={replacePhotoFromRegistry}

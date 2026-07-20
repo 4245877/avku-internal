@@ -18,7 +18,17 @@ import {
 } from "../../db/sqlite";
 
 import { renderCertificate } from "./certificate-renderer";
-import { createPdfFromPng } from "./certificate-pdf";
+import {
+  buildPdfFromImages,
+  createPdfFromPng,
+} from "./certificate-pdf";
+import {
+  composePrintSheet,
+  getBackSlot,
+  getFrontSlot,
+  MAX_PRINT_SHEET_CARDS,
+  type SheetCardPlacement,
+} from "./certificate-print-sheet";
 import type {
   CertificateLayout,
   CertificatePhotoCrop,
@@ -26,6 +36,7 @@ import type {
 } from "./certificate.types";
 
 export const DEFAULT_CERTIFICATE_TEMPLATE_ID = "volunteer-card-v1-uk";
+export const ENGLISH_CERTIFICATE_TEMPLATE_ID = "volunteer-card-v1-en";
 export const LEGACY_CERTIFICATE_TEMPLATE_ID = "volunteer-card-v1";
 
 const TEMPLATE_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -128,6 +139,13 @@ export interface CertificateListQuery {
   limit?: number | string;
   /** Rows to skip; only applied together with `limit`. Accepts raw query strings. */
   offset?: number | string;
+}
+
+export interface PrintSheetOptions {
+  /** Template used for the front (main-language) cards; defaults per record. */
+  frontTemplateId?: string;
+  /** Template used for the back (English) cards; auto-resolved when omitted. */
+  backTemplateId?: string;
 }
 
 export interface CertificateRepositoryOptions {
@@ -728,6 +746,28 @@ export class CertificateRepository {
     return this.readTemplateDefinition(templateId);
   }
 
+  /**
+   * Resolves the template used for the English (back) side of a print sheet.
+   * An explicit id wins; otherwise the first template whose locale is English
+   * is used, falling back to the conventional English template id.
+   */
+  private async resolveEnglishTemplateId(
+    explicitTemplateId?: string,
+  ): Promise<string> {
+    if (explicitTemplateId) {
+      return normalizeTemplateId(explicitTemplateId);
+    }
+
+    const templates = await this.listTemplates();
+    const englishTemplate = templates.find(
+      (template) => template.locale.toLowerCase() === "en",
+    );
+
+    return englishTemplate
+      ? englishTemplate.id
+      : normalizeTemplateId(ENGLISH_CERTIFICATE_TEMPLATE_ID);
+  }
+
   async list(
     query: CertificateListQuery = {},
   ): Promise<CertificateRecordResponse[]> {
@@ -1051,6 +1091,69 @@ export class CertificateRepository {
         templateId,
       ),
     );
+  }
+
+  /**
+   * Prepares a duplex-ready A4 print sheet for 1–4 certificates. The front page
+   * carries the main-language cards; the back page carries the English versions
+   * with each row mirrored horizontally so a card lines up behind its front
+   * after a long-edge flip. Returns a two-page PDF sized to A4.
+   */
+  async renderPrintSheet(
+    ids: string[],
+    options: PrintSheetOptions = {},
+  ): Promise<Buffer> {
+    const uniqueIds = [...new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map((id) => String(id ?? "").trim())
+        .filter((id) => id.length > 0),
+    )];
+
+    if (uniqueIds.length === 0) {
+      throw new Error("Виберіть хоча б одне посвідчення для друку.");
+    }
+
+    if (uniqueIds.length > MAX_PRINT_SHEET_CARDS) {
+      throw new Error(
+        `На один аркуш A4 можна розмістити не більше ${MAX_PRINT_SHEET_CARDS} посвідчень.`,
+      );
+    }
+
+    const backTemplateId = await this.resolveEnglishTemplateId(
+      options.backTemplateId,
+    );
+    const frontPlacements: SheetCardPlacement[] = [];
+    const backPlacements: SheetCardPlacement[] = [];
+
+    for (const [index, id] of uniqueIds.entries()) {
+      const frontPngPath = await this.renderPng(
+        id,
+        options.frontTemplateId,
+      );
+      const backPngPath = await this.renderPng(
+        id,
+        backTemplateId,
+      );
+
+      frontPlacements.push({
+        pngPath: frontPngPath,
+        slot: getFrontSlot(index),
+      });
+      backPlacements.push({
+        pngPath: backPngPath,
+        slot: getBackSlot(index),
+      });
+    }
+
+    const [frontPage, backPage] = await Promise.all([
+      composePrintSheet(frontPlacements),
+      composePrintSheet(backPlacements),
+    ]);
+
+    return buildPdfFromImages([
+      frontPage,
+      backPage,
+    ]);
   }
 
   private async ensureDirectories(): Promise<void> {

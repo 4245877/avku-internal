@@ -9,7 +9,10 @@ import type {
   CertificateRepository,
   CertificateTemplateDefinition,
 } from "../modules/certificates/certificate-records";
-import { readCertificatePayload } from "../http/body";
+import {
+  readCertificatePayload,
+  readJsonBody,
+} from "../http/body";
 import { sendJson } from "../http/responses";
 
 const TEMPLATE_ASSETS = new Map([
@@ -242,6 +245,40 @@ export async function handleCertificateRequest(
         await readCertificatePayload(request),
       ),
     );
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    pathname === "/api/certificates/print-sheet"
+  ) {
+    const body = await readJsonBody(request);
+    const ids = Array.isArray(body.ids)
+      ? body.ids.map((id) => String(id))
+      : [];
+    const content = await repository.renderPrintSheet(
+      ids,
+      {
+        frontTemplateId:
+          typeof body.frontTemplateId === "string"
+            ? body.frontTemplateId
+            : undefined,
+        backTemplateId:
+          typeof body.backTemplateId === "string"
+            ? body.backTemplateId
+            : undefined,
+      },
+    );
+
+    response.writeHead(
+      200,
+      {
+        "Content-Type": "application/pdf",
+        "Content-Length": content.length,
+        "Content-Disposition": 'attachment; filename="certificates-a4.pdf"',
+      },
+    );
+    response.end(content);
     return;
   }
 

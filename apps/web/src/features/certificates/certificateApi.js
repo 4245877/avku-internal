@@ -327,6 +327,32 @@ export async function downloadCertificate(record, format) {
   return response.blob();
 }
 
+export async function printCertificateSheet(ids, options = {}) {
+  const response = await fetch(resolveApiUrl('/certificates/print-sheet'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      ids,
+      ...options,
+    }),
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      const payload = await response.json();
+      throw new Error(payload.error || 'Не вдалося сформувати аркуш для друку.');
+    }
+
+    throw new Error('Не вдалося сформувати аркуш для друку.');
+  }
+
+  return response.blob();
+}
+
 export function downloadBlob(blob, fileName) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

@@ -13,6 +13,13 @@ function CertificateRegistry({
   loading,
   loadError,
   actionState,
+  printSelection = [],
+  maxPrintCards = 4,
+  isPrinting = false,
+  isActionRunning = false,
+  onTogglePrint,
+  onClearPrint,
+  onPrintSheet,
   onOpen,
   onRenew,
   onReplacePhoto,
@@ -20,6 +27,12 @@ function CertificateRegistry({
   onDelete,
 }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const printSelectionSet = useMemo(
+    () => new Set(printSelection),
+    [printSelection],
+  );
+  const selectedCount = printSelection.length;
+  const canPrint = selectedCount > 0 && selectedCount <= maxPrintCards && !isActionRunning;
   const filteredRecords = useMemo(() => {
     const query = normalizeWhitespace(searchQuery).toLowerCase();
 
@@ -46,6 +59,34 @@ function CertificateRegistry({
         <div>
           <p className={styles.paneEyebrow}>Реєстр</p>
           <h2 className={styles.paneTitle}>Збережені записи</h2>
+        </div>
+      </div>
+
+      <div className={styles.printPanel}>
+        <div className={styles.printPanelInfo}>
+          <span className={styles.printPanelTitle}>Друк на аркуші A4</span>
+          <span className={styles.printPanelHint}>
+            Вибрано {selectedCount} із {maxPrintCards}. Лицьовий бік — основна мова,
+            зворотний — англійська (дзеркально для двостороннього друку).
+          </span>
+        </div>
+        <div className={styles.printPanelActions}>
+          <button
+            className={styles.primaryButton}
+            type="button"
+            onClick={onPrintSheet}
+            disabled={!canPrint || isPrinting}
+          >
+            {isPrinting ? 'Формування…' : 'Підготувати A4 (PDF)'}
+          </button>
+          <button
+            className={styles.linkButton}
+            type="button"
+            onClick={onClearPrint}
+            disabled={selectedCount === 0 || isPrinting}
+          >
+            Очистити
+          </button>
         </div>
       </div>
 
@@ -81,17 +122,31 @@ function CertificateRegistry({
           ? filteredRecords.map((record) => {
             const status = getCertificateStatus(record.validUntil);
             const isBusy = actionState?.id === record.id;
+            const isChecked = printSelectionSet.has(record.id);
+            const isSelectDisabled =
+              isPrinting || (!isChecked && selectedCount >= maxPrintCards);
 
             return (
               <article
                 className={[
                   styles.recordItem,
                   selectedId === record.id ? styles.recordItemActive : '',
+                  isChecked ? styles.recordItemChecked : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
                 key={record.id}
               >
+                <label className={styles.recordSelect} title="Додати до аркуша друку A4">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    disabled={isSelectDisabled}
+                    onChange={() => onTogglePrint(record)}
+                  />
+                  <span className={styles.visuallyHidden}>Додати до аркуша друку A4</span>
+                </label>
+
                 <button className={styles.recordOpenButton} type="button" onClick={() => onOpen(record)}>
                   <span className={styles.recordName}>{record.fullName}</span>
                   <span className={styles.recordMeta}>
