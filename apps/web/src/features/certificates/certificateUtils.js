@@ -131,6 +131,42 @@ export function parseInputDate(value) {
   return date;
 }
 
+/**
+ * Parses a hand-typed or pasted date into the `yyyy-mm-dd` value the form
+ * stores. Accepts the separators people actually use (`.`, `,`, `/`, `-`,
+ * spaces), a bare digit run (`31122027`) and the ISO form itself.
+ * Returns an empty string when the text is not a complete, valid date.
+ */
+export function parseFlexibleDate(value) {
+  const text = normalizeWhitespace(value);
+
+  if (!text) {
+    return '';
+  }
+
+  const isoMatch = /^(\d{4})[.,/\s-](\d{1,2})[.,/\s-](\d{1,2})$/.exec(text);
+  const separatedMatch = /^(\d{1,2})[.,/\s-](\d{1,2})[.,/\s-](\d{4})$/.exec(text);
+  const digitsMatch = /^(\d{2})(\d{2})(\d{4})$/.exec(text);
+
+  let day = '';
+  let month = '';
+  let year = '';
+
+  if (isoMatch) {
+    [, year, month, day] = isoMatch;
+  } else if (separatedMatch) {
+    [, day, month, year] = separatedMatch;
+  } else if (digitsMatch) {
+    [, day, month, year] = digitsMatch;
+  } else {
+    return '';
+  }
+
+  const candidate = [year, month.padStart(2, '0'), day.padStart(2, '0')].join('-');
+
+  return parseInputDate(candidate) ? candidate : '';
+}
+
 export function formatDate(value) {
   const date = parseInputDate(value);
 

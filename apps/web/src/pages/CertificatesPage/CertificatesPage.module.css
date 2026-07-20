@@ -641,6 +641,56 @@
   box-shadow: 0 0 0 3px rgba(166, 62, 76, 0.2);
 }
 
+/* ──────────────────────────────────────────────────────────
+   DATE FIELD
+   ────────────────────────────────────────────────────────── */
+.dateField {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.dateField .input {
+  padding-right: calc(var(--input-padding-x) + 28px);
+}
+
+.dateFieldButton {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  font-size: var(--text-base);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: var(--transition-base);
+}
+
+.dateFieldButton:hover {
+  opacity: 1;
+}
+
+/* Native picker anchor: invisible, but must stay laid out so showPicker()
+   has somewhere to attach the calendar popup. */
+.dateFieldPicker {
+  position: absolute;
+  right: 6px;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .fieldError {
   display: block;
   font-size: var(--text-xs);

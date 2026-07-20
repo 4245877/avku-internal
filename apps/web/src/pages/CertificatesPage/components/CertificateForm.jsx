@@ -1,5 +1,6 @@
 import { getTemplateLabel } from '../../../features/certificates/certificateUtils.js';
 import styles from '../CertificatesPage.module.css';
+import DateField from './DateField.jsx';
 
 function CertificateForm({
   form,
@@ -105,29 +106,19 @@ function CertificateForm({
           ) : null}
         </label>
 
-        <label className={styles.field}>
-          <span>Дата видачі</span>
-          <input
-            className={`${styles.input} ${errors.issuedAt ? styles.inputError : ''}`}
-            type="date"
-            value={form.issuedAt}
-            onChange={(event) => onChange('issuedAt', event.target.value)}
-            aria-invalid={Boolean(errors.issuedAt)}
-          />
-          {errors.issuedAt ? <small className={styles.fieldError}>{errors.issuedAt}</small> : null}
-        </label>
+        <DateField
+          label="Дата видачі"
+          value={form.issuedAt}
+          error={errors.issuedAt}
+          onChange={(value) => onChange('issuedAt', value)}
+        />
 
-        <label className={styles.field}>
-          <span>Дійсне до</span>
-          <input
-            className={`${styles.input} ${errors.validUntil ? styles.inputError : ''}`}
-            type="date"
-            value={form.validUntil}
-            onChange={(event) => onChange('validUntil', event.target.value)}
-            aria-invalid={Boolean(errors.validUntil)}
-          />
-          {errors.validUntil ? <small className={styles.fieldError}>{errors.validUntil}</small> : null}
-        </label>
+        <DateField
+          label="Дійсне до"
+          value={form.validUntil}
+          error={errors.validUntil}
+          onChange={(value) => onChange('validUntil', value)}
+        />
       </div>
 
       <div className={styles.formActions}>
