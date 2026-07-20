@@ -304,18 +304,45 @@ function clamp(
   );
 }
 
+const MIN_CROP_ZOOM = 1;
+const MAX_CROP_ZOOM = 10;
+
 function normalizeCrop(
   crop?: Partial<CertificatePhotoCrop>,
 ): CertificatePhotoCrop {
+  const rotation = Number(crop?.rotation) || 0;
+
   return {
     zoom: clamp(
       Number(crop?.zoom) || 1,
-      1,
-      3,
+      MIN_CROP_ZOOM,
+      MAX_CROP_ZOOM,
     ),
     offsetX: Number(crop?.offsetX) || 0,
     offsetY: Number(crop?.offsetY) || 0,
+    rotation: ((((rotation + 180) % 360) + 360) % 360) - 180,
   };
+}
+
+/**
+ * Smallest scale at which the rotated photo still covers every corner of the
+ * frame. Mirrors `getCoverScale` in the web client — the two must agree or the
+ * rendered card will not match what the operator saw while cropping.
+ */
+function getCoverScale(
+  imageSize: { width: number; height: number },
+  frameWidth: number,
+  frameHeight: number,
+  rotation: number,
+): number {
+  const radians = (rotation * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(radians));
+  const sin = Math.abs(Math.sin(radians));
+
+  return Math.max(
+    (frameWidth * cos + frameHeight * sin) / imageSize.width,
+    (frameWidth * sin + frameHeight * cos) / imageSize.height,
+  );
 }
 
 function getOrientedSize(
@@ -351,27 +378,58 @@ async function createPhotoLayer(
   const metadata = await sharp(photoPath).metadata();
   const imageSize = getOrientedSize(metadata);
   const safeCrop = normalizeCrop(crop);
-  const scale = Math.max(
-    targetWidth / imageSize.width,
-    targetHeight / imageSize.height,
+  const scale = getCoverScale(
+    imageSize,
+    targetWidth,
+    targetHeight,
+    safeCrop.rotation,
   ) * safeCrop.zoom;
   const resizedWidth = Math.max(
     targetWidth,
-    Math.round(imageSize.width * scale),
+    Math.ceil(imageSize.width * scale),
   );
   const resizedHeight = Math.max(
     targetHeight,
-    Math.round(imageSize.height * scale),
+    Math.ceil(imageSize.height * scale),
   );
+
+  // Resize and rotate in separate pipelines: sharp fixes its own operation
+  // order within one pipeline, and the extract below needs the real post-
+  // rotation canvas size, which only the rotated buffer's metadata gives us.
+  const resizedPhoto = await sharp(photoPath)
+    .autoOrient()
+    .resize(resizedWidth, resizedHeight, {
+      fit: "fill",
+    })
+    .png()
+    .toBuffer();
+  const rotatedPhoto = safeCrop.rotation
+    ? await sharp(resizedPhoto)
+      .rotate(safeCrop.rotation, {
+        background: {
+          r: 0,
+          g: 0,
+          b: 0,
+          alpha: 0,
+        },
+      })
+      .png()
+      .toBuffer()
+    : resizedPhoto;
+  const rotatedMetadata = await sharp(rotatedPhoto).metadata();
+  const rotatedWidth = rotatedMetadata.width ?? resizedWidth;
+  const rotatedHeight = rotatedMetadata.height ?? resizedHeight;
+  // sharp centres the image on the rotated canvas, so the frame is offset from
+  // that centre by exactly the crop offset — the same pivot the preview uses.
   const extractLeft = clamp(
-    Math.round((resizedWidth - targetWidth) / 2 - safeCrop.offsetX),
+    Math.round((rotatedWidth - targetWidth) / 2 - safeCrop.offsetX),
     0,
-    Math.max(0, resizedWidth - targetWidth),
+    Math.max(0, rotatedWidth - targetWidth),
   );
   const extractTop = clamp(
-    Math.round((resizedHeight - targetHeight) / 2 - safeCrop.offsetY),
+    Math.round((rotatedHeight - targetHeight) / 2 - safeCrop.offsetY),
     0,
-    Math.max(0, resizedHeight - targetHeight),
+    Math.max(0, rotatedHeight - targetHeight),
   );
   const roundedMask = Buffer.from(`
     <svg
@@ -392,11 +450,7 @@ async function createPhotoLayer(
     </svg>
   `);
 
-  return sharp(photoPath)
-    .autoOrient()
-    .resize(resizedWidth, resizedHeight, {
-      fit: "fill",
-    })
+  return sharp(rotatedPhoto)
     .extract({
       left: extractLeft,
       top: extractTop,

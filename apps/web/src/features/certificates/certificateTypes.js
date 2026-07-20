@@ -1,7 +1,20 @@
+export const MIN_ZOOM = 1;
+export const MAX_ZOOM = 10;
+export const MIN_ROTATION = -180;
+export const MAX_ROTATION = 180;
+
+/**
+ * Zoom that puts a head-and-shoulders portrait inside the face guide oval.
+ * Used by the «Під овал» preset — there is no face detection, so this is a
+ * standard ID-photo framing the operator then nudges into place.
+ */
+export const FACE_PRESET_ZOOM = 1.35;
+
 export const EMPTY_CROP = {
   zoom: 1,
   offsetX: 0,
   offsetY: 0,
+  rotation: 0,
 };
 
 export const DEFAULT_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1-uk';
@@ -12,6 +25,7 @@ export const LEGACY_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1';
  * @property {number} zoom
  * @property {number} offsetX
  * @property {number} offsetY
+ * @property {number} rotation Clockwise degrees, normalised to (-180, 180].
  */
 
 /**

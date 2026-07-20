@@ -58,7 +58,59 @@ const DEFAULT_CROP: CertificatePhotoCrop = {
   zoom: 1,
   offsetX: 0,
   offsetY: 0,
+  rotation: 0,
 };
+const MIN_CROP_ZOOM = 1;
+const MAX_CROP_ZOOM = 10;
+/**
+ * Single definition of the table body, shared by the initial CREATE and by the
+ * rebuild in `relaxPhotoZoomConstraint`, so the two can never drift apart.
+ */
+const CERTIFICATE_RECORDS_COLUMNS = `
+        id TEXT PRIMARY KEY NOT NULL,
+        full_name TEXT NOT NULL CHECK (length(trim(full_name)) > 0),
+        first_name_en TEXT NOT NULL DEFAULT '',
+        last_name_en TEXT NOT NULL DEFAULT '',
+        certificate_number TEXT NOT NULL COLLATE NOCASE UNIQUE
+          CHECK (length(trim(certificate_number)) > 0),
+        issued_at TEXT NOT NULL
+          CHECK (issued_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        valid_until TEXT NOT NULL
+          CHECK (
+            valid_until GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND
+            valid_until >= issued_at
+          ),
+        photo_file_name TEXT NOT NULL CHECK (length(trim(photo_file_name)) > 0),
+        photo_crop_zoom REAL NOT NULL DEFAULT 1
+          CHECK (
+            photo_crop_zoom >= ${MIN_CROP_ZOOM} AND
+            photo_crop_zoom <= ${MAX_CROP_ZOOM}
+          ),
+        photo_crop_offset_x REAL NOT NULL DEFAULT 0,
+        photo_crop_offset_y REAL NOT NULL DEFAULT 0,
+        photo_crop_rotation REAL NOT NULL DEFAULT 0
+          CHECK (photo_crop_rotation >= -180 AND photo_crop_rotation <= 180),
+        template_id TEXT NOT NULL CHECK (length(trim(template_id)) > 0),
+        created_at TEXT NOT NULL CHECK (length(trim(created_at)) > 0),
+        updated_at TEXT NOT NULL CHECK (length(trim(updated_at)) > 0)
+`.trim();
+const CERTIFICATE_RECORDS_COLUMN_NAMES = [
+  "id",
+  "full_name",
+  "first_name_en",
+  "last_name_en",
+  "certificate_number",
+  "issued_at",
+  "valid_until",
+  "photo_file_name",
+  "photo_crop_zoom",
+  "photo_crop_offset_x",
+  "photo_crop_offset_y",
+  "photo_crop_rotation",
+  "template_id",
+  "created_at",
+  "updated_at",
+].join(", ");
 const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
 /**
  * Dimension guardrails. The renderer composes the photo into a 377×519 slot; a
@@ -319,18 +371,29 @@ function normalizeCrop(
   const zoom = Number(crop.zoom ?? fallback.zoom);
   const offsetX = Number(crop.offsetX ?? fallback.offsetX);
   const offsetY = Number(crop.offsetY ?? fallback.offsetY);
+  const rotation = Number(crop.rotation ?? fallback.rotation);
 
   return {
     zoom: Math.min(
       Math.max(
         Number.isFinite(zoom) ? zoom : DEFAULT_CROP.zoom,
-        1,
+        MIN_CROP_ZOOM,
       ),
-      3,
+      MAX_CROP_ZOOM,
     ),
     offsetX: Number.isFinite(offsetX) ? offsetX : DEFAULT_CROP.offsetX,
     offsetY: Number.isFinite(offsetY) ? offsetY : DEFAULT_CROP.offsetY,
+    rotation: normalizeRotation(
+      Number.isFinite(rotation) ? rotation : DEFAULT_CROP.rotation,
+    ),
   };
+}
+
+/** Wraps any angle into (-180, 180]; mirrors the web client's `normalizeRotation`. */
+function normalizeRotation(value: number): number {
+  const wrapped = ((((value + 180) % 360) + 360) % 360) - 180;
+
+  return Math.round(wrapped * 10) / 10;
 }
 
 function getExtensionForImageFormat(format: string): string {
@@ -567,6 +630,7 @@ function rowToRecord(row: Record<string, unknown>): CertificateRecord {
       zoom: row.photo_crop_zoom,
       offsetX: row.photo_crop_offset_x,
       offsetY: row.photo_crop_offset_y,
+      rotation: row.photo_crop_rotation,
     }),
     templateId: normalizeTemplateId(row.template_id),
     createdAt: String(row.created_at ?? ""),
@@ -1308,34 +1372,8 @@ export class CertificateRepository {
   private migrateDatabase(database: DatabaseSync): void {
     database.exec(`
       CREATE TABLE IF NOT EXISTS certificate_records (
-        id TEXT PRIMARY KEY NOT NULL,
-        full_name TEXT NOT NULL CHECK (length(trim(full_name)) > 0),
-        first_name_en TEXT NOT NULL DEFAULT '',
-        last_name_en TEXT NOT NULL DEFAULT '',
-        certificate_number TEXT NOT NULL COLLATE NOCASE UNIQUE
-          CHECK (length(trim(certificate_number)) > 0),
-        issued_at TEXT NOT NULL
-          CHECK (issued_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
-        valid_until TEXT NOT NULL
-          CHECK (
-            valid_until GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND
-            valid_until >= issued_at
-          ),
-        photo_file_name TEXT NOT NULL CHECK (length(trim(photo_file_name)) > 0),
-        photo_crop_zoom REAL NOT NULL DEFAULT 1
-          CHECK (photo_crop_zoom >= 1 AND photo_crop_zoom <= 3),
-        photo_crop_offset_x REAL NOT NULL DEFAULT 0,
-        photo_crop_offset_y REAL NOT NULL DEFAULT 0,
-        template_id TEXT NOT NULL CHECK (length(trim(template_id)) > 0),
-        created_at TEXT NOT NULL CHECK (length(trim(created_at)) > 0),
-        updated_at TEXT NOT NULL CHECK (length(trim(updated_at)) > 0)
+        ${CERTIFICATE_RECORDS_COLUMNS}
       );
-
-      CREATE INDEX IF NOT EXISTS idx_certificate_records_updated_at
-        ON certificate_records(updated_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_certificate_records_valid_until
-        ON certificate_records(valid_until);
-
     `);
 
     const columns = new Set(
@@ -1358,7 +1396,61 @@ export class CertificateRepository {
       );
     }
 
-    database.exec("PRAGMA user_version = 2");
+    if (!columns.has("photo_crop_rotation")) {
+      database.exec(
+        "ALTER TABLE certificate_records " +
+        "ADD COLUMN photo_crop_rotation REAL NOT NULL DEFAULT 0",
+      );
+    }
+
+    this.relaxPhotoZoomConstraint(database);
+
+    // Recreated after the rebuild below, which drops the old table's indexes.
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_certificate_records_updated_at
+        ON certificate_records(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_certificate_records_valid_until
+        ON certificate_records(valid_until);
+    `);
+
+    database.exec("PRAGMA user_version = 3");
+  }
+
+  /**
+   * Databases created before the zoom range was widened carry a table-level
+   * `CHECK (photo_crop_zoom <= 3)` that would reject the new crops. SQLite
+   * cannot alter a CHECK in place, so the table is rebuilt — but only when the
+   * stored schema still shows the old bound, which keeps this a no-op for
+   * fresh and already-migrated databases.
+   */
+  private relaxPhotoZoomConstraint(database: DatabaseSync): void {
+    const schema = database.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'table' AND name = 'certificate_records'
+    `).get() as Record<string, unknown> | undefined;
+
+    if (!String(schema?.sql ?? "").includes(`<= ${MAX_CROP_ZOOM}`)) {
+      database.exec(`
+        BEGIN;
+
+        CREATE TABLE certificate_records_migrated (
+          ${CERTIFICATE_RECORDS_COLUMNS}
+        );
+
+        INSERT INTO certificate_records_migrated (
+          ${CERTIFICATE_RECORDS_COLUMN_NAMES}
+        )
+        SELECT ${CERTIFICATE_RECORDS_COLUMN_NAMES}
+        FROM certificate_records;
+
+        DROP TABLE certificate_records;
+
+        ALTER TABLE certificate_records_migrated
+          RENAME TO certificate_records;
+
+        COMMIT;
+      `);
+    }
   }
 
   private async migrateLegacyRegistry(database: DatabaseSync): Promise<void> {
@@ -1491,11 +1583,12 @@ export class CertificateRepository {
         photo_crop_zoom,
         photo_crop_offset_x,
         photo_crop_offset_y,
+        photo_crop_rotation,
         template_id,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.fullName,
@@ -1508,6 +1601,7 @@ export class CertificateRepository {
       record.photoCrop.zoom,
       record.photoCrop.offsetX,
       record.photoCrop.offsetY,
+      record.photoCrop.rotation,
       record.templateId,
       record.createdAt,
       record.updatedAt,
@@ -1531,6 +1625,7 @@ export class CertificateRepository {
         photo_crop_zoom = ?,
         photo_crop_offset_x = ?,
         photo_crop_offset_y = ?,
+        photo_crop_rotation = ?,
         template_id = ?,
         updated_at = ?
       WHERE id = ?
@@ -1545,6 +1640,7 @@ export class CertificateRepository {
       record.photoCrop.zoom,
       record.photoCrop.offsetX,
       record.photoCrop.offsetY,
+      record.photoCrop.rotation,
       record.templateId,
       record.updatedAt,
       record.id,

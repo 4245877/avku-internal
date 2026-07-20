@@ -2,6 +2,8 @@ import {
   DEFAULT_CERTIFICATE_TEMPLATE_ID,
   EMPTY_CROP,
   LEGACY_CERTIFICATE_TEMPLATE_ID,
+  MAX_ZOOM,
+  MIN_ZOOM,
 } from './certificateTypes.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -312,39 +314,112 @@ export function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function toRadians(degrees) {
+  return (degrees * Math.PI) / 180;
+}
+
+/** Wraps any angle into (-180, 180] and keeps a tenth-of-a-degree precision. */
+export function normalizeRotation(value) {
+  const rotation = Number(value);
+
+  if (!Number.isFinite(rotation)) {
+    return 0;
+  }
+
+  const wrapped = ((((rotation + 180) % 360) + 360) % 360) - 180;
+
+  return Math.round(wrapped * 10) / 10;
+}
+
 export function normalizeCrop(crop) {
   return {
-    zoom: clamp(Number(crop?.zoom) || 1, 1, 3),
+    zoom: clamp(Number(crop?.zoom) || 1, MIN_ZOOM, MAX_ZOOM),
     offsetX: Number(crop?.offsetX) || 0,
     offsetY: Number(crop?.offsetY) || 0,
+    rotation: normalizeRotation(crop?.rotation),
   };
 }
 
-export function getCropLimits(imageSize, frame, zoom) {
+/**
+ * Smallest scale at which the rotated image still covers every corner of the
+ * frame. A rotated rect (half-extents a, b) contains the frame (half-extents
+ * p, q) exactly when a ≥ p·|cos| + q·|sin| and b ≥ p·|sin| + q·|cos| — solving
+ * both for the scale gives the two terms below. Reduces to the plain
+ * `max(frame/image)` cover scale at rotation 0.
+ */
+export function getCoverScale(imageSize, frame, rotation) {
+  const radians = toRadians(normalizeRotation(rotation));
+  const cos = Math.abs(Math.cos(radians));
+  const sin = Math.abs(Math.sin(radians));
+
+  return Math.max(
+    (frame.width * cos + frame.height * sin) / imageSize.width,
+    (frame.width * sin + frame.height * cos) / imageSize.height,
+  );
+}
+
+/**
+ * How far the image may travel along its **own** axes before a frame corner
+ * slides off it. With rotation the valid offsets form a rotated box, so the
+ * limits live in image space; `clampCrop` projects into and out of it.
+ */
+export function getCropLimits(imageSize, frame, zoom, rotation) {
   if (!imageSize?.width || !imageSize?.height || !frame) {
     return {
-      x: 0,
-      y: 0,
+      u: 0,
+      v: 0,
     };
   }
 
-  const safeZoom = clamp(Number(zoom) || 1, 1, 3);
-  const scale = Math.max(frame.width / imageSize.width, frame.height / imageSize.height) * safeZoom;
+  const safeZoom = clamp(Number(zoom) || 1, MIN_ZOOM, MAX_ZOOM);
+  const radians = toRadians(normalizeRotation(rotation));
+  const cos = Math.abs(Math.cos(radians));
+  const sin = Math.abs(Math.sin(radians));
+  const scale = getCoverScale(imageSize, frame, rotation) * safeZoom;
 
   return {
-    x: Math.max(0, Math.round((imageSize.width * scale - frame.width) / 2)),
-    y: Math.max(0, Math.round((imageSize.height * scale - frame.height) / 2)),
+    u: Math.max(0, (imageSize.width * scale - (frame.width * cos + frame.height * sin)) / 2),
+    v: Math.max(0, (imageSize.height * scale - (frame.width * sin + frame.height * cos)) / 2),
+  };
+}
+
+/**
+ * Axis-aligned bounds of the valid offset region, in frame coordinates. Only
+ * a display hint for the numeric inputs — the region itself is the rotated box
+ * from `getCropLimits`, so `clampCrop` stays the source of truth.
+ */
+export function getCropBounds(imageSize, frame, zoom, rotation) {
+  const limits = getCropLimits(imageSize, frame, zoom, rotation);
+  const radians = toRadians(normalizeRotation(rotation));
+  const cos = Math.abs(Math.cos(radians));
+  const sin = Math.abs(Math.sin(radians));
+
+  return {
+    x: Math.round(limits.u * cos + limits.v * sin),
+    y: Math.round(limits.u * sin + limits.v * cos),
   };
 }
 
 export function clampCrop(crop, imageSize, frame) {
   const safeCrop = normalizeCrop(crop);
-  const limits = getCropLimits(imageSize, frame, safeCrop.zoom);
+
+  if (!imageSize?.width || !imageSize?.height || !frame) {
+    return safeCrop;
+  }
+
+  const limits = getCropLimits(imageSize, frame, safeCrop.zoom, safeCrop.rotation);
+  const radians = toRadians(safeCrop.rotation);
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  // Project the frame-space offset onto the image axes, clamp there, rotate back.
+  const u = clamp(safeCrop.offsetX * cos + safeCrop.offsetY * sin, -limits.u, limits.u);
+  const v = clamp(-safeCrop.offsetX * sin + safeCrop.offsetY * cos, -limits.v, limits.v);
 
   return {
     zoom: safeCrop.zoom,
-    offsetX: clamp(safeCrop.offsetX, -limits.x, limits.x),
-    offsetY: clamp(safeCrop.offsetY, -limits.y, limits.y),
+    offsetX: u * cos - v * sin,
+    offsetY: u * sin + v * cos,
+    rotation: safeCrop.rotation,
   };
 }
 
@@ -354,7 +429,7 @@ export function getPhotoPlacement(imageSize, frame, crop) {
   }
 
   const safeCrop = clampCrop(crop, imageSize, frame);
-  const scale = Math.max(frame.width / imageSize.width, frame.height / imageSize.height) * safeCrop.zoom;
+  const scale = getCoverScale(imageSize, frame, safeCrop.rotation) * safeCrop.zoom;
   const width = imageSize.width * scale;
   const height = imageSize.height * scale;
   const left = (frame.width - width) / 2 + safeCrop.offsetX;
@@ -365,7 +440,24 @@ export function getPhotoPlacement(imageSize, frame, crop) {
     top: `${(top / frame.height) * 100}%`,
     width: `${(width / frame.width) * 100}%`,
     height: `${(height / frame.height) * 100}%`,
+    // Default transform-origin is the element centre — the same pivot the
+    // renderer rotates around, so preview and PDF agree.
+    transform: safeCrop.rotation ? `rotate(${safeCrop.rotation}deg)` : undefined,
   };
+}
+
+/**
+ * Effective source pixels per frame pixel. Below 1 the operator is enlarging
+ * past the photo's own resolution and the result will look soft.
+ */
+export function getEffectiveResolution(imageSize, frame, crop) {
+  if (!imageSize?.width || !imageSize?.height || !frame) {
+    return null;
+  }
+
+  const safeCrop = normalizeCrop(crop);
+
+  return 1 / (getCoverScale(imageSize, frame, safeCrop.rotation) * safeCrop.zoom);
 }
 
 export function getImageSize(source) {

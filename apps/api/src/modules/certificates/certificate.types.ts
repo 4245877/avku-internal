@@ -61,6 +61,8 @@ export interface CertificatePhotoCrop {
   zoom: number;
   offsetX: number;
   offsetY: number;
+  /** Clockwise degrees, normalised to (-180, 180]. */
+  rotation: number;
 }
 
 export interface RenderCertificateInput {
