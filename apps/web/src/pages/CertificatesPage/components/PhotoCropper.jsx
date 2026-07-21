@@ -59,6 +59,17 @@ function getPlaceholderText(photoStatus) {
   return 'Фото не вибрано';
 }
 
+/**
+ * Whether a drag event is actually carrying files. Dragging selected text or an
+ * on-page element also fires these events, and we only want to light up the
+ * frame for a real file drop.
+ */
+function isFileDrag(event) {
+  const types = event.dataTransfer?.types;
+
+  return Boolean(types && Array.from(types).includes('Files'));
+}
+
 const PhotoCropper = forwardRef(function PhotoCropper({
   imageUrl,
   crop,
@@ -66,10 +77,12 @@ const PhotoCropper = forwardRef(function PhotoCropper({
   error,
   onCropChange,
   onPhotoChange,
+  onPhotoDrop,
 }, inputRef) {
   const frameRef = useRef(null);
   const dragStateRef = useRef(null);
   const [showGuides, setShowGuides] = useState(true);
+  const [isDropActive, setIsDropActive] = useState(false);
   const { status: photoStatus, size: imageSize } = usePhotoImage(imageUrl);
 
   const safeCrop = useMemo(
@@ -174,6 +187,42 @@ const PhotoCropper = forwardRef(function PhotoCropper({
     }
   }, []);
 
+  const handleDragOver = useCallback((event) => {
+    if (!onPhotoDrop || !isFileDrag(event)) {
+      return;
+    }
+
+    // Signal a copy operation and prevent the browser from opening the file.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setIsDropActive(true);
+  }, [onPhotoDrop]);
+
+  const handleDragLeave = useCallback((event) => {
+    // dragleave also fires when moving onto child nodes, so only reset once the
+    // pointer has actually left the frame.
+    if (event.currentTarget.contains(event.relatedTarget)) {
+      return;
+    }
+
+    setIsDropActive(false);
+  }, []);
+
+  const handleDrop = useCallback((event) => {
+    if (!onPhotoDrop || !isFileDrag(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsDropActive(false);
+
+    const [file] = event.dataTransfer.files ?? [];
+
+    if (file) {
+      onPhotoDrop(file);
+    }
+  }, [onPhotoDrop]);
+
   // Wheel-to-zoom needs a non-passive listener, which React's onWheel cannot give us.
   useEffect(() => {
     const frame = frameRef.current;
@@ -238,9 +287,9 @@ const PhotoCropper = forwardRef(function PhotoCropper({
         <div className={styles.cropStage}>
           <div
             ref={frameRef}
-            className={`${styles.cropCanvasFrame} ${error ? styles.cropCanvasFrameError : ''}`}
+            className={`${styles.cropCanvasFrame} ${error ? styles.cropCanvasFrameError : ''} ${isDropActive ? styles.cropCanvasFrameDragging : ''}`}
             role="application"
-            aria-label="Перетягніть фото, стрілки — точне зміщення, колесо — масштаб"
+            aria-label="Перетягніть фото, стрілки — точне зміщення, колесо — масштаб. Перетягніть файл сюди, щоб замінити фотографію"
             tabIndex={isReady ? 0 : -1}
             onPointerDown={startDragging}
             onPointerMove={movePhoto}
@@ -248,14 +297,27 @@ const PhotoCropper = forwardRef(function PhotoCropper({
             onPointerCancel={stopDragging}
             onPointerLeave={stopDragging}
             onKeyDown={handleKeyDown}
+            onDragEnter={handleDragOver}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
             {imageUrl && photoPlacement ? (
               <img className={styles.cropImage} src={imageUrl} alt="" style={photoPlacement} draggable="false" />
             ) : (
               <span className={styles.cropPlaceholder}>
                 {getPlaceholderText(photoStatus)}
+                {onPhotoDrop ? (
+                  <span className={styles.cropDropHint}>або перетягніть файл сюди</span>
+                ) : null}
               </span>
             )}
+
+            {isDropActive ? (
+              <span className={styles.cropDropOverlay} aria-hidden="true">
+                Відпустіть, щоб замінити фото
+              </span>
+            ) : null}
 
             {isReady && showGuides ? (
               <svg

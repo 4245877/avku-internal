@@ -395,10 +395,7 @@ function CertificatesPage() {
     return true;
   }, [clearNotice, confirmUnsavedChanges, isAnyActionRunning, setCleanForm]);
 
-  const handlePhotoChange = useCallback(async (event) => {
-    const input = event.currentTarget;
-    const [file] = input.files ?? [];
-
+  const applyPhotoFile = useCallback(async (file) => {
     if (!file) {
       return;
     }
@@ -411,7 +408,6 @@ function CertificatesPage() {
         photo: validationMessage,
       }));
       showNotice('error', validationMessage);
-      input.value = '';
       return;
     }
 
@@ -442,10 +438,23 @@ function CertificatesPage() {
         photo: message,
       }));
       showNotice('error', message);
+    }
+  }, [clearNotice, form.templateId, showNotice]);
+
+  const handlePhotoChange = useCallback(async (event) => {
+    const input = event.currentTarget;
+    const [file] = input.files ?? [];
+
+    try {
+      await applyPhotoFile(file);
     } finally {
       input.value = '';
     }
-  }, [clearNotice, form.templateId, showNotice]);
+  }, [applyPhotoFile]);
+
+  const handlePhotoDrop = useCallback((file) => {
+    void applyPhotoFile(file);
+  }, [applyPhotoFile]);
 
   const saveForm = useCallback(async () => {
     if (loading || isSaving || registryAction || exportingFormat) {
@@ -893,6 +902,7 @@ function CertificatesPage() {
             error={errors.photo}
             onCropChange={updateCrop}
             onPhotoChange={handlePhotoChange}
+            onPhotoDrop={handlePhotoDrop}
           />
         </div>
 

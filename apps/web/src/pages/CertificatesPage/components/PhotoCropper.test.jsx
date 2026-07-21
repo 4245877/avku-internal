@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import PhotoCropper from './PhotoCropper.jsx';
 
@@ -192,6 +192,54 @@ describe('PhotoCropper', () => {
 
     expect(cropperImage()?.getAttribute('src')).toBe(PHOTO_B);
     expect(screen.queryByText('Не вдалося завантажити фото')).toBeNull();
+  });
+
+  it('hands a dropped image file to onPhotoDrop', () => {
+    const onPhotoDrop = vi.fn();
+    render(
+      <PhotoCropper
+        imageUrl=""
+        crop={CROP}
+        photoFrame={PHOTO_FRAME}
+        error=""
+        onCropChange={() => {}}
+        onPhotoChange={() => {}}
+        onPhotoDrop={onPhotoDrop}
+      />,
+    );
+
+    const frame = screen.getByRole('application');
+    const file = new File(['x'], 'photo.jpg', { type: 'image/jpeg' });
+    const dataTransfer = { types: ['Files'], files: [file], dropEffect: '' };
+
+    fireEvent.dragOver(frame, { dataTransfer });
+    fireEvent.drop(frame, { dataTransfer });
+
+    expect(onPhotoDrop).toHaveBeenCalledTimes(1);
+    expect(onPhotoDrop).toHaveBeenCalledWith(file);
+  });
+
+  it('ignores drags that carry no file', () => {
+    const onPhotoDrop = vi.fn();
+    render(
+      <PhotoCropper
+        imageUrl=""
+        crop={CROP}
+        photoFrame={PHOTO_FRAME}
+        error=""
+        onCropChange={() => {}}
+        onPhotoChange={() => {}}
+        onPhotoDrop={onPhotoDrop}
+      />,
+    );
+
+    const frame = screen.getByRole('application');
+    const dataTransfer = { types: ['text/plain'], files: [], dropEffect: '' };
+
+    fireEvent.dragOver(frame, { dataTransfer });
+    fireEvent.drop(frame, { dataTransfer });
+
+    expect(onPhotoDrop).not.toHaveBeenCalled();
   });
 
   it('does not let a late success from a previous photo set the wrong size', async () => {
