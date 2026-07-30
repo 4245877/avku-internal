@@ -64,6 +64,12 @@ const navigationItems = [
     description: 'Instagram та YouTube',
     icon: 'S',
   },
+  {
+    path: '/elections',
+    label: 'Вибори',
+    description: 'Карта будинків',
+    icon: 'В',
+  },
 ];
 
 function MainLayout() {
