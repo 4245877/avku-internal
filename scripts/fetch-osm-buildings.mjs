@@ -2,13 +2,19 @@
 /**
  * Builds the "Вибори" house dataset from OpenStreetMap.
  *
- * Downloads every mapped building inside the covered radius through the
+ * Downloads every mapped building around the campaign address through the
  * Overpass API, normalizes it with the same module the app uses, and writes the
  * snapshot the web bundle ships with. Re-run it whenever the district should
  * pick up new OSM edits — the map has no other source of buildings.
  *
+ * Overpass filters by radius, the app by the working-area polygon, so the
+ * default radius is whatever it takes to cover `workspaceArea.geo.json` from
+ * the campaign address, plus a margin for buildings hanging over the border.
+ * Re-run it after re-tracing the boundary: a wider polygon needs a wider
+ * download.
+ *
  *   node scripts/fetch-osm-buildings.mjs
- *   node scripts/fetch-osm-buildings.mjs --radius 3000 --out apps/web/public/data/elections/houses.json
+ *   node scripts/fetch-osm-buildings.mjs --radius 4000 --out apps/web/public/data/elections/houses.json
  *   node scripts/fetch-osm-buildings.mjs --include-unaddressed
  *
  * Data © OpenStreetMap contributors, ODbL 1.0 — https://osm.org/copyright
@@ -18,19 +24,28 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import {
-  AREA_CENTER,
-  AREA_RADIUS_METERS,
-} from '../apps/web/src/features/elections/geo.js';
+import { AREA_CENTER } from '../apps/web/src/features/elections/geo.js';
 import { listStreetNames } from '../apps/web/src/features/elections/osmBuildings.js';
 import { fetchHousesFromOverpass } from '../apps/web/src/features/elections/overpassClient.js';
+import {
+  WORKSPACE_AREA_NAME,
+  filterHousesToWorkspace,
+  workspaceCoverRadiusMeters,
+} from '../apps/web/src/features/elections/workspaceArea.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_OUTPUT = 'apps/web/public/data/elections/houses.json';
+/** Slack around the polygon, so a building straddling the border is complete. */
+const COVER_MARGIN_METERS = 250;
+
+/** Narrowest circle that still contains the traced boundary, plus the margin. */
+function defaultRadiusMeters() {
+  return workspaceCoverRadiusMeters() + COVER_MARGIN_METERS;
+}
 
 function parseArguments(argv) {
   const options = {
-    radiusMeters: AREA_RADIUS_METERS,
+    radiusMeters: defaultRadiusMeters(),
     outputPath: DEFAULT_OUTPUT,
     requireAddress: true,
   };
@@ -106,7 +121,8 @@ async function main() {
       [
         'Оновлює датасет будинків «Вибори» з OpenStreetMap.',
         '',
-        '  --radius <м>            радіус робочої зони (типово 3000)',
+        `  --radius <м>            радіус завантаження (типово ${defaultRadiusMeters()}, ` +
+          'щоб покрити полігон робочої території)',
         `  --out <шлях>            куди писати (типово ${DEFAULT_OUTPUT})`,
         '  --include-unaddressed   додати будівлі без addr:housenumber',
       ].join('\n'),
@@ -130,6 +146,9 @@ async function main() {
     throw new Error('Overpass повернув порожній набір — датасет не перезаписано.');
   }
 
+  // The snapshot keeps the whole download: the polygon is applied when the app
+  // loads it, so re-tracing a border does not mean re-downloading the district.
+  const covered = filterHousesToWorkspace(houses);
   const streets = listStreetNames(houses);
   const snapshot = {
     version: 1,
@@ -139,7 +158,8 @@ async function main() {
     fetchedAt: new Date().toISOString(),
     area: {
       center: AREA_CENTER,
-      radiusMeters: options.radiusMeters,
+      downloadRadiusMeters: options.radiusMeters,
+      workspace: WORKSPACE_AREA_NAME,
       label: `${AREA_CENTER.address}, ${AREA_CENTER.city}, ${AREA_CENTER.postalCode}`,
     },
     streets,
@@ -156,6 +176,7 @@ async function main() {
 
   console.log(`\nЗаписано ${outputPath}`);
   console.log(`  будинків:        ${houses.length}`);
+  console.log(`  у межах зони:    ${covered.length} (${WORKSPACE_AREA_NAME})`);
   console.log(`  вулиць:          ${streets.length}`);
   console.log(`  з поверховістю:  ${withLevels}`);
   console.log(`  за типом:        ${JSON.stringify(byType)}`);

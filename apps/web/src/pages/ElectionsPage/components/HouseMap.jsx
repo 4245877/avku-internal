@@ -14,10 +14,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
 
-import { AREA_RADIUS_METERS } from '../../../features/elections/geo.js';
+import { WORKSPACE_AREA_NAME } from '../../../features/elections/workspaceArea.js';
 import { DEFAULT_BASEMAP_ID, getBasemap } from '../../../features/elections/basemaps.js';
 import { useHouseLayer } from '../../../features/elections/useHouseLayer.js';
 import { useLeafletMap } from '../../../features/elections/useLeafletMap.js';
+import {
+  useAreaEditMode,
+  useWorkspaceEditor,
+} from '../../../features/elections/useWorkspaceEditor.js';
 import {
   formatApartments,
   getFillStatus,
@@ -27,6 +31,7 @@ import { fillStatusesById } from '../../../features/elections/electionsTypes.js'
 import MapBasemapSwitcher from './MapBasemapSwitcher.jsx';
 import MapControls from './MapControls.jsx';
 import MapLegend from './MapLegend.jsx';
+import WorkspaceAreaEditor from './WorkspaceAreaEditor.jsx';
 import { MapEmptyResultState, MapErrorState, MapLoadingState } from './MapStates.jsx';
 import styles from '../ElectionsPage.module.css';
 
@@ -52,6 +57,10 @@ function HouseMap({
   const [hoveredHouseId, setHoveredHouseId] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState(null);
 
+  // Temporary mode, opened with `?areaEdit=1`: the map turns into a drawing
+  // surface for the working-area boundary and stops selecting buildings.
+  const { isActive: isAreaEditing, exit: exitAreaEditing } = useAreaEditMode();
+
   const {
     containerRef,
     map,
@@ -61,7 +70,9 @@ function HouseMap({
     zoomOut,
     resetView,
     focusOnBounds,
-  } = useLeafletMap({ basemapId });
+  } = useLeafletMap({ basemapId, isAreaEditing });
+
+  const areaEditor = useWorkspaceEditor({ map, isActive: isAreaEditing });
 
   const handleSelectHouse = useCallback(
     (houseId) => onSelectHouse(houseId ?? null),
@@ -80,6 +91,7 @@ function HouseMap({
     selectedHouseId: selectedHouse?.id ?? null,
     hoveredHouseId,
     isImageryBasemap: Boolean(getBasemap(basemapId).isImagery),
+    isSelectionEnabled: !isAreaEditing,
     onSelectHouse: handleSelectHouse,
     onHoverHouse: handleHoverHouse,
   });
@@ -136,15 +148,16 @@ function HouseMap({
       <div className={styles.mapSurface}>
         <div
           aria-describedby="elections-map-hint"
-          aria-label="Карта будинків у радіусі 3 км від штабу"
+          aria-label={`Карта будинків у межах території «${WORKSPACE_AREA_NAME}»`}
           className={styles.mapCanvas}
           ref={containerRef}
           role="application"
         />
 
         <p className="sr-only" id="elections-map-hint">
-          Карта показує реальні будинки з OpenStreetMap у радіусі{' '}
-          {AREA_RADIUS_METERS / 1000} км від адреси вулиця Якуба Коласа, 6.
+          Карта показує реальні будинки з OpenStreetMap у межах робочої
+          території — окресленого полігона навколо адреси вулиця Якуба Коласа, 6.
+          Територія поза межами затемнена, будинки на ній недоступні.
           Перетягуйте карту стрілками, змінюйте масштаб клавішами плюс і мінус.
           Щоб вибрати будинок за допомогою клавіатури, скористайтеся списком
           будинків поруч із картою.
@@ -175,11 +188,19 @@ function HouseMap({
 
         <MapBasemapSwitcher activeId={basemapId} onChange={setBasemapId} />
 
-        <MapLegend
-          activeStatus={fillStatusFilter}
-          onStatusChange={onFillStatusChange}
-          summary={summary}
-        />
+        {isAreaEditing && (
+          <WorkspaceAreaEditor editor={areaEditor} onExit={exitAreaEditing} />
+        )}
+
+        {/* The legend reads survey progress — not a question while the border
+            is being traced, and the editor needs the corner it sits in. */}
+        {!isAreaEditing && (
+          <MapLegend
+            activeStatus={fillStatusFilter}
+            onStatusChange={onFillStatusChange}
+            summary={summary}
+          />
+        )}
 
         {status === 'loading' && <MapLoadingState />}
 

@@ -133,6 +133,7 @@ export function useHouseLayer({
   onSelectHouse,
   onHoverHouse,
   isImageryBasemap = false,
+  isSelectionEnabled = true,
 }) {
   const layersRef = useRef(new Map());
   const groupRef = useRef(null);
@@ -145,6 +146,10 @@ export function useHouseLayer({
   /* Page-level handlers are recreated every render; the map must not be. */
   const callbacksRef = useRef({ onSelectHouse, onHoverHouse });
   callbacksRef.current = { onSelectHouse, onHoverHouse };
+
+  /* Read inside the delegated handlers, which are bound once per map. */
+  const isSelectionEnabledRef = useRef(isSelectionEnabled);
+  isSelectionEnabledRef.current = isSelectionEnabled;
 
   const housesById = useMemo(
     () => new Map(houses.map((house) => [house.id, house])),
@@ -165,11 +170,17 @@ export function useHouseLayer({
 
     // `bubblingMouseEvents: false` on the polygons stops a building click from
     // also reaching the map, so this only fires on roads, yards and open ground.
-    const clearSelection = () => callbacksRef.current.onSelectHouse(null);
+    const clearSelection = () => {
+      if (isSelectionEnabledRef.current) {
+        callbacksRef.current.onSelectHouse(null);
+      }
+    };
 
-    group.on('click', (event) =>
-      callbacksRef.current.onSelectHouse(event.layer?.options?.houseId ?? null),
-    );
+    group.on('click', (event) => {
+      if (isSelectionEnabledRef.current) {
+        callbacksRef.current.onSelectHouse(event.layer?.options?.houseId ?? null);
+      }
+    });
     // The pointer position travels with the event, so the tooltip can appear on
     // the same frame the building is entered instead of on the next move.
     group.on('mouseover', (event) =>
@@ -302,8 +313,9 @@ export function useHouseLayer({
         isHeadquarters: house.isHeadquarters,
       };
 
-      // Faded buildings stop swallowing clicks aimed at the ones that match.
-      layer.options.interactive = isMatched;
+      // Faded buildings stop swallowing clicks aimed at the ones that match,
+      // and while the boundary is being traced nothing takes clicks at all.
+      layer.options.interactive = isMatched && isSelectionEnabled;
 
       const key = styleKeyOf(state, fillScale);
 
@@ -322,6 +334,7 @@ export function useHouseLayer({
     hoveredHouseId,
     housesById,
     isImageryBasemap,
+    isSelectionEnabled,
     map,
     matchedIds,
     paletteVersion,

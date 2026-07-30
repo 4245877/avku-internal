@@ -45,7 +45,7 @@ export function MapLoadingState() {
       <div className={styles.mapOverlayCard}>
         <span aria-hidden="true" className={styles.mapSpinner} />
         <strong>Завантаження карти</strong>
-        <span>Готуємо будинки в радіусі 3 км від штабу…</span>
+        <span>Готуємо будинки в межах робочої території…</span>
       </div>
     </div>
   );

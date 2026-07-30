@@ -3,6 +3,7 @@
  */
 
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
+import { formatAreaSquareMeters } from '../../../features/elections/geo.js';
 import { formatNumber } from '../../../features/elections/houseUtils.js';
 import styles from '../ElectionsPage.module.css';
 
@@ -16,7 +17,7 @@ function ElectionsHeader({ area, summary, isLoading, onResetDemoData }) {
       icon: 'building',
       label: 'Будинків у зоні',
       value: formatNumber(summary.total),
-      hint: `Радіус ${area.radiusMeters / 1000} км`,
+      hint: `Площа ${formatAreaSquareMeters(area.areaSqm)}`,
     },
     {
       id: 'complete',
@@ -57,15 +58,15 @@ function ElectionsHeader({ area, summary, isLoading, onResetDemoData }) {
           <span>
             <strong>{area.center.address}</strong>
             <small>
-              {area.center.city}, {area.center.postalCode} · {area.center.district} ·
-              радіус {area.radiusMeters / 1000} км
+              {area.center.city}, {area.center.postalCode} · {area.center.district} ·{' '}
+              {area.name}, {formatAreaSquareMeters(area.areaSqm)}
             </small>
           </span>
         </p>
 
         <p className={styles.heroDescription}>
-          Інтерактивна карта реальних будинків території за даними
-          OpenStreetMap. Натисніть на будинок, щоб відкрити картку, переглянути
+          Інтерактивна карта реальних будинків у межах робочої території за
+          даними OpenStreetMap. Натисніть на будинок, щоб відкрити картку, переглянути
           підʼїзди, квартири, мешканців і контакти або внести нові дані після
           обходу.
         </p>

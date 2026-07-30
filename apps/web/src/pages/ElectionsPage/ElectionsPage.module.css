@@ -9,7 +9,9 @@
   --map-bg-start: #f7fbfe;
   --map-bg-end: #e4eff8;
   --map-area-fill: rgba(255, 255, 255, 0.72);
-  --map-area-ring: rgba(44, 95, 138, 0.42);
+  --map-area-ring: rgba(44, 95, 138, 0.55);
+  /* Ground outside the working-area polygon — dimmed and out of play. */
+  --map-outside-fill: rgba(28, 46, 64, 0.42);
 
   --map-road-casing: rgba(44, 95, 138, 0.16);
   --map-road-surface: #ffffff;
@@ -63,7 +65,8 @@
   --map-bg-start: #14243a;
   --map-bg-end: #0d1826;
   --map-area-fill: rgba(22, 40, 60, 0.55);
-  --map-area-ring: rgba(168, 221, 247, 0.34);
+  --map-area-ring: rgba(168, 221, 247, 0.5);
+  --map-outside-fill: rgba(4, 10, 18, 0.55);
 
   --map-road-casing: rgba(0, 0, 0, 0.4);
   --map-road-surface: #22384f;
@@ -900,12 +903,76 @@
   filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7);
 }
 
-/* Working-area ring — the 3 km the district covers. */
+/* Border of the working area — the traced polygon the district covers. */
 :global(.elections-area-ring) {
   fill: none;
   stroke: var(--map-area-ring);
-  stroke-width: 1.5px;
+  stroke-width: 2px;
   stroke-dasharray: 10 8;
+  stroke-linejoin: round;
+}
+
+/*
+ * Everything outside the polygon. One path with the working area punched out
+ * of it as a hole, so the dimming stops exactly at the border.
+ */
+:global(.elections-area-mask) {
+  fill: var(--map-outside-fill);
+  fill-opacity: 1;
+  stroke: none;
+}
+
+/* ── BOUNDARY EDITING (?areaEdit=1) ───────────────────────── */
+:global(.elections-area-editing) :global(.leaflet-grab),
+:global(.elections-area-editing) :global(.leaflet-container) {
+  cursor: crosshair;
+}
+
+/* The outline as it is being traced. */
+:global(.elections-area-draft) {
+  fill: var(--ice-deep, #2c5f8a);
+  fill-opacity: 0.1;
+  stroke: var(--ice-deep, #2c5f8a);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+}
+
+:global(.elections-area-vertex),
+:global(.elections-area-midpoint) {
+  cursor: grab;
+}
+
+:global(.elections-area-vertex) span,
+:global(.elections-area-midpoint) span {
+  position: absolute;
+  inset: 3px;
+
+  display: block;
+
+  border: 2px solid var(--ice-deep, #2c5f8a);
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+
+  transition: inset var(--duration-fast, 120ms) var(--ease-out);
+}
+
+:global(.elections-area-vertex) span {
+  inset: 0;
+  background: var(--panel-surface-solid, #fff);
+}
+
+/* Hollow, and half the weight: an invitation rather than a real vertex. */
+:global(.elections-area-midpoint) span {
+  background: transparent;
+  border-width: 1.5px;
+  opacity: 0.55;
+}
+
+:global(.elections-area-vertex):hover span,
+:global(.elections-area-midpoint):hover span {
+  inset: 0;
+  opacity: 1;
+  background: var(--ice-whisper, #a8ddf7);
 }
 
 /* Campaign anchor — вулиця Якуба Коласа, 6. */
@@ -1116,6 +1183,159 @@
   background: var(--color-info-bg);
   border-color: var(--panel-border);
   font-weight: var(--weight-medium);
+}
+
+/*
+ * Boundary editor — the temporary `?areaEdit=1` mode. Parked under the base
+ * layer switcher, which stays reachable: tracing a district over orthophoto is
+ * a different job from tracing it over a street map.
+ */
+.areaEditor {
+  position: absolute;
+  top: calc(var(--space-4) * 2 + 34px);
+  left: var(--space-4);
+  z-index: var(--z-raised);
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+
+  width: 268px;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+
+  background: var(--panel-surface);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
+}
+
+.areaEditorHeader {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.areaEditorBadge {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+
+  color: var(--blood-crest, #a63e4c);
+}
+
+.areaEditorClose {
+  width: 22px;
+  height: 22px;
+
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+
+  border-radius: var(--radius-sm);
+  transition: var(--transition-fast);
+}
+
+.areaEditorClose:hover {
+  color: var(--ice-deep);
+  background: var(--color-info-bg);
+}
+
+.areaEditorHint {
+  margin: 0;
+
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.areaEditorStats {
+  display: flex;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.areaEditorStats dt {
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+
+.areaEditorStats dd {
+  margin: 0;
+
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-primary);
+}
+
+.areaEditorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.areaEditorButton {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  padding: 5px var(--space-3);
+
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+
+  background: var(--panel-inset);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full, 999px);
+
+  transition: var(--transition-fast);
+}
+
+.areaEditorButton:not(:disabled):hover {
+  color: var(--ice-deep);
+  background: var(--color-info-bg);
+  border-color: var(--panel-border);
+}
+
+.areaEditorButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.areaEditorButtonPrimary {
+  font-weight: var(--weight-medium);
+  color: var(--ice-deep);
+  background: var(--color-info-bg);
+  border-color: var(--panel-border);
+}
+
+.areaEditorPath {
+  margin: 0;
+
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.areaEditorPath code {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+}
+
+.areaEditorNotice {
+  min-height: 1em;
+  margin: 0;
+
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
 }
 
 /* Legend */

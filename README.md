@@ -204,8 +204,42 @@ geometry. The base layer is served by a map provider (OpenStreetMap raster tiles
 by default), and every building inside the working area is overlaid as its own
 interactive polygon carrying its OSM address.
 
-Working area: **вулиця Якуба Коласа, 6, Київ, 03146** (`50.4345086, 30.3774787`
-— the OSM position of the building itself), radius **3 km**.
+Campaign address: **вулиця Якуба Коласа, 6, Київ, 03146** (`50.4345086,
+30.3774787` — the OSM position of the building itself).
+
+### Working area boundary
+
+The territory is an arbitrary GeoJSON polygon in one file:
+
+```
+apps/web/src/features/elections/workspaceArea.geo.json
+```
+
+That file is the only definition of the district. The map fits its initial zoom
+to the polygon, dims and disables everything outside it, and a building is shown
+and clickable only when its footprint is inside the polygon or crosses its
+border. Replacing the file moves the whole district — no other change needed.
+
+**The file currently shipped is a placeholder**: an exact 3 km circle around the
+campaign address, i.e. the territory the module covered before it moved to
+polygons. Replace it with a boundary traced over the real map:
+
+1. Open the map with `?areaEdit=1` — e.g. `/elections?areaEdit=1`. This is a
+   temporary mode; nothing in the normal UI leads to it.
+2. Click along the border to drop vertices. Drag a filled handle to move a
+   vertex, drag a hollow midpoint handle to insert one between two neighbours,
+   right-click a vertex to delete it. `Ctrl+Z` undoes, `Backspace` drops the
+   last point. Panning and zooming are unrestricted in this mode, and the
+   satellite base layer is available for tracing over imagery.
+3. Press **Завантажити GeoJSON** (or copy the JSON) and save the result over
+   `apps/web/src/features/elections/workspaceArea.geo.json`.
+4. Reload. The unfinished outline also survives a reload on its own — it is kept
+   in `localStorage` under `avku-elections-area-draft-v1` until exported.
+
+Re-run the dataset script after enlarging the boundary: Overpass is queried by
+radius, and the default radius is derived from the polygon.
+
+### Buildings dataset
 
 The dataset is a versioned snapshot at
 `apps/web/public/data/elections/houses.json`, built by querying the Overpass
@@ -219,10 +253,13 @@ node scripts/fetch-osm-buildings.mjs
 Useful flags:
 
 ```bash
-node scripts/fetch-osm-buildings.mjs --radius 3000
+node scripts/fetch-osm-buildings.mjs --radius 4000   # default covers the polygon + 250 m
 node scripts/fetch-osm-buildings.mjs --out apps/web/public/data/elections/houses.json
 node scripts/fetch-osm-buildings.mjs --include-unaddressed   # also keep buildings with no addr:housenumber
 ```
+
+The snapshot keeps the whole circular download; the polygon is applied when the
+app loads it, so re-tracing the border does not require re-downloading OSM.
 
 The script walks several public Overpass mirrors and retries, because any single
 instance is regularly busy. It refuses to overwrite the snapshot with an empty
@@ -302,7 +339,7 @@ exposed beyond the LAN/Cloudflare Access perimeter, add an authentication layer
 
 ## Partially Ready Modules
 
-- Elections: the map itself is real. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own survey card. Survey data entered into those cards is still kept in browser `localStorage` under `avku-elections-details-v1`; there is no API persistence yet.
+- Elections: the map itself is real. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own survey card. The working area is a GeoJSON polygon (`workspaceArea.geo.json`) — the shipped one is still the placeholder circle until a boundary is traced in `?areaEdit=1`. Survey data entered into those cards is still kept in browser `localStorage` under `avku-elections-details-v1`; there is no API persistence yet.
 - SMM: frontend prototype only. Data is kept in browser `localStorage` under `avku-smm-data-v1`; there is no API persistence yet.
 - Dashboard: uses static in-client data and export helpers; it is not connected to live aggregate API data yet.
 - Deploy automation: `infra/scripts/deploy.sh` exists but is empty. Current GitHub workflow is CI only.

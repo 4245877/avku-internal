@@ -30,6 +30,13 @@ const iconPaths = {
       <circle cx="13" cy="12" fill="currentColor" r="0.9" stroke="none" />
     </>
   ),
+  download: (
+    <>
+      <path d="M12 4v11" />
+      <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+      <path d="M4 19h16" />
+    </>
+  ),
   edit: (
     <>
       <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" />

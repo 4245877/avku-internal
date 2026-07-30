@@ -11,12 +11,16 @@
  *   overpass            — a live OpenStreetMap query, for checking the district
  *                         against fresh edits without regenerating anything.
  *
+ * Whatever the source, the result is cut to the working-area polygon
+ * (`workspaceArea.geo.json`) before it leaves this module — a house the polygon
+ * does not cover never reaches the map, the list or the counters.
+ *
  * Survey edits are held in a details overlay keyed by house id. Today that
  * overlay is localStorage; when the backend lands, `saveHouseDetails` becomes a
  * `PATCH` and the rest of the module stays as it is.
  */
 
-import { AREA_CENTER, AREA_RADIUS_METERS } from './geo.js';
+import { filterHousesToWorkspace, getWorkspaceMeta } from './workspaceArea.js';
 import { createEmptyDetails } from './electionsTypes.js';
 import { listStreetNames } from './osmBuildings.js';
 import { fetchHousesFromOverpass } from './overpassClient.js';
@@ -84,13 +88,9 @@ function normalizeDetails(details) {
   };
 }
 
-/** Static metadata about the covered territory. */
+/** Static metadata about the covered territory — the traced GeoJSON polygon. */
 export function getAreaMeta() {
-  return {
-    center: AREA_CENTER,
-    radiusMeters: AREA_RADIUS_METERS,
-    label: `${AREA_CENTER.address}, ${AREA_CENTER.city}, ${AREA_CENTER.postalCode}`,
-  };
+  return getWorkspaceMeta();
 }
 
 async function fetchJson(url, signal) {
@@ -115,7 +115,7 @@ async function loadDataset(signal) {
   if (SOURCE === 'overpass') {
     const { houses } = await fetchHousesFromOverpass({ signal });
 
-    return { houses, streets: listStreetNames(houses), area: getAreaMeta() };
+    return { houses };
   }
 
   if (SOURCE === 'backend') {
@@ -125,19 +125,13 @@ async function loadDataset(signal) {
 
     const payload = await fetchJson(`${BACKEND_URL.replace(/\/$/, '')}/houses`, signal);
 
-    return {
-      houses: payload.houses ?? [],
-      streets: payload.streets ?? listStreetNames(payload.houses ?? []),
-      area: payload.area ?? getAreaMeta(),
-    };
+    return { houses: payload.houses ?? [] };
   }
 
   const snapshot = await fetchJson(SNAPSHOT_URL, signal);
 
   return {
     houses: (snapshot.houses ?? []).map(hydrateHouse),
-    streets: snapshot.streets ?? listStreetNames(snapshot.houses ?? []),
-    area: snapshot.area ?? getAreaMeta(),
     osmTimestamp: snapshot.osmTimestamp ?? null,
     attribution: snapshot.license ?? null,
   };
@@ -160,12 +154,26 @@ export async function fetchHouses({ signal } = {}) {
     );
   }
 
+  // The download is a circle wide enough to contain the polygon; the polygon
+  // itself is what the module works with. Filtering here — and not in the map —
+  // is what keeps the list, the filters, the counters and the outlines talking
+  // about the same set of buildings.
+  const covered = filterHousesToWorkspace(dataset.houses);
+
+  if (covered.length === 0) {
+    throw new Error(
+      'Жоден будинок із набору не потрапляє в межі робочої території. ' +
+        'Перевірте `workspaceArea.geo.json` або оновіть набір будинків.',
+    );
+  }
+
   const overrides = readOverrides();
 
   return {
     ...dataset,
-    streets: [...dataset.streets].sort(compareStreetNames),
-    houses: dataset.houses.map((house) =>
+    area: getAreaMeta(),
+    streets: listStreetNames(covered).sort(compareStreetNames),
+    houses: covered.map((house) =>
       overrides[house.id]
         ? { ...house, details: normalizeDetails(overrides[house.id]) }
         : house,

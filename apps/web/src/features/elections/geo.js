@@ -7,9 +7,9 @@
  *
  * A few derived numbers (footprint area, centroid, entrance estimates) are
  * easier to compute on a plane, so this module also exposes a local
- * equirectangular projection around the campaign address. Inside a 3 km radius
- * its error stays under a metre, which is far below the accuracy of the source
- * data itself.
+ * equirectangular projection around the campaign address. Across a city
+ * district its error stays under a metre, which is far below the accuracy of
+ * the source data itself.
  */
 
 const EARTH_RADIUS_METERS = 6378137;
@@ -30,7 +30,13 @@ export const AREA_CENTER = {
   district: 'Святошинський район',
 };
 
-/** Radius of the covered territory, in metres. */
+/**
+ * Radius of the OSM download around the campaign address, in metres.
+ *
+ * This is an acquisition parameter, not the territory: what the module actually
+ * covers is the traced polygon in `workspaceArea.geo.json`. The download only
+ * has to be wide enough to contain it — see `workspaceCoverRadiusMeters()`.
+ */
 export const AREA_RADIUS_METERS = 3000;
 
 /** Projects a WGS84 point onto a local metre plane around `origin`. */
@@ -67,7 +73,11 @@ export function distanceMeters(from, to) {
   return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(chord)));
 }
 
-/** True when a point sits inside the covered territory. */
+/**
+ * True when a point sits inside the download radius. Membership of the working
+ * area itself is decided by the polygon — `isInsideWorkspace` in
+ * `workspaceArea.js` — which is what the UI and the dataset go through.
+ */
 export function isInsideArea(point, radiusMeters = AREA_RADIUS_METERS) {
   return distanceMeters(AREA_CENTER, point) <= radiusMeters;
 }
@@ -187,6 +197,19 @@ export function ringBounds(ring) {
     [minLat, minLon],
     [maxLat, maxLon],
   ];
+}
+
+/** Human-readable ground area for the UI. */
+export function formatAreaSquareMeters(squareMeters) {
+  if (!Number.isFinite(squareMeters) || squareMeters <= 0) {
+    return '—';
+  }
+
+  if (squareMeters < 100000) {
+    return `${Math.round(squareMeters / 100) * 100} м²`;
+  }
+
+  return `${(squareMeters / 1e6).toFixed(2).replace('.', ',')} км²`;
 }
 
 /** Human-readable distance for the UI. */
