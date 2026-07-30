@@ -6,14 +6,16 @@ import {
   distanceMeters,
   formatDistance,
   isInsideArea,
-  polygonBounds,
-  polygonCentroid,
-  polygonToPath,
-  polylineToPath,
-  projectFootprint,
   projectToMeters,
+  ringAreaSquareMeters,
+  ringBounds,
+  ringCentroid,
+  ringDimensions,
   unprojectFromMeters,
 } from './geo.js';
+
+/** Builds a WGS84 ring from local-grid offsets, in metres. */
+const ringOf = (points) => points.map((point) => unprojectFromMeters(point));
 
 describe('projection', () => {
   it('places the campaign address at the grid origin', () => {
@@ -52,6 +54,13 @@ describe('projection', () => {
   });
 });
 
+describe('AREA_CENTER', () => {
+  it('is the OSM position of вулиця Якуба Коласа, 6', () => {
+    expect(AREA_CENTER.lat).toBeCloseTo(50.43451, 4);
+    expect(AREA_CENTER.lon).toBeCloseTo(30.37748, 4);
+  });
+});
+
 describe('isInsideArea', () => {
   it('accepts points inside the radius and rejects points outside it', () => {
     expect(isInsideArea(unprojectFromMeters({ x: 2900, y: 0 }))).toBe(true);
@@ -64,49 +73,66 @@ describe('isInsideArea', () => {
   });
 });
 
-describe('polygon helpers', () => {
-  const square = [
+describe('ring helpers', () => {
+  // A 40 × 20 m block, the shape of a small apartment building.
+  const block = ringOf([
     { x: 0, y: 0 },
-    { x: 10, y: 0 },
-    { x: 10, y: 10 },
-    { x: 0, y: 10 },
-  ];
+    { x: 40, y: 0 },
+    { x: 40, y: 20 },
+    { x: 0, y: 20 },
+  ]);
 
-  it('finds the centroid of a square', () => {
-    expect(polygonCentroid(square)).toEqual({ x: 5, y: 5 });
+  it('finds the centroid of a rectangle', () => {
+    const centroid = projectToMeters(ringCentroid(block));
+
+    expect(centroid.x).toBeCloseTo(20, 2);
+    expect(centroid.y).toBeCloseTo(10, 2);
   });
 
   it('falls back to the first vertex for a degenerate ring', () => {
-    expect(polygonCentroid([{ x: 3, y: 4 }, { x: 3, y: 4 }])).toEqual({ x: 3, y: 4 });
+    const point = { lat: 50.1, lon: 30.1 };
+
+    expect(ringCentroid([point, point])).toEqual(point);
   });
 
-  it('computes axis-aligned bounds', () => {
-    expect(polygonBounds(square)).toEqual({ minX: 0, minY: 0, maxX: 10, maxY: 10 });
+  it('measures ground area in square metres', () => {
+    expect(ringAreaSquareMeters(block)).toBeCloseTo(800, 0);
   });
 
-  it('serialises closed and open paths', () => {
-    expect(polygonToPath(square)).toBe('M0.0 0.0 L10.0 0.0 L10.0 10.0 L0.0 10.0 Z');
-    expect(polylineToPath(square.slice(0, 2))).toBe('M0.0 0.0 L10.0 0.0');
-  });
-});
+  it('reports the long side and the depth of a footprint', () => {
+    const { length, width } = ringDimensions(block);
 
-describe('projectFootprint', () => {
-  const footprint = [
-    { lat: AREA_CENTER.lat, lon: AREA_CENTER.lon },
-    { lat: AREA_CENTER.lat, lon: AREA_CENTER.lon + 0.0005 },
-    { lat: AREA_CENTER.lat - 0.0003, lon: AREA_CENTER.lon + 0.0005 },
-  ];
-
-  it('projects every vertex of the ring', () => {
-    const projected = projectFootprint(footprint);
-
-    expect(projected).toHaveLength(3);
-    expect(projected[0].x).toBeCloseTo(0, 6);
-    expect(projected[1].x).toBeGreaterThan(0);
+    expect(length).toBeCloseTo(40, 1);
+    expect(width).toBeCloseTo(20, 1);
   });
 
-  it('caches by ring identity so edits do not re-project the district', () => {
-    expect(projectFootprint(footprint)).toBe(projectFootprint(footprint));
+  it('measures a rotated footprint by its own axes, not the compass', () => {
+    const angle = Math.PI / 6;
+    const rotated = ringOf(
+      [
+        { x: 0, y: 0 },
+        { x: 40, y: 0 },
+        { x: 40, y: 20 },
+        { x: 0, y: 20 },
+      ].map((point) => ({
+        x: point.x * Math.cos(angle) - point.y * Math.sin(angle),
+        y: point.x * Math.sin(angle) + point.y * Math.cos(angle),
+      })),
+    );
+
+    const { length, width } = ringDimensions(rotated);
+
+    expect(length).toBeCloseTo(40, 0);
+    expect(width).toBeCloseTo(20, 0);
+  });
+
+  it('returns Leaflet-shaped bounds', () => {
+    const [[south, west], [north, east]] = ringBounds(block);
+
+    expect(north).toBeGreaterThan(south);
+    expect(east).toBeGreaterThan(west);
+    expect(south).toBeCloseTo(Math.min(...block.map((point) => point.lat)), 9);
+    expect(east).toBeCloseTo(Math.max(...block.map((point) => point.lon)), 9);
   });
 });
 

@@ -85,6 +85,16 @@ Frontend variables:
 | `VITE_LOGISTICS_API_URL` | `VITE_API_URL` or `/api` | Logistics API base URL override. |
 | `VITE_API_PROXY_TARGET` | `http://localhost:3001` | Vite dev-server proxy target for `/api`; Docker sets it to `http://api:3001`. |
 
+Elections map variables (all optional — the map works with no configuration):
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `VITE_ELECTIONS_SOURCE` | `snapshot` | Where houses come from: `snapshot` (the shipped OSM dataset), `backend` (`VITE_ELECTIONS_API_URL`), or `overpass` (a live OpenStreetMap query). |
+| `VITE_ELECTIONS_API_URL` | unset | Base URL of the houses API. Required when `VITE_ELECTIONS_SOURCE=backend`. |
+| `VITE_MAP_BASEMAP` | `osm` | Base layer selected on load: `osm`, `carto-voyager`, `carto-light`, `esri-imagery`, or a configured commercial provider. |
+| `VITE_MAPTILER_KEY` | unset | Adds MapTiler Streets to the base-layer switcher. |
+| `VITE_MAPBOX_TOKEN` | unset | Adds Mapbox Streets to the base-layer switcher. |
+
 ## Run API Locally
 
 ```bash
@@ -187,6 +197,48 @@ sudo install -d -o 0 -g 0 -m 0700 /var/backups/avku-internal
 
 Before migrating existing SQLite files, stop the API or use `sqlite3 .backup`. If copying files directly, copy the main database and any `-wal` and `-shm` files together. Do not delete the old `runtime/data` or `storage` directories until the new stack has started, health checks pass, records/photos/PNG/PDF export work, and data survives a container recreate.
 
+## Elections Map Data
+
+The "Вибори" map is backed by real OpenStreetMap data, not by generated
+geometry. The base layer is served by a map provider (OpenStreetMap raster tiles
+by default), and every building inside the working area is overlaid as its own
+interactive polygon carrying its OSM address.
+
+Working area: **вулиця Якуба Коласа, 6, Київ, 03146** (`50.4345086, 30.3774787`
+— the OSM position of the building itself), radius **3 km**.
+
+The dataset is a versioned snapshot at
+`apps/web/public/data/elections/houses.json`, built by querying the Overpass
+API. Regenerate it whenever the district should pick up newer OSM edits:
+
+```bash
+node scripts/fetch-osm-buildings.mjs
+# or, from apps/web:  pnpm run data:houses
+```
+
+Useful flags:
+
+```bash
+node scripts/fetch-osm-buildings.mjs --radius 3000
+node scripts/fetch-osm-buildings.mjs --out apps/web/public/data/elections/houses.json
+node scripts/fetch-osm-buildings.mjs --include-unaddressed   # also keep buildings with no addr:housenumber
+```
+
+The script walks several public Overpass mirrors and retries, because any single
+instance is regularly busy. It refuses to overwrite the snapshot with an empty
+result. Current snapshot: ~3 550 addressed buildings, ~2.8 MB (~0.4 MB gzipped —
+`infra/nginx/web.conf` compresses `/data/`).
+
+Attributes come straight from OSM tags: `addr:street`, `addr:housenumber`,
+`building`, `building:levels`, `start_date`. Anything OSM does not carry stays
+`null` and the UI renders it as "невідомо" rather than inventing a value.
+Entrance / apartment / resident counts shown before a survey are labelled
+"оціночно, за геометрією" and are derived from the real footprint area, its
+street frontage and the mapped storey count — they disappear as soon as a
+canvasser enters measured data.
+
+Map data © OpenStreetMap contributors, [ODbL 1.0](https://www.openstreetmap.org/copyright).
+
 ## Backup And Restore
 
 Create a backup:
@@ -250,6 +302,7 @@ exposed beyond the LAN/Cloudflare Access perimeter, add an authentication layer
 
 ## Partially Ready Modules
 
+- Elections: the map itself is real. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own survey card. Survey data entered into those cards is still kept in browser `localStorage` under `avku-elections-details-v1`; there is no API persistence yet.
 - SMM: frontend prototype only. Data is kept in browser `localStorage` under `avku-smm-data-v1`; there is no API persistence yet.
 - Dashboard: uses static in-client data and export helpers; it is not connected to live aggregate API data yet.
 - Deploy automation: `infra/scripts/deploy.sh` exists but is empty. Current GitHub workflow is CI only.

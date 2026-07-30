@@ -9,9 +9,12 @@
  * @property {number} lon
  *
  * @typedef {object} HouseEstimate
- * @property {number} entrances    Derived from the footprint, before any survey.
- * @property {number} apartments
- * @property {number} residents
+ *   Derived from the OSM footprint before any survey. A field is `null` when
+ *   the geometry cannot support a guess — most often because OpenStreetMap has
+ *   no `building:levels` for that house.
+ * @property {number|null} entrances
+ * @property {number|null} apartments
+ * @property {number|null} residents
  *
  * @typedef {object} Resident
  * @property {string} id
@@ -43,27 +46,42 @@
  * @property {string|null} updatedAt ISO timestamp of the last save.
  *
  * @typedef {object} House
- * @property {string} id
- * @property {string} street
+ *   One real building from OpenStreetMap. Attributes OSM does not carry are
+ *   `null`; nothing here is generated.
+ * @property {string} id            `way/123` or `relation/123` — the OSM id.
+ * @property {'way'|'relation'} osmType
+ * @property {number} osmId
+ * @property {string} street        `addr:street`, in full.
  * @property {string} streetShort
- * @property {string} number
+ * @property {string} number        `addr:housenumber`.
  * @property {string} address
  * @property {string} fullAddress
+ * @property {string|null} name     `name`, for schools, clinics and the like.
  * @property {string} type          One of {@link HOUSE_TYPES}.
- * @property {number} floors
- * @property {number} builtYear
- * @property {HouseGeoPoint} location
+ * @property {string} building      The raw `building=*` value.
+ * @property {number|null} floors   `building:levels`.
+ * @property {number|null} builtYear `start_date`, when it is a plain year.
+ * @property {number} footprintAreaSqm
+ * @property {HouseGeoPoint} location   Centroid of the footprint.
  * @property {HouseGeoPoint[]} footprint
  * @property {number} distanceMeters
+ * @property {boolean} isHeadquarters
  * @property {HouseEstimate} estimate
  * @property {HouseDetails} details
  */
 
+/**
+ * Building categories, derived from the OSM `building=*` tag rather than from
+ * anything we assume about the district. `other` covers `building=yes`, which is
+ * how roughly half of Kyiv is mapped — it means "OSM does not say", not "mixed".
+ */
 export const HOUSE_TYPES = [
-  { id: 'panel', label: 'Панельний', short: 'Панель' },
-  { id: 'brick', label: 'Цегляний', short: 'Цегла' },
-  { id: 'newBuild', label: 'Новобудова', short: 'Новобуд' },
-  { id: 'private', label: 'Приватний', short: 'Приват' },
+  { id: 'apartments', label: 'Багатоквартирний', short: 'Багатокв.' },
+  { id: 'private', label: 'Приватний будинок', short: 'Приватний' },
+  { id: 'dormitory', label: 'Гуртожиток', short: 'Гуртожиток' },
+  { id: 'public', label: 'Громадський обʼєкт', short: 'Громадський' },
+  { id: 'commercial', label: 'Комерційний обʼєкт', short: 'Комерція' },
+  { id: 'other', label: 'Тип не вказано', short: 'Без типу' },
 ];
 
 export const FILL_STATUSES = [

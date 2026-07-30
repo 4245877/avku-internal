@@ -64,15 +64,16 @@ function ElectionsHeader({ area, summary, isLoading, onResetDemoData }) {
         </p>
 
         <p className={styles.heroDescription}>
-          Інтерактивна карта житлових будинків території. Натисніть на будинок,
-          щоб відкрити картку, переглянути підʼїзди, квартири, мешканців і
-          контакти або внести нові дані після обходу.
+          Інтерактивна карта реальних будинків території за даними
+          OpenStreetMap. Натисніть на будинок, щоб відкрити картку, переглянути
+          підʼїзди, квартири, мешканців і контакти або внести нові дані після
+          обходу.
         </p>
 
         <div className={styles.heroActions}>
           <span className={styles.demoNotice}>
             <ElectionsIcon name="info" size={15} />
-            Демонстраційні дані — зміни зберігаються локально
+            Будинки — OpenStreetMap; внесені дані зберігаються локально
           </span>
 
           <button
@@ -82,7 +83,7 @@ function ElectionsHeader({ area, summary, isLoading, onResetDemoData }) {
             type="button"
           >
             <ElectionsIcon name="refresh" size={16} />
-            Скинути демо-дані
+            Скинути внесені дані
           </button>
         </div>
       </div>

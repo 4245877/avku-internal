@@ -8,6 +8,7 @@ import {
 import {
   DEFAULT_HOUSE_FILTERS,
   filterHouses,
+  formatApartments,
   formatFloors,
   getCompletedFields,
   getCompletionRatio,
@@ -35,7 +36,7 @@ function createHouse(overrides = {}) {
     number: '6',
     address: 'вул. Якуба Коласа, 6',
     fullAddress: 'вул. Якуба Коласа, 6, Київ, 03146',
-    type: 'panel',
+    type: 'apartments',
     floors: 9,
     builtYear: 1976,
     location: { lat: 50.4569, lon: 30.3618 },
@@ -105,9 +106,17 @@ describe('estimate fallbacks', () => {
   it('falls back to the geometry estimate and flags it', () => {
     const house = createHouse();
 
-    expect(resolveEntrances(house)).toEqual({ value: 4, isEstimate: true });
-    expect(resolveApartments(house)).toEqual({ value: 144, isEstimate: true });
-    expect(resolveResidents(house)).toEqual({ value: 274, isEstimate: true });
+    expect(resolveEntrances(house)).toEqual({ value: 4, isEstimate: true, isKnown: true });
+    expect(resolveApartments(house)).toEqual({
+      value: 144,
+      isEstimate: true,
+      isKnown: true,
+    });
+    expect(resolveResidents(house)).toEqual({
+      value: 274,
+      isEstimate: true,
+      isKnown: true,
+    });
   });
 
   it('prefers surveyed values over the estimate', () => {
@@ -115,9 +124,17 @@ describe('estimate fallbacks', () => {
       details: { ...createEmptyDetails(), entrances: 6, apartments: 210, residentsCount: 400 },
     });
 
-    expect(resolveEntrances(house)).toEqual({ value: 6, isEstimate: false });
-    expect(resolveApartments(house)).toEqual({ value: 210, isEstimate: false });
-    expect(resolveResidents(house)).toEqual({ value: 400, isEstimate: false });
+    expect(resolveEntrances(house)).toEqual({ value: 6, isEstimate: false, isKnown: true });
+    expect(resolveApartments(house)).toEqual({
+      value: 210,
+      isEstimate: false,
+      isKnown: true,
+    });
+    expect(resolveResidents(house)).toEqual({
+      value: 400,
+      isEstimate: false,
+      isKnown: true,
+    });
   });
 
   it('treats a surveyed zero as a real answer, not a missing one', () => {
@@ -125,7 +142,42 @@ describe('estimate fallbacks', () => {
       details: { ...createEmptyDetails(), residentsCount: 0 },
     });
 
-    expect(resolveResidents(house)).toEqual({ value: 0, isEstimate: false });
+    expect(resolveResidents(house)).toEqual({ value: 0, isEstimate: false, isKnown: true });
+  });
+
+  /*
+   * OpenStreetMap knows the outline of every house but the storey count of only
+   * about half of them, so "no answer from either source" is a normal state the
+   * UI has to be able to render.
+   */
+  it('reports nothing known when OSM supports no estimate either', () => {
+    const house = createHouse({
+      floors: null,
+      estimate: { entrances: null, apartments: null, residents: null },
+    });
+
+    expect(resolveApartments(house)).toEqual({
+      value: null,
+      isEstimate: false,
+      isKnown: false,
+    });
+    expect(formatApartments(resolveApartments(house).value)).toBe(
+      'кількість квартир невідома',
+    );
+    expect(formatFloors(house.floors)).toBe('поверхи невідомі');
+  });
+
+  it('keeps totals finite when part of the district has no estimate', () => {
+    const summary = summarizeHouses([
+      createHouse(),
+      createHouse({
+        id: 'house-2',
+        estimate: { entrances: null, apartments: null, residents: null },
+      }),
+    ]);
+
+    expect(summary.apartments).toBe(144);
+    expect(summary.residents).toBe(274);
   });
 });
 
@@ -196,12 +248,12 @@ describe('filterHouses', () => {
       distanceMeters: 100,
     }),
     createHouse({
-      id: 'brick-other-street',
+      id: 'private-other-street',
       street: 'вулиця Зодчих',
       streetShort: 'вул. Зодчих',
       number: '3',
       address: 'вул. Зодчих, 3',
-      type: 'brick',
+      type: 'private',
       distanceMeters: 450,
     }),
   ];
@@ -209,7 +261,7 @@ describe('filterHouses', () => {
   it('returns everything and sorts by distance by default', () => {
     expect(filterHouses(houses, DEFAULT_HOUSE_FILTERS).map((house) => house.id)).toEqual([
       'empty-near',
-      'brick-other-street',
+      'private-other-street',
       'complete-far',
     ]);
   });
@@ -229,7 +281,7 @@ describe('filterHouses', () => {
     ).toHaveLength(1);
 
     expect(
-      filterHouses(houses, { ...DEFAULT_HOUSE_FILTERS, houseType: 'brick' }),
+      filterHouses(houses, { ...DEFAULT_HOUSE_FILTERS, houseType: 'private' }),
     ).toHaveLength(1);
   });
 

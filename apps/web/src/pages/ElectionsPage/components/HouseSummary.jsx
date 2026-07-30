@@ -87,6 +87,14 @@ function Metric({ icon, label, value, hint, isEstimate }) {
   );
 }
 
+/**
+ * A survey metric that has neither a confirmed value nor a geometry estimate
+ * says so, rather than showing a zero somebody could mistake for data.
+ */
+function metricHint(resolved) {
+  return resolved.isKnown ? undefined : 'даних немає — заповніть картку';
+}
+
 function HouseSummary({ house, onStartEditing }) {
   const status = getFillStatus(house);
   const completedCount = getCompletedFields(house.details).length;
@@ -130,28 +138,37 @@ function HouseSummary({ house, onStartEditing }) {
 
       <div className={styles.metricGrid}>
         <Metric
+          hint={metricHint(entrances)}
           icon="door"
           isEstimate={entrances.isEstimate}
           label="Підʼїзди"
           value={formatNumber(entrances.value)}
         />
         <Metric
+          hint={metricHint(apartments)}
           icon="home"
           isEstimate={apartments.isEstimate}
           label="Квартири"
           value={formatNumber(apartments.value)}
         />
         <Metric
+          hint={metricHint(residents)}
           icon="users"
           isEstimate={residents.isEstimate}
           label="Мешканці"
           value={formatNumber(residents.value)}
         />
         <Metric
-          hint={`${house.builtYear} рік`}
+          hint={
+            house.builtYear
+              ? `${house.builtYear} рік`
+              : `забудова ${formatNumber(house.footprintAreaSqm)} м²`
+          }
           icon="building"
           label={getHouseTypeLabel(house)}
-          value={formatFloors(house.floors)}
+          value={
+            Number.isFinite(house.floors) ? formatFloors(house.floors) : 'Поверхи невідомі'
+          }
         />
       </div>
 
@@ -164,6 +181,23 @@ function HouseSummary({ house, onStartEditing }) {
         <div>
           <dt>Відстань від штабу</dt>
           <dd>{formatDistance(house.distanceMeters)}</dd>
+        </div>
+
+        {/* The outline and the address are somebody's OSM edit — link to it,
+            so a wrong house number can be checked and fixed at the source. */}
+        <div>
+          <dt>Обʼєкт на карті</dt>
+          <dd>
+            <a
+              className={styles.factLink}
+              href={`https://www.openstreetmap.org/${house.osmType}/${house.osmId}`}
+              rel="noreferrer noopener"
+              target="_blank"
+            >
+              OpenStreetMap · building={house.building}
+              <ElectionsIcon name="link" size={13} />
+            </a>
+          </dd>
         </div>
 
         <div>

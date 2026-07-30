@@ -8,10 +8,12 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "data:houses": "node ../../scripts/fetch-osm-buildings.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.2",
+    "leaflet": "^1.9.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router": "^7.17.0",

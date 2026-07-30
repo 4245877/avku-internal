@@ -88,24 +88,32 @@ export function getMissingFieldLabels(house) {
 
 /**
  * Confirmed value if a canvasser entered one, otherwise the geometry estimate.
- * `isEstimate` lets the UI show "оціночно" instead of pretending to know.
+ * `isEstimate` lets the UI show "оціночно" instead of pretending to know, and a
+ * `null` value means neither source has an answer — OSM does not describe every
+ * building well enough to guess from.
  */
+function resolve(surveyed, estimated) {
+  if (hasValue(surveyed)) {
+    return { value: surveyed, isEstimate: false, isKnown: true };
+  }
+
+  return {
+    value: hasValue(estimated) ? estimated : null,
+    isEstimate: hasValue(estimated),
+    isKnown: hasValue(estimated),
+  };
+}
+
 export function resolveEntrances(house) {
-  return hasValue(house.details?.entrances)
-    ? { value: house.details.entrances, isEstimate: false }
-    : { value: house.estimate.entrances, isEstimate: true };
+  return resolve(house.details?.entrances, house.estimate?.entrances);
 }
 
 export function resolveApartments(house) {
-  return hasValue(house.details?.apartments)
-    ? { value: house.details.apartments, isEstimate: false }
-    : { value: house.estimate.apartments, isEstimate: true };
+  return resolve(house.details?.apartments, house.estimate?.apartments);
 }
 
 export function resolveResidents(house) {
-  return hasValue(house.details?.residentsCount)
-    ? { value: house.details.residentsCount, isEstimate: false }
-    : { value: house.estimate.residents, isEstimate: true };
+  return resolve(house.details?.residentsCount, house.estimate?.residents);
 }
 
 /** Counts known residents per political stance, in a stable display order. */
@@ -254,7 +262,8 @@ function compareHouses(first, second, sortBy) {
   }
 
   if (sortBy === 'apartments') {
-    return resolveApartments(second).value - resolveApartments(first).value;
+    // Houses with no usable estimate sort last rather than jumping to the top.
+    return (resolveApartments(second).value ?? -1) - (resolveApartments(first).value ?? -1);
   }
 
   return first.distanceMeters - second.distanceMeters;
@@ -314,8 +323,8 @@ export function summarizeHouses(houses) {
 
   for (const house of houses) {
     summary[getFillStatus(house)] += 1;
-    summary.apartments += resolveApartments(house).value;
-    summary.residents += resolveResidents(house).value;
+    summary.apartments += resolveApartments(house).value ?? 0;
+    summary.residents += resolveResidents(house).value ?? 0;
     summary.knownContacts += house.details?.contacts?.length ?? 0;
   }
 
@@ -376,15 +385,31 @@ export function pluralize(count, forms) {
   return forms[2];
 }
 
+/**
+ * OpenStreetMap has `building:levels` for roughly half the district, so "поверхи
+ * невідомі" is a normal, frequent answer rather than an error state.
+ */
 export function formatFloors(floors) {
+  if (!Number.isFinite(floors)) {
+    return 'поверхи невідомі';
+  }
+
   return `${floors} ${pluralize(floors, ['поверх', 'поверхи', 'поверхів'])}`;
 }
 
 export function formatEntrances(count) {
+  if (!Number.isFinite(count)) {
+    return '—';
+  }
+
   return `${count} ${pluralize(count, ['підʼїзд', 'підʼїзди', 'підʼїздів'])}`;
 }
 
 export function formatApartments(count) {
+  if (!Number.isFinite(count)) {
+    return 'кількість квартир невідома';
+  }
+
   return `${formatNumber(count)} ${pluralize(count, ['квартира', 'квартири', 'квартир'])}`;
 }
 

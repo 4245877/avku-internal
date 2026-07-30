@@ -88,6 +88,7 @@ function HouseResultsList({
           const status = getFillStatus(house);
           const isSelected = house.id === selectedHouseId;
           const completion = Math.round(getCompletionRatio(house) * 100);
+          const apartments = resolveApartments(house);
 
           return (
             <li key={house.id}>
@@ -112,9 +113,16 @@ function HouseResultsList({
                     )}
                   </span>
 
+                  {/* Only what OSM actually knows about this house — an empty
+                      slot is left out rather than filled with "невідомо". */}
                   <small className={styles.houseRowMeta}>
-                    {getHouseTypeLabel(house)} · {formatFloors(house.floors)} ·{' '}
-                    {formatApartments(resolveApartments(house).value)}
+                    {[
+                      getHouseTypeLabel(house),
+                      Number.isFinite(house.floors) ? formatFloors(house.floors) : null,
+                      apartments.isKnown ? formatApartments(apartments.value) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </small>
 
                   <span className={styles.houseRowProgress}>
