@@ -14,20 +14,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
 
-import { WORKSPACE_AREA_NAME } from '../../../features/elections/workspaceArea.js';
 import { DEFAULT_BASEMAP_ID, getBasemap } from '../../../features/elections/basemaps.js';
 import { useHouseLayer } from '../../../features/elections/useHouseLayer.js';
 import { useLeafletMap } from '../../../features/elections/useLeafletMap.js';
-import {
-  useAreaEditMode,
-  useWorkspaceEditor,
-} from '../../../features/elections/useWorkspaceEditor.js';
+import { useWorkspaceArea } from '../../../features/elections/useWorkspaceArea.js';
+import { useWorkspaceEditor } from '../../../features/elections/useWorkspaceEditor.js';
 import {
   formatApartments,
   getFillStatus,
   resolveApartments,
 } from '../../../features/elections/houseUtils.js';
 import { fillStatusesById } from '../../../features/elections/electionsTypes.js';
+import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
 import MapBasemapSwitcher from './MapBasemapSwitcher.jsx';
 import MapControls from './MapControls.jsx';
 import MapLegend from './MapLegend.jsx';
@@ -37,6 +35,9 @@ import styles from '../ElectionsPage.module.css';
 
 /** Below this distance from the top edge the tooltip flips under the cursor. */
 const TOOLTIP_FLIP_THRESHOLD_PIXELS = 76;
+
+/** How long the confirmation of a saved boundary stays on the map. */
+const AREA_NOTICE_TIMEOUT_MS = 6000;
 
 function HouseMap({
   houses,
@@ -52,14 +53,15 @@ function HouseMap({
   onFillStatusChange,
   onResetFilters,
   hasEmptyResult,
+  isAreaEditing,
+  onExitAreaEditing,
 }) {
   const [basemapId, setBasemapId] = useState(DEFAULT_BASEMAP_ID);
   const [hoveredHouseId, setHoveredHouseId] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState(null);
+  const [areaNotice, setAreaNotice] = useState(null);
 
-  // Temporary mode, opened with `?areaEdit=1`: the map turns into a drawing
-  // surface for the working-area boundary and stops selecting buildings.
-  const { isActive: isAreaEditing, exit: exitAreaEditing } = useAreaEditMode();
+  const area = useWorkspaceArea();
 
   const {
     containerRef,
@@ -73,6 +75,45 @@ function HouseMap({
   } = useLeafletMap({ basemapId, isAreaEditing });
 
   const areaEditor = useWorkspaceEditor({ map, isActive: isAreaEditing });
+
+  /*
+   * Saving closes the editor on purpose: the new border, the dimmed
+   * surroundings and the re-cut set of houses are only visible once the drawing
+   * surface is out of the way, and seeing them is the confirmation that the
+   * boundary took effect. The banner covers what a redrawn map cannot say.
+   */
+  const handleSaveArea = useCallback(() => {
+    const result = areaEditor.save();
+
+    if (result.isSaved) {
+      onExitAreaEditing();
+      setAreaNotice(
+        result.isPersisted
+          ? {
+              text: 'Нову межу збережено — карта і список будинків уже за нею.',
+              isWarning: false,
+            }
+          : {
+              text:
+                'Межу застосовано, але браузер не дав її зберегти — вона діятиме ' +
+                'до перезавантаження сторінки.',
+              isWarning: true,
+            },
+      );
+    }
+
+    return result;
+  }, [areaEditor, onExitAreaEditing]);
+
+  useEffect(() => {
+    if (!areaNotice) {
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(() => setAreaNotice(null), AREA_NOTICE_TIMEOUT_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [areaNotice]);
 
   const handleSelectHouse = useCallback(
     (houseId) => onSelectHouse(houseId ?? null),
@@ -148,7 +189,7 @@ function HouseMap({
       <div className={styles.mapSurface}>
         <div
           aria-describedby="elections-map-hint"
-          aria-label={`Карта будинків у межах території «${WORKSPACE_AREA_NAME}»`}
+          aria-label={`Карта будинків у межах території «${area.name}»`}
           className={styles.mapCanvas}
           ref={containerRef}
           role="application"
@@ -189,7 +230,24 @@ function HouseMap({
         <MapBasemapSwitcher activeId={basemapId} onChange={setBasemapId} />
 
         {isAreaEditing && (
-          <WorkspaceAreaEditor editor={areaEditor} onExit={exitAreaEditing} />
+          <WorkspaceAreaEditor
+            editor={areaEditor}
+            onExit={onExitAreaEditing}
+            onSave={handleSaveArea}
+          />
+        )}
+
+        {areaNotice && (
+          <p
+            className={[styles.mapNotice, areaNotice.isWarning ? styles.mapNoticeWarning : '']
+              .filter(Boolean)
+              .join(' ')}
+            data-map-overlay=""
+            role="status"
+          >
+            <ElectionsIcon name={areaNotice.isWarning ? 'warning' : 'check'} size={16} />
+            {areaNotice.text}
+          </p>
         )}
 
         {/* The legend reads survey progress — not a question while the border

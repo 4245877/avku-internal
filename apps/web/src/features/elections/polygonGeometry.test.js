@@ -5,6 +5,7 @@ import {
   isPointInPolygon,
   isPointInRing,
   isRingInsideRing,
+  isRingSelfIntersecting,
   polygonIntersectsRing,
   ringBox,
   ringsOverlap,
@@ -162,5 +163,27 @@ describe('polygonIntersectsRing', () => {
 
   it('accepts a building reaching out of a hole into the polygon', () => {
     expect(polygonIntersectsRing(rings, square({ lon: 2, size: 0.5 }))).toBe(true);
+  });
+});
+
+describe('isRingSelfIntersecting', () => {
+  it('accepts a plain outline whose edges only meet at vertices', () => {
+    expect(isRingSelfIntersecting(OUTER)).toBe(false);
+    expect(isRingSelfIntersecting(square({ size: 1 }))).toBe(false);
+  });
+
+  it('accepts anything too short to cross itself', () => {
+    expect(isRingSelfIntersecting([{ lat: 0, lon: 0 }, { lat: 1, lon: 1 }])).toBe(false);
+  });
+
+  it('catches the figure-of-eight a mis-ordered vertex makes', () => {
+    const bowtie = [
+      { lat: 0, lon: 0 },
+      { lat: 1, lon: 1 },
+      { lat: 0, lon: 1 },
+      { lat: 1, lon: 0 },
+    ];
+
+    expect(isRingSelfIntersecting(bowtie)).toBe(true);
   });
 });

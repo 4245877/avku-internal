@@ -7,18 +7,20 @@
  * district. The hook exposes exactly the handful of values the UI needs
  * (`zoom`, `canZoomIn`, …) and keeps everything else inside Leaflet.
  *
- * The working area is the GeoJSON polygon from `workspaceArea.geo.json`: the
- * initial view is fitted to it, its outline is drawn on top of the tiles, and
- * everything outside is covered by a dimming mask. While the boundary is being
- * re-traced (`isAreaEditing`) both overlays and the pan limits step aside, so
- * the new outline can be drawn beyond the old one.
+ * The working area is the polygon the workspace store holds: the initial view
+ * is fitted to it, its outline is drawn on top of the tiles, and everything
+ * outside is covered by a dimming mask. While the boundary is being re-traced
+ * (`isAreaEditing`) both overlays and the pan limits step aside, so the new
+ * outline can be drawn beyond the old one — and when a re-traced boundary is
+ * saved, the overlays, the pan limits and the home view all follow it.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 
 import { AREA_CENTER } from './geo.js';
-import { WORKSPACE_BOUNDS, toLeafletLatLngs } from './workspaceArea.js';
+import { toLeafletLatLngs } from './workspaceArea.js';
+import { useWorkspaceArea } from './useWorkspaceArea.js';
 import { getBasemap } from './basemaps.js';
 
 /** Padding around the working area when the whole district is fitted. */
@@ -56,7 +58,7 @@ function whenSized(container, callback) {
  * limit rather than the whole world: the map cannot be moved past that anyway,
  * and a world-sized SVG path turns into millions of pixels at street zoom.
  */
-function maskRings(bounds) {
+function maskRings(bounds, rings) {
   const outside = bounds.pad(PAN_MARGIN_RATIO * 2);
   const north = outside.getNorth();
   const south = outside.getSouth();
@@ -70,7 +72,7 @@ function maskRings(bounds) {
       [north, east],
       [north, west],
     ],
-    ...toLeafletLatLngs(),
+    ...toLeafletLatLngs(rings),
   ];
 }
 
@@ -79,6 +81,14 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
   const mapRef = useRef(null);
   const tileLayerRef = useRef(null);
   const homeBoundsRef = useRef(null);
+
+  const area = useWorkspaceArea();
+  // The map is created once; the territory it opens on is whatever is in force
+  // at that moment, and later changes are handled by the effect below rather
+  // than by rebuilding the map.
+  const areaRef = useRef(area);
+
+  areaRef.current = area;
 
   const [map, setMap] = useState(null);
   const [zoom, setZoom] = useState(null);
@@ -108,7 +118,7 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
 
       // The starting view is whatever fits the traced boundary — the polygon is
       // the only thing that decides how far out the district opens.
-      const areaBounds = L.latLngBounds(WORKSPACE_BOUNDS);
+      const areaBounds = L.latLngBounds(areaRef.current.bounds);
 
       instance.fitBounds(areaBounds, { padding: [FIT_PADDING_PIXELS, FIT_PADDING_PIXELS] });
 
@@ -169,6 +179,36 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
     return undefined;
   }, [basemapId, map]);
 
+  /* A newly saved boundary becomes the district: it is what "show the whole
+   * territory" means from now on, and the view moves to it once. The guard is
+   * what keeps that to an actual change of territory — re-fitting on every
+   * render would yank the map back from wherever the user had panned to. */
+  const fittedAreaRef = useRef(null);
+
+  useEffect(() => {
+    if (!map) {
+      return undefined;
+    }
+
+    homeBoundsRef.current = L.latLngBounds(area.bounds);
+
+    const isFirstArea = fittedAreaRef.current === null;
+
+    fittedAreaRef.current = area;
+
+    if (!isFirstArea && !isAreaEditing) {
+      // Not animated: the pan and zoom limits are recomputed in the very next
+      // effect, and clamping a moving map mid-flight leaves it short of the
+      // territory it was asked to show.
+      map.fitBounds(homeBoundsRef.current, {
+        padding: [FIT_PADDING_PIXELS, FIT_PADDING_PIXELS],
+        animate: false,
+      });
+    }
+
+    return undefined;
+  }, [area, isAreaEditing, map]);
+
   /* Pan and zoom limits — lifted while a new boundary is being traced. */
   useEffect(() => {
     const bounds = homeBoundsRef.current;
@@ -190,7 +230,7 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
     map.setMaxBounds(bounds.pad(PAN_MARGIN_RATIO));
 
     return undefined;
-  }, [isAreaEditing, map]);
+  }, [area, isAreaEditing, map]);
 
   /* The working area: dimmed surroundings, outlined border, campaign anchor. */
   useEffect(() => {
@@ -203,13 +243,13 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
     // Non-interactive on purpose: the mask covers the whole viewport, and a
     // path that swallowed clicks would also swallow panning. Nothing outside
     // the polygon is clickable anyway — those houses are never added to the map.
-    const mask = L.polygon(maskRings(L.latLngBounds(WORKSPACE_BOUNDS)), {
+    const mask = L.polygon(maskRings(L.latLngBounds(area.bounds), area.rings), {
       interactive: false,
       className: 'elections-area-mask',
       renderer,
     }).addTo(map);
 
-    const border = L.polygon(toLeafletLatLngs(), {
+    const border = L.polygon(toLeafletLatLngs(area.rings), {
       interactive: false,
       className: 'elections-area-ring',
       renderer,
@@ -232,7 +272,7 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
       border.remove();
       anchor.remove();
     };
-  }, [center, isAreaEditing, map]);
+  }, [area, center, isAreaEditing, map]);
 
   const zoomIn = useCallback(() => mapRef.current?.zoomIn(), []);
   const zoomOut = useCallback(() => mapRef.current?.zoomOut(), []);

@@ -224,17 +224,27 @@ border. Replacing the file moves the whole district — no other change needed.
 campaign address, i.e. the territory the module covered before it moved to
 polygons. Replace it with a boundary traced over the real map:
 
-1. Open the map with `?areaEdit=1` — e.g. `/elections?areaEdit=1`. This is a
-   temporary mode; nothing in the normal UI leads to it.
+1. Press **Редагувати межу** in the page header (the mode is also reachable
+   directly at `/elections?areaEdit=1`, which is what the button puts in the
+   address bar).
 2. Click along the border to drop vertices. Drag a filled handle to move a
    vertex, drag a hollow midpoint handle to insert one between two neighbours,
    right-click a vertex to delete it. `Ctrl+Z` undoes, `Backspace` drops the
    last point. Panning and zooming are unrestricted in this mode, and the
    satellite base layer is available for tracing over imagery.
-3. Press **Завантажити GeoJSON** (or copy the JSON) and save the result over
+3. Press **Зберегти межу**. The boundary takes effect immediately — the map
+   re-fits to it, the dimming mask follows it and the dataset is re-cut to it —
+   and is kept in `localStorage` under `avku-elections-area-v1`. This is
+   per-browser: it changes the district for whoever traced it, not for the team.
+4. To make it everybody's, open **Експорт GeoJSON** in the same panel, press
+   **Завантажити файл** (or copy the JSON) and commit the result over
    `apps/web/src/features/elections/workspaceArea.geo.json`.
-4. Reload. The unfinished outline also survives a reload on its own — it is kept
-   in `localStorage` under `avku-elections-area-draft-v1` until exported.
+
+An unfinished outline survives a reload on its own — it is kept in
+`localStorage` under `avku-elections-area-draft-v1` until it is saved. A saved
+boundary can always be taken back: reopen the editor and press **Початкова
+межа**, then **Зберегти межу**, which drops the override and returns the
+district to the file in the repository.
 
 Re-run the dataset script after enlarging the boundary: Overpass is queried by
 radius, and the default radius is derived from the polygon.
@@ -339,7 +349,7 @@ exposed beyond the LAN/Cloudflare Access perimeter, add an authentication layer
 
 ## Partially Ready Modules
 
-- Elections: the map itself is real. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own survey card. The working area is a GeoJSON polygon (`workspaceArea.geo.json`) — the shipped one is still the placeholder circle until a boundary is traced in `?areaEdit=1`. Survey data entered into those cards is still kept in browser `localStorage` under `avku-elections-details-v1`; there is no API persistence yet.
+- Elections: the map itself is real. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own survey card. The working area is a GeoJSON polygon (`workspaceArea.geo.json`) — the shipped one is still the placeholder circle until a boundary is traced with **Редагувати межу**; a boundary saved there applies at once but lives in browser `localStorage` (`avku-elections-area-v1`) until the exported file is committed. Survey data entered into those cards is still kept in browser `localStorage` under `avku-elections-details-v1`; there is no API persistence yet.
 - SMM: frontend prototype only. Data is kept in browser `localStorage` under `avku-smm-data-v1`; there is no API persistence yet.
 - Dashboard: uses static in-client data and export helpers; it is not connected to live aggregate API data yet.
 - Deploy automation: `infra/scripts/deploy.sh` exists but is empty. Current GitHub workflow is CI only.

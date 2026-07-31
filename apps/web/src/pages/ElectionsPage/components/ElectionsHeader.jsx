@@ -7,7 +7,14 @@ import { formatAreaSquareMeters } from '../../../features/elections/geo.js';
 import { formatNumber } from '../../../features/elections/houseUtils.js';
 import styles from '../ElectionsPage.module.css';
 
-function ElectionsHeader({ area, summary, isLoading, onResetDemoData }) {
+function ElectionsHeader({
+  area,
+  summary,
+  isLoading,
+  isAreaEditing,
+  onResetDemoData,
+  onToggleAreaEditing,
+}) {
   const coveragePercent =
     summary.total > 0 ? Math.round((summary.complete / summary.total) * 100) : 0;
 
@@ -60,6 +67,7 @@ function ElectionsHeader({ area, summary, isLoading, onResetDemoData }) {
             <small>
               {area.center.city}, {area.center.postalCode} · {area.center.district} ·{' '}
               {area.name}, {formatAreaSquareMeters(area.areaSqm)}
+              {area.isCustom ? ' · межу обведено вручну' : ''}
             </small>
           </span>
         </p>
@@ -72,10 +80,17 @@ function ElectionsHeader({ area, summary, isLoading, onResetDemoData }) {
         </p>
 
         <div className={styles.heroActions}>
-          <span className={styles.demoNotice}>
-            <ElectionsIcon name="info" size={15} />
-            Будинки — OpenStreetMap; внесені дані зберігаються локально
-          </span>
+          {/* The whole module works on whatever this polygon covers, so redrawing
+              it is a page-level action and lives next to the address it frames. */}
+          <button
+            aria-pressed={isAreaEditing}
+            className={styles.primaryButton}
+            onClick={onToggleAreaEditing}
+            type="button"
+          >
+            <ElectionsIcon name={isAreaEditing ? 'close' : 'edit'} size={16} />
+            {isAreaEditing ? 'Завершити редагування межі' : 'Редагувати межу'}
+          </button>
 
           <button
             className={styles.ghostButton}
@@ -86,6 +101,11 @@ function ElectionsHeader({ area, summary, isLoading, onResetDemoData }) {
             <ElectionsIcon name="refresh" size={16} />
             Скинути внесені дані
           </button>
+
+          <span className={styles.demoNotice}>
+            <ElectionsIcon name="info" size={15} />
+            Будинки — OpenStreetMap; внесені дані зберігаються локально
+          </span>
         </div>
       </div>
 

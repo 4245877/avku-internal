@@ -28,7 +28,7 @@ import { AREA_CENTER } from '../apps/web/src/features/elections/geo.js';
 import { listStreetNames } from '../apps/web/src/features/elections/osmBuildings.js';
 import { fetchHousesFromOverpass } from '../apps/web/src/features/elections/overpassClient.js';
 import {
-  WORKSPACE_AREA_NAME,
+  SHIPPED_WORKSPACE_AREA,
   filterHousesToWorkspace,
   workspaceCoverRadiusMeters,
 } from '../apps/web/src/features/elections/workspaceArea.js';
@@ -159,7 +159,7 @@ async function main() {
     area: {
       center: AREA_CENTER,
       downloadRadiusMeters: options.radiusMeters,
-      workspace: WORKSPACE_AREA_NAME,
+      workspace: SHIPPED_WORKSPACE_AREA.name,
       label: `${AREA_CENTER.address}, ${AREA_CENTER.city}, ${AREA_CENTER.postalCode}`,
     },
     streets,
@@ -176,7 +176,7 @@ async function main() {
 
   console.log(`\nЗаписано ${outputPath}`);
   console.log(`  будинків:        ${houses.length}`);
-  console.log(`  у межах зони:    ${covered.length} (${WORKSPACE_AREA_NAME})`);
+  console.log(`  у межах зони:    ${covered.length} (${SHIPPED_WORKSPACE_AREA.name})`);
   console.log(`  вулиць:          ${streets.length}`);
   console.log(`  з поверховістю:  ${withLevels}`);
   console.log(`  за типом:        ${JSON.stringify(byType)}`);

@@ -1,17 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { AREA_CENTER, distanceMeters, unprojectFromMeters } from './geo.js';
 import {
-  WORKSPACE_AREA_SQM,
-  WORKSPACE_BOUNDS,
-  WORKSPACE_OUTER_RING,
-  WORKSPACE_RINGS,
+  SHIPPED_WORKSPACE_AREA,
   coordinatesFromRing,
   coversFootprint,
   filterHousesToWorkspace,
+  getWorkspaceArea,
   getWorkspaceMeta,
   isInsideWorkspace,
+  restoreShippedWorkspaceArea,
   ringFromCoordinates,
+  saveWorkspaceArea,
+  subscribeToWorkspaceArea,
   toLeafletLatLngs,
   toWorkspaceFeature,
   workspaceCoverRadiusMeters,
@@ -29,17 +30,19 @@ function footprintAt({ x, y }, size = 20) {
 
 describe('the shipped boundary file', () => {
   it('parses into at least one closed ring of real coordinates', () => {
-    expect(WORKSPACE_RINGS.length).toBeGreaterThanOrEqual(1);
-    expect(WORKSPACE_OUTER_RING.length).toBeGreaterThanOrEqual(3);
+    expect(SHIPPED_WORKSPACE_AREA.rings.length).toBeGreaterThanOrEqual(1);
+    expect(SHIPPED_WORKSPACE_AREA.outerRing.length).toBeGreaterThanOrEqual(3);
 
-    for (const point of WORKSPACE_OUTER_RING) {
+    for (const point of SHIPPED_WORKSPACE_AREA.outerRing) {
       expect(Number.isFinite(point.lat)).toBe(true);
       expect(Number.isFinite(point.lon)).toBe(true);
     }
   });
 
   it('drops the repeated closing vertex GeoJSON requires', () => {
-    expect(WORKSPACE_OUTER_RING[0]).not.toEqual(WORKSPACE_OUTER_RING.at(-1));
+    expect(SHIPPED_WORKSPACE_AREA.outerRing[0]).not.toEqual(
+      SHIPPED_WORKSPACE_AREA.outerRing.at(-1),
+    );
   });
 
   it('covers the campaign address it was drawn around', () => {
@@ -47,9 +50,9 @@ describe('the shipped boundary file', () => {
   });
 
   it('reports bounds that contain every vertex', () => {
-    const [[south, west], [north, east]] = WORKSPACE_BOUNDS;
+    const [[south, west], [north, east]] = SHIPPED_WORKSPACE_AREA.bounds;
 
-    for (const point of WORKSPACE_OUTER_RING) {
+    for (const point of SHIPPED_WORKSPACE_AREA.outerRing) {
       expect(point.lat).toBeGreaterThanOrEqual(south);
       expect(point.lat).toBeLessThanOrEqual(north);
       expect(point.lon).toBeGreaterThanOrEqual(west);
@@ -58,8 +61,8 @@ describe('the shipped boundary file', () => {
   });
 
   it('measures a plausible district-sized ground area', () => {
-    expect(WORKSPACE_AREA_SQM).toBeGreaterThan(1e6);
-    expect(WORKSPACE_AREA_SQM).toBeLessThan(1e9);
+    expect(SHIPPED_WORKSPACE_AREA.areaSqm).toBeGreaterThan(1e6);
+    expect(SHIPPED_WORKSPACE_AREA.areaSqm).toBeLessThan(1e9);
   });
 });
 
@@ -132,7 +135,7 @@ describe('workspaceCoverRadiusMeters', () => {
   it('reaches every vertex of the polygon from the campaign address', () => {
     const radius = workspaceCoverRadiusMeters();
 
-    for (const point of WORKSPACE_OUTER_RING) {
+    for (const point of SHIPPED_WORKSPACE_AREA.outerRing) {
       expect(distanceMeters(AREA_CENTER, point)).toBeLessThanOrEqual(radius);
     }
   });
@@ -165,9 +168,96 @@ describe('getWorkspaceMeta', () => {
   it('describes the territory without mentioning a radius', () => {
     const meta = getWorkspaceMeta();
 
-    expect(meta.vertexCount).toBe(WORKSPACE_OUTER_RING.length);
-    expect(meta.areaSqm).toBe(WORKSPACE_AREA_SQM);
-    expect(meta.bounds).toEqual(WORKSPACE_BOUNDS);
+    expect(meta.vertexCount).toBe(SHIPPED_WORKSPACE_AREA.outerRing.length);
+    expect(meta.areaSqm).toBe(SHIPPED_WORKSPACE_AREA.areaSqm);
+    expect(meta.bounds).toEqual(SHIPPED_WORKSPACE_AREA.bounds);
     expect(meta).not.toHaveProperty('radiusMeters');
+  });
+});
+
+describe('saving a traced boundary', () => {
+  /** A small square around the campaign address, in metres. */
+  const tracedRing = [
+    { x: -400, y: -400 },
+    { x: 400, y: -400 },
+    { x: 400, y: 400 },
+    { x: -400, y: 400 },
+  ].map((point) => unprojectFromMeters(point));
+
+  afterEach(() => {
+    restoreShippedWorkspaceArea();
+  });
+
+  it('puts the traced polygon in force for every territory predicate', () => {
+    const outside = unprojectFromMeters({ x: 2000, y: 0 });
+
+    expect(isInsideWorkspace(outside)).toBe(true);
+
+    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+
+    expect(isInsideWorkspace(AREA_CENTER)).toBe(true);
+    expect(isInsideWorkspace(outside)).toBe(false);
+    expect(getWorkspaceArea().isCustom).toBe(true);
+    expect(getWorkspaceMeta().vertexCount).toBe(4);
+  });
+
+  it('re-cuts the house dataset to the new boundary', () => {
+    const houses = [
+      { id: 'near', footprint: footprintAt({ x: 0, y: 0 }) },
+      { id: 'far', footprint: footprintAt({ x: 2000, y: 0 }) },
+    ];
+
+    expect(filterHousesToWorkspace(houses).map((house) => house.id)).toEqual([
+      'near',
+      'far',
+    ]);
+
+    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+
+    expect(filterHousesToWorkspace(houses).map((house) => house.id)).toEqual(['near']);
+  });
+
+  it('notifies subscribers on save and on a return to the shipped boundary', () => {
+    const seen = [];
+    const unsubscribe = subscribeToWorkspaceArea((area) => seen.push(area.vertexCount));
+
+    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+    restoreShippedWorkspaceArea();
+    unsubscribe();
+    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+
+    expect(seen).toEqual([4, SHIPPED_WORKSPACE_AREA.outerRing.length]);
+  });
+
+  it('survives a reload through storage', () => {
+    saveWorkspaceArea(toWorkspaceFeature(tracedRing, { name: 'Квартал' }));
+
+    const stored = JSON.parse(window.localStorage.getItem('avku-elections-area-v1'));
+
+    expect(stored.properties.name).toBe('Квартал');
+    expect(ringFromCoordinates(stored.geometry.coordinates[0])).toHaveLength(4);
+  });
+
+  it('refuses a polygon that encloses nothing', () => {
+    expect(() => saveWorkspaceArea(toWorkspaceFeature(tracedRing.slice(0, 2)))).toThrow(
+      /щонайменше 3 точки/,
+    );
+    expect(getWorkspaceArea().isCustom).toBe(false);
+  });
+
+  it('treats saving the shipped outline as a return to it, not a new boundary', () => {
+    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+    saveWorkspaceArea(toWorkspaceFeature(SHIPPED_WORKSPACE_AREA.outerRing));
+
+    expect(getWorkspaceArea()).toBe(SHIPPED_WORKSPACE_AREA);
+    expect(window.localStorage.getItem('avku-elections-area-v1')).toBeNull();
+  });
+
+  it('restores the shipped boundary and forgets the saved one', () => {
+    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+    restoreShippedWorkspaceArea();
+
+    expect(getWorkspaceArea()).toBe(SHIPPED_WORKSPACE_AREA);
+    expect(window.localStorage.getItem('avku-elections-area-v1')).toBeNull();
   });
 });

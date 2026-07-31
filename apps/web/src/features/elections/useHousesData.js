@@ -13,6 +13,7 @@ import {
   resetHouseDetails,
   saveHouseDetails,
 } from './electionsApi.js';
+import { subscribeToWorkspaceArea } from './workspaceArea.js';
 
 const initialState = {
   status: 'loading',
@@ -69,6 +70,14 @@ export function useHousesData() {
   const reload = useCallback(() => {
     setReloadToken((current) => current + 1);
   }, []);
+
+  /*
+   * The dataset is cut to the working area inside `electionsApi`, so a boundary
+   * saved in the editor changes which houses exist — the list, the filters, the
+   * counters and the territory's own metadata all have to be built again from
+   * the new polygon.
+   */
+  useEffect(() => subscribeToWorkspaceArea(reload), [reload]);
 
   /**
    * Saves one house's survey data. The house object is replaced but its

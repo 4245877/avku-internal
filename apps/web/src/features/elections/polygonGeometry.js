@@ -125,6 +125,41 @@ export function segmentsIntersect(a1, a2, b1, b2) {
   );
 }
 
+/**
+ * True when a ring crosses itself — a figure-of-eight rather than an outline.
+ *
+ * Hand-tracing a district over a map produces these by accident, and they are
+ * worth catching: "inside" stops meaning anything obvious for a self-crossing
+ * ring, so the dimming mask and the house filter would quietly disagree with
+ * what the person drew. Edges that merely meet at a shared vertex are how a
+ * ring is built and are skipped.
+ */
+export function isRingSelfIntersecting(ring) {
+  if (ring.length < 4) {
+    return false;
+  }
+
+  for (let index = 0; index < ring.length; index += 1) {
+    const a1 = ring[index];
+    const a2 = ring[(index + 1) % ring.length];
+
+    for (let other = index + 1; other < ring.length; other += 1) {
+      const isAdjacent =
+        other === index + 1 || (index === 0 && other === ring.length - 1);
+
+      if (isAdjacent) {
+        continue;
+      }
+
+      if (segmentsIntersect(a1, a2, ring[other], ring[(other + 1) % ring.length])) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 /** True when any edge of one ring crosses any edge of the other. */
 export function ringEdgesCross(first, second) {
   for (let index = 0; index < first.length; index += 1) {

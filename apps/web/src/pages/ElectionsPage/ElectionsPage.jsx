@@ -7,9 +7,10 @@
  * access lives in `features/elections`, all rendering in `./components`.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useHousesData } from '../../features/elections/useHousesData.js';
+import { useAreaEditMode } from '../../features/elections/useWorkspaceEditor.js';
 import {
   DEFAULT_HOUSE_FILTERS,
   filterHouses,
@@ -35,6 +36,12 @@ const PANEL_TABS = [
 
 function ElectionsPage() {
   const data = useHousesData();
+
+  /* Redrawing the boundary decides which houses exist at all, so the mode is
+   * owned here — the button that opens it belongs in the page header, next to
+   * the territory it describes, not hidden inside the map. */
+  const areaEdit = useAreaEditMode();
+  const workspaceRef = useRef(null);
 
   const [filters, setFilters] = useState(DEFAULT_HOUSE_FILTERS);
   const [selectedHouseId, setSelectedHouseId] = useState(null);
@@ -72,6 +79,18 @@ function ElectionsPage() {
 
     return () => clearTimeout(timeoutId);
   }, [saveNotice]);
+
+  /** Opens the editor and brings the map — the drawing surface — into view. */
+  function toggleAreaEditing() {
+    if (areaEdit.isActive) {
+      areaEdit.exit();
+      return;
+    }
+
+    areaEdit.enter();
+    setIsEditing(false);
+    workspaceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   function updateFilters(patch) {
     setFilters((current) => ({ ...current, ...patch }));
@@ -120,8 +139,10 @@ function ElectionsPage() {
     <main className={styles.page}>
       <ElectionsHeader
         area={data.area}
+        isAreaEditing={areaEdit.isActive}
         isLoading={data.isLoading}
         onResetDemoData={data.resetDemoData}
+        onToggleAreaEditing={toggleAreaEditing}
         summary={summary}
       />
 
@@ -138,14 +159,16 @@ function ElectionsPage() {
         summary={summary}
       />
 
-      <div className={styles.workspace}>
+      <div className={styles.workspace} ref={workspaceRef}>
         <HouseMap
           error={data.error}
           fillStatusFilter={filters.fillStatus}
           focusRequest={focusRequest}
           hasEmptyResult={isMapEmpty}
           houses={data.houses}
+          isAreaEditing={areaEdit.isActive}
           matchedIds={matchedIds}
+          onExitAreaEditing={areaEdit.exit}
           onFillStatusChange={(fillStatus) => updateFilters({ fillStatus })}
           onResetFilters={resetFilters}
           onRetry={data.reload}

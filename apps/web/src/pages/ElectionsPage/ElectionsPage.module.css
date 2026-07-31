@@ -1186,28 +1186,30 @@
 }
 
 /*
- * Boundary editor — the temporary `?areaEdit=1` mode. Parked under the base
- * layer switcher, which stays reachable: tracing a district over orthophoto is
- * a different job from tracing it over a street map.
+ * Boundary editor. Parked under the base layer switcher, which stays reachable:
+ * tracing a district over orthophoto is a different job from tracing it over a
+ * street map. It sits above the load and error overlays on purpose — redrawing
+ * the boundary is how an empty district is recovered from.
  */
 .areaEditor {
   position: absolute;
   top: calc(var(--space-4) * 2 + 34px);
   left: var(--space-4);
-  z-index: var(--z-raised);
+  z-index: var(--z-sticky);
 
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
 
-  width: 268px;
+  width: 280px;
   padding: var(--space-3) var(--space-4) var(--space-4);
 
-  background: var(--panel-surface);
+  /* Solid, unlike the other map panels: it carries the numbers and the buttons
+     the tracing depends on, over whatever the basemap happens to be. */
+  background: var(--panel-surface-solid);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
-  backdrop-filter: blur(12px);
 }
 
 .areaEditorHeader {
@@ -1308,11 +1310,64 @@
   cursor: not-allowed;
 }
 
-.areaEditorButtonPrimary {
+/* The one action the mode exists for, sized so it cannot be mistaken. */
+.areaEditorSave {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: center;
+
+  height: var(--btn-height-md);
+  padding: 0 var(--space-4);
+
+  font-size: var(--btn-font-size);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--btn-tracking);
+
+  color: var(--btn-primary-text);
+
+  background: var(--btn-primary-bg);
+  border: 1px solid transparent;
+  border-radius: var(--btn-radius);
+  box-shadow: var(--btn-shadow);
+
+  transition: var(--transition-base);
+}
+
+.areaEditorSave:not(:disabled):hover {
+  background: var(--btn-primary-hover);
+  box-shadow: var(--btn-shadow-hover);
+  transform: translateY(var(--btn-lift));
+}
+
+.areaEditorSave:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/*
+ * Export is the second half of the job — a boundary only becomes everybody's
+ * once the file is in the repository — but it is not what the person tracing a
+ * district is doing right now, so it stays folded away.
+ */
+.areaEditorExport {
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+
+.areaEditorExport summary {
+  cursor: pointer;
+  padding-block: var(--space-1);
   font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.areaEditorExport summary:hover {
   color: var(--ice-deep);
-  background: var(--color-info-bg);
-  border-color: var(--panel-border);
+}
+
+.areaEditorExport > * + * {
+  margin-top: var(--space-2);
 }
 
 .areaEditorPath {
@@ -1335,7 +1390,53 @@
   margin: 0;
 
   font-size: var(--text-2xs);
+  line-height: 1.5;
   color: var(--color-text-secondary);
+}
+
+/*
+ * Confirmation that a saved boundary took effect, shown once the editor has
+ * closed. Bottom centre is the only free strip of the map: the legend owns the
+ * bottom-left corner and Leaflet's scale bar the bottom-right.
+ */
+.mapNotice {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  z-index: var(--z-raised);
+  transform: translateX(-50%);
+
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  max-width: min(440px, calc(100% - 2 * var(--space-4)));
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+
+  background: var(--panel-surface-solid);
+  border: 1px solid color-mix(in srgb, var(--color-success) 40%, transparent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+
+  animation: dropIn var(--duration-base) var(--ease-spring) both;
+}
+
+.mapNotice svg {
+  flex-shrink: 0;
+  color: var(--color-success-strong);
+}
+
+.mapNoticeWarning {
+  border-color: rgba(201, 134, 42, 0.35);
+}
+
+.mapNoticeWarning svg {
+  color: var(--color-warning-strong);
 }
 
 /* Legend */
