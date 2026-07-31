@@ -16,11 +16,40 @@ import styles from '../ElectionsPage.module.css';
 
 const SUGGESTION_LIMIT = 7;
 
+/**
+ * The full prompt carries an example, which is what makes the field obviously
+ * about addresses rather than free text. It needs ~330px to render; below that
+ * the browser cuts it mid-word, so a narrow screen gets the short form instead
+ * of a truncated long one.
+ */
+const PLACEHOLDER = 'Пошук за адресою — наприклад, Коласа 6';
+const PLACEHOLDER_NARROW = 'Пошук за адресою';
+const NARROW_QUERY = '(max-width: 560px)';
+
 const statusDotClassNames = {
   complete: styles.swatchComplete,
   partial: styles.swatchPartial,
   empty: styles.swatchEmpty,
 };
+
+/** Tracks a media query, including changes from rotating the device. */
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches,
+  );
+
+  useEffect(() => {
+    const list = window.matchMedia(query);
+    const update = () => setMatches(list.matches);
+
+    update();
+    list.addEventListener('change', update);
+
+    return () => list.removeEventListener('change', update);
+  }, [query]);
+
+  return matches;
+}
 
 function HouseSearchField({ houses, query, onQueryChange, onSelectHouse, disabled }) {
   const listboxId = useId();
@@ -28,6 +57,7 @@ function HouseSearchField({ houses, query, onQueryChange, onSelectHouse, disable
   const wrapperRef = useRef(null);
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const isNarrow = useMediaQuery(NARROW_QUERY);
 
   const suggestions = useMemo(
     () => (query.trim() ? searchHouses(houses, query, SUGGESTION_LIMIT) : []),
@@ -129,7 +159,7 @@ function HouseSearchField({ houses, query, onQueryChange, onSelectHouse, disable
           }}
           onFocus={() => setIsOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Пошук за адресою — наприклад, Коласа 6"
+          placeholder={isNarrow ? PLACEHOLDER_NARROW : PLACEHOLDER}
           role="combobox"
           type="text"
           value={query}

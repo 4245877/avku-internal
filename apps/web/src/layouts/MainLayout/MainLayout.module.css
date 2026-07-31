@@ -350,7 +350,10 @@
     /* Deterministic height so sticky section headers (e.g. SMM) can offset
        by --topbar-height and sit flush beneath the bar. */
     height: var(--topbar-height);
-    padding: 0 var(--space-3);
+    /* Landscape on a notched phone puts the cutout beside the bar, not above
+       it — pad past whichever inset the orientation produces. */
+    padding-right: max(var(--space-3), env(safe-area-inset-right));
+    padding-left: max(var(--space-3), env(safe-area-inset-left));
 
     border-right: none;
     border-bottom: 1px solid var(--sidebar-border);
@@ -360,8 +363,10 @@
 
   .brand {
     flex-shrink: 0;
+    justify-content: center;
+    min-width: 44px;
     min-height: 44px;
-    margin: 0 var(--space-3) 0 0;
+    margin: 0 var(--space-2) 0 0;
     padding: var(--space-1);
   }
 
@@ -375,8 +380,19 @@
   }
 
   .navigation {
+    /*
+     * `flex: 1` alone does not let this shrink: a flex item's automatic minimum
+     * size is its min-content width, and with the section list laid out in a
+     * `width: max-content` row that is ~610px. The item therefore refused to
+     * shrink, `overflow-x: auto` never had anything to scroll, and the row
+     * simply pushed the theme toggle and the last sections off the bar.
+     * `min-width: 0` is what turns that overflow into a scrollable strip.
+     */
+    min-width: 0;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
     /* Fade the trailing edge to signal the row is horizontally scrollable
        when more sections than fit are present. */
     -webkit-mask-image: linear-gradient(
@@ -403,7 +419,10 @@
   }
 
   .themeToggle {
-    width: 40px;
+    /* Pinned beside the scrolling section strip, never part of it. */
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
     margin-top: 0;
     margin-left: var(--space-2);
     padding: 0;
@@ -464,6 +483,24 @@
 
   .navigationText strong {
     font-size: var(--text-xs);
+  }
+}
+
+/*
+ * Touch pointers latch `:hover` onto whatever was tapped last, so a nudge meant
+ * as feedback becomes a stuck offset. Selection is already carried by
+ * .navigationLinkActive, which needs no pointer at all.
+ */
+@media (hover: none) {
+  .navigationLink:hover,
+  .themeToggle:hover {
+    transform: none;
+  }
+
+  .navigationLink:hover:not(.navigationLinkActive) {
+    color: var(--sidebar-text);
+    background: transparent;
+    border-color: transparent;
   }
 }
 

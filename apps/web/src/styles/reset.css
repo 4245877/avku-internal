@@ -22,7 +22,10 @@
   }
 
   html {
-    min-width: 320px;
+    /* No `min-width` floor here: at a 320px viewport a classic scrollbar leaves
+       314px of client width, and a 320px floor turns that 6px difference into
+       real horizontal overflow. Layout holds itself together below 320 through
+       `min-width: 0` on the flex/grid tracks instead. */
     min-height: 100%;
     font-size: 16px;
     line-height: 1.5;
@@ -42,7 +45,6 @@
   }
 
   body {
-    min-width: 320px;
     min-height: 100vh;
     min-height: 100svh;
     font-family: var(--font-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);

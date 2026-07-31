@@ -50,6 +50,11 @@
      enough to spend, so a wider workspace does not turn into a letterbox. */
   --elections-map-height: clamp(460px, 68vh, 820px);
 
+  /* How far anything docked to the map's bottom edge must stay clear of
+     Leaflet's own chrome — the attribution strip and, above it, the scale bar.
+     Stated once; the legend, the notices and the editor all measure from it. */
+  --map-chrome-bottom: calc(var(--space-4) + 30px);
+
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -58,9 +63,16 @@
      growing at --page-max-width. See variables.css for the two width rules. */
   width: 100%;
   max-width: var(--page-max-width);
+  /* Every child track below is a `minmax(0, …)` or carries `min-width: 0`; this
+     stops anything that slips through from widening the page itself. */
+  min-width: 0;
   min-height: 100%;
   margin-inline: auto;
-  padding: var(--space-10) var(--page-padding-inline) var(--space-12);
+  padding-top: var(--space-10);
+  padding-bottom: var(--space-12);
+  /* Notch and home-indicator insets are zero everywhere they do not apply. */
+  padding-right: max(var(--page-padding-inline), env(safe-area-inset-right));
+  padding-left: max(var(--page-padding-inline), env(safe-area-inset-left));
 
   animation: pageReveal var(--duration-reveal) var(--ease-out) both;
 }
@@ -419,6 +431,7 @@
   flex-direction: column;
   gap: var(--space-4);
 
+  min-width: 0;
   padding: var(--space-5) var(--space-6);
 
   background: var(--panel-surface);
@@ -432,6 +445,7 @@
   display: flex;
   gap: var(--space-4);
   align-items: center;
+  min-width: 0;
 }
 
 .resultCount {
@@ -496,6 +510,10 @@
   background: transparent;
   border: none;
   outline: none;
+  /* A placeholder longer than the field is cut mid-word by default; ellipsis
+     makes the truncation read as deliberate. The narrow layout also swaps in a
+     shorter string — see HouseSearchField. */
+  text-overflow: ellipsis;
 }
 
 .searchInput::placeholder {
@@ -556,6 +574,7 @@
   gap: var(--space-3);
   align-items: center;
 
+  min-height: 44px;
   padding: var(--space-3) var(--space-4);
 
   color: var(--color-text-secondary);
@@ -611,18 +630,27 @@
 }
 
 /* ── FILTERS ───────────────────────────────────────────────── */
+/*
+ * `min-width: 0` on all three boxes is load-bearing, not defensive. Once the
+ * chip row stops wrapping (see the ≤760 block), its min-content width is the
+ * full un-wrapped strip; without this the automatic minimum size propagates up
+ * through .filters and out of the card, and that single chain was the page's
+ * largest source of horizontal overflow.
+ */
 .filters {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .chipGroup {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .chip {
@@ -699,6 +727,11 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+  min-width: 0;
+}
+
+.selectField {
+  min-width: 0;
 }
 
 .selectField select {
@@ -1257,7 +1290,9 @@
   flex-direction: column;
   gap: var(--space-3);
 
-  width: 280px;
+  /* Never wider than the map it floats over: at a 320px viewport the surface is
+     only ~291px, and a flat 280px + the left offset ran past its right edge. */
+  width: min(280px, calc(100% - var(--space-4) * 2));
   padding: var(--space-3) var(--space-4) var(--space-4);
 
   /* Solid, unlike the other map panels: it carries the numbers and the buttons
@@ -1373,6 +1408,18 @@
   align-items: center;
   justify-content: center;
 
+  /*
+   * It is a sibling of the button rows, not part of them, so in a column flex
+   * box with a capped height it was the item that gave — squashed to half
+   * height and pushed out of the panel. Wherever the editor scrolls (any small
+   * screen) it stays its own size and stays in view; on a desktop panel that
+   * never scrolls, sticky resolves to no change at all.
+   */
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex-shrink: 0;
+
   height: var(--btn-height-md);
   padding: 0 var(--space-4);
 
@@ -1457,7 +1504,7 @@
  */
 .mapNotice {
   position: absolute;
-  bottom: var(--space-4);
+  bottom: var(--map-chrome-bottom);
   left: 50%;
   z-index: var(--z-raised);
   transform: translateX(-50%);
@@ -1498,7 +1545,12 @@
 /* Legend */
 .mapLegend {
   position: absolute;
-  bottom: var(--space-4);
+  /*
+   * Clears Leaflet's chrome along the bottom edge. «Супутник» is credited to
+   * Esri in a line long enough to reach back under the legend, so the offset
+   * has to cover the strip's height, not just the corner it usually keeps to.
+   */
+  bottom: var(--map-chrome-bottom);
   left: var(--space-4);
   z-index: var(--z-raised);
 
@@ -1657,7 +1709,7 @@
   position: relative;
   z-index: 1;
 
-  max-width: 340px;
+  max-width: min(340px, 100%);
   padding: var(--space-6);
 
   text-align: center;
@@ -1729,6 +1781,9 @@
   align-items: center;
 
   max-width: min(520px, calc(100% - 100px));
+  /* However long the copy, the card stays inside the map: past this the text
+     below scrolls instead of the card growing out through the bottom edge. */
+  max-height: calc(100% - 100px);
   padding: var(--space-3) var(--space-4);
 
   background: var(--panel-surface-solid);
@@ -1750,6 +1805,11 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  /* The part that gives when the card meets its height cap — never the
+     button beside it, which carries the way out of the state. */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .mapBannerText strong {
@@ -1837,6 +1897,20 @@
 .mapEmptyBanner > span:nth-child(2) {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/*
+ * One thing owns the map's bottom-left corner at a time. A banner is an
+ * exceptional state that needs a decision; the legend is ambient, and the same
+ * status filters sit in the toolbar directly above the map. This mirrors the
+ * existing rule that hides the legend while a boundary is being traced.
+ */
+.mapSurface:has(.mapBanner, .mapEmptyBanner) .mapLegend {
+  display: none;
 }
 
 .mapEmptyBanner strong {
@@ -3230,14 +3304,42 @@ a.contactValue:hover {
 
 @media (max-width: 760px) {
   .page {
-    --elections-map-height: 62vh;
+    /*
+     * `svh`, not `vh`: on iOS `vh` is the *largest* viewport, so a 62vh map ran
+     * under the browser chrome. `svh` is stable while scrolling (unlike `dvh`,
+     * which would resize the map under the finger every time the URL bar
+     * hides), and the clamp keeps a usable map in landscape, where 60% of a
+     * 390px-tall viewport would be a letterbox. Orientation changes still
+     * resize the container, and the ResizeObserver in `useLeafletMap` answers
+     * those with `invalidateSize()`.
+     */
+    --elections-map-height: clamp(320px, 60vh, 520px);
+    --elections-map-height: clamp(320px, 60svh, 520px);
+
+    /* Scoped to this page: every control built on these tokens clears 44px on
+       touch without editing each rule (and without moving desktop). */
+    --btn-height-md: 44px;
+    --input-height: 48px;
+
+    /* How far anything docked to the map's bottom edge must stay clear of
+       Leaflet's own chrome: the attribution strip and, above it, the scale bar
+       — together ~42px. Stated once; the notices and the boundary editor all
+       measure from it. */
+    --map-chrome-bottom: calc(var(--space-2) + 46px);
 
     gap: var(--space-5);
-    padding: var(--space-6) var(--space-4) var(--space-8);
+    padding-top: var(--space-6);
+    padding-bottom: max(var(--space-8), env(safe-area-inset-bottom));
+    padding-right: max(var(--space-4), env(safe-area-inset-right));
+    padding-left: max(var(--space-4), env(safe-area-inset-left));
   }
 
   .title {
     font-size: var(--text-3xl);
+  }
+
+  .toolbar {
+    padding: var(--space-4);
   }
 
   .toolbarTop {
@@ -3245,16 +3347,43 @@ a.contactValue:hover {
     align-items: stretch;
   }
 
+  .searchClear {
+    width: 44px;
+    height: 44px;
+  }
+
   .filters {
     flex-direction: column;
     align-items: stretch;
   }
 
+  /*
+   * Status filters scroll as one compact strip inside their own block. The
+   * negative inline margin cancels the card padding so the strip bleeds to the
+   * card edge and a half-visible chip advertises that it continues — with the
+   * padding restored inside, the first and last chip still line up with the
+   * text above them.
+   */
   .chipGroup {
-    overflow-x: auto;
     flex-wrap: nowrap;
+    /*
+     * The width must be stated, not left to `align-items: stretch`. A stretched
+     * item whose cross size is `auto` resolves against its own max-content
+     * here, so the un-wrapped strip (~444px) became the width of the flex line
+     * — which then sized every *other* row in .filters to match and pushed the
+     * whole page ~76px past the viewport. Pinning it to the card's inner width
+     * is what actually makes `overflow-x` scroll instead of overflow.
+     */
+    width: calc(100% + var(--space-4) * 2);
+    margin-inline: calc(var(--space-4) * -1);
+
+    overflow-x: auto;
+    padding-inline: var(--space-4);
     padding-bottom: var(--space-1);
     scrollbar-width: none;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .chipGroup::-webkit-scrollbar {
@@ -3263,6 +3392,8 @@ a.contactValue:hover {
 
   .chip {
     flex-shrink: 0;
+    min-height: 44px;
+    scroll-snap-align: start;
   }
 
   .selectField,
@@ -3271,24 +3402,154 @@ a.contactValue:hover {
     max-width: none;
   }
 
+  .selectField select,
+  .resetFiltersButton {
+    min-height: 44px;
+  }
+
+  /* `minmax(0, …)`, not `1fr`: a bare `1fr` floors the track at the widest
+     option of the <select> inside it, which is far wider than the phone. */
   .selectGroup {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
   }
 
-  .mapLegend {
-    width: 158px;
-    padding: var(--space-2);
+  .tab {
+    height: 44px;
   }
 
-  .mapLegendHint {
+  /* Map chrome: switcher top-left, zoom top-right, attribution bottom-right.
+     Capping the switcher keeps it clear of the zoom stack on a ~291px map. */
+  .mapBasemaps {
+    max-width: calc(100% - 84px);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .mapBasemaps::-webkit-scrollbar {
     display: none;
   }
 
+  .mapBasemapButton {
+    min-height: 44px;
+    padding: 0 var(--space-2);
+    white-space: nowrap;
+  }
+
+  /* The switcher above it is 52px tall on touch, not the 34px the desktop
+     offset was cut for. */
+  .areaEditor {
+    top: calc(var(--space-4) + 60px);
+  }
+
+  .mapControlButton {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Remaining controls that were sized for a mouse. */
+  .panelClose,
+  .areaEditorClose,
+  .iconButton {
+    width: 44px;
+    height: 44px;
+  }
+
+  .loadMoreButton {
+    height: 44px;
+  }
+
+  .areaEditorButton {
+    min-height: 44px;
+    padding-inline: var(--space-4);
+  }
+
+  .areaEditorExport summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .factLink {
+    min-height: 44px;
+  }
+
+  /*
+   * The legend is a colour key plus a duplicate of the status filters that sit
+   * in the toolbar directly above the map. On the stacked layout it cost a
+   * quarter of the surface and shared corners with the notices and the
+   * attribution, so here the toolbar chips are the only place filtering lives.
+   */
+  .mapLegend {
+    display: none;
+  }
+
+  /*
+   * Notices become a bottom card.
+   *
+   * Anchored top-left with a `100% - 100px` cap they collapsed to ~190px on a
+   * 355px map: the OSM coverage notice rendered 583px tall over a 484px map,
+   * one word per line, with its button pushed past the surface. Full width at
+   * the bottom gives the copy a readable measure; capping the height and
+   * scrolling only the *text* keeps the primary action permanently on screen.
+   */
+  .mapBanner,
   .mapEmptyBanner {
-    right: var(--space-4);
+    top: auto;
+    right: var(--space-2);
+    /* Leaves Leaflet's attribution and scale bar readable underneath. */
+    bottom: var(--map-chrome-bottom);
+    left: var(--space-2);
+
     flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    align-items: center;
+
     max-width: none;
+    padding: var(--space-3);
+  }
+
+  .mapBannerText,
+  .mapEmptyBanner > span:nth-child(2) {
+    flex: 1 1 0;
+    min-width: 0;
+    max-height: 32svh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .mapBanner button,
+  .mapEmptyBanner button {
+    flex: 1 0 100%;
+    width: 100%;
+  }
+
+  /*
+   * Transient banners stack down the top edge instead of centring over it: the
+   * switcher owns the first 52px, the zoom stack owns a 52px gutter on the
+   * right, and the bottom card may be showing at the same time. Anchoring both
+   * edges (rather than centring on a max-width) is what keeps them out of the
+   * zoom stack at every width.
+   */
+  .mapStatusBanner,
+  .mapNotice {
+    right: calc(var(--space-2) + 52px);
+    left: var(--space-2);
+
+    justify-content: center;
+    width: auto;
+    max-width: none;
+    transform: none;
+  }
+
+  .mapStatusBanner {
+    top: calc(var(--space-2) + 52px);
+  }
+
+  .mapNotice {
+    top: calc(var(--space-2) + 100px);
+    bottom: auto;
   }
 
   .formGrid {
@@ -3326,30 +3587,191 @@ a.contactValue:hover {
   }
 }
 
+@media (max-width: 560px) {
+  /* Two 200px-capped selects never fit beside each other on a phone — the
+     right one was simply cut off. One column, full width, 44px tall. */
+  .selectGroup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /*
+   * Boundary editing is the one mode where the map surface *is* the workspace,
+   * so the editor moves out of the corner and docks to the bottom edge.
+   */
+  .areaEditor {
+    top: auto;
+    right: var(--space-2);
+    bottom: var(--map-chrome-bottom);
+    left: var(--space-2);
+
+    width: auto;
+    /* Stops short of the zoom stack opposite it (~151px from the map's top
+       edge), so the two never cover each other however long the hint runs. */
+    max-height: calc(100% - 210px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--space-3);
+  }
+
+  /*
+   * Pinned to the bottom of the editor's own scroll box. It is a sibling of the
+   * button rows rather than part of them, so in a height-capped column flex box
+   * it was the item that gave: squashed to 22px and pushed below the editor,
+   * over the scale bar. `flex-shrink: 0` keeps its height, `sticky` keeps it in
+   * view however long the traced boundary makes the panel above it.
+   */
+  .areaEditorSave {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    flex-shrink: 0;
+  }
+
+  .areaEditorHeader,
+  .areaEditorStats {
+    flex-shrink: 0;
+  }
+}
+
 @media (max-width: 480px) {
   .heroStats {
     grid-template-columns: 1fr;
   }
 
+  .hero {
+    padding: var(--space-5) var(--space-4);
+  }
+
   .panelTitle {
     font-size: var(--text-xl);
   }
+}
 
-  .mapControls {
-    top: auto;
-    bottom: var(--space-4);
-    right: var(--space-4);
-    flex-direction: row;
+/*
+ * Landscape phones: the viewport is short, not narrow. A percentage-based map
+ * would be a letterbox, and the hero is the part worth giving up.
+ */
+@media (max-height: 480px) and (orientation: landscape) {
+  .page {
+    --elections-map-height: clamp(260px, 82vh, 420px);
+    --elections-map-height: clamp(260px, 82svh, 420px);
   }
 
+  /* A 196px-tall legend does not fit a ~320px map, whatever the width. */
   .mapLegend {
-    bottom: calc(var(--space-4) + 48px);
+    display: none;
   }
 
-  .mapBasemaps {
-    right: calc(var(--space-4) + 44px);
-    left: var(--space-4);
-    overflow-x: auto;
+  /*
+   * Same reasoning as the editor below: with height scarce and width to spare,
+   * a full-width bottom card would reach up into the zoom stack, so the notices
+   * take the left column instead.
+   */
+  .mapBanner,
+  .mapEmptyBanner {
+    right: auto;
+    width: min(360px, 54%);
+  }
+
+  .mapBannerText,
+  .mapEmptyBanner > span:nth-child(2) {
+    max-height: 26svh;
+  }
+
+  /*
+   * Landscape has width to spare and no height to give: the editor leaves the
+   * bottom dock and takes the left column, clearing the zoom stack on the right
+   * without having to be short. Anchored top *and* bottom, so it fills exactly
+   * the space between the switcher and the attribution and can never grow past
+   * the map's edge — the height comes from the anchors, not from the content.
+   */
+  .areaEditor {
+    top: calc(var(--space-2) + 58px);
+    right: auto;
+    bottom: calc(var(--space-2) + 26px);
+    left: var(--space-2);
+
+    width: min(300px, 46%);
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+/*
+ * Comfortable hit areas are a property of the *pointer*, not of the viewport: a
+ * phone held in landscape is 844px wide and still driven by a fingertip, and
+ * the width breakpoint above would have handed it back its 26px mouse targets.
+ * Keyed on `pointer: coarse`, the floors follow the input device instead.
+ */
+@media (pointer: coarse) {
+  .page {
+    --btn-height-md: 44px;
+    --input-height: 48px;
+  }
+
+  .chip,
+  .selectField select,
+  .resetFiltersButton,
+  .mapBasemapButton,
+  .areaEditorButton,
+  .mapLegendRow,
+  .suggestionItem,
+  .factLink,
+  .areaEditorExport summary {
+    min-height: 44px;
+  }
+
+  .tab,
+  .loadMoreButton {
+    height: 44px;
+  }
+
+  .searchClear,
+  .panelClose,
+  .areaEditorClose,
+  .iconButton,
+  .mapControlButton {
+    width: 44px;
+    height: 44px;
+  }
+
+  .areaEditorExport summary {
+    display: flex;
+    align-items: center;
+  }
+}
+
+/*
+ * Hover is an enhancement, never the affordance. On touch the last-tapped
+ * control keeps `:hover` until something else is tapped, which leaves lift
+ * transforms stuck in place; state that matters is carried by the `Active`
+ * classes and `aria-pressed`.
+ */
+@media (hover: none) {
+  .statTile:hover,
+  .metric:hover,
+  .houseRow:hover,
+  .contactRow:hover,
+  .chip:not(:disabled):hover,
+  .primaryButton:not(:disabled):hover,
+  .ghostButton:not(:disabled):hover,
+  .residentCard:hover {
+    transform: none;
+  }
+
+  .mapLegendRow:hover,
+  .mapBasemapButton:hover {
+    background: transparent;
+  }
+
+  .mapLegendRowActive:hover {
+    background: var(--color-info-bg);
+  }
+
+  .mapBasemapButtonActive:hover {
+    color: var(--ice-deep);
+    background: var(--color-info-bg);
   }
 }
 
