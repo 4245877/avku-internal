@@ -130,8 +130,15 @@ export async function runOverpassQuery(
   );
 }
 
-/** Live house dataset straight from OpenStreetMap. */
+/**
+ * Live house dataset straight from OpenStreetMap.
+ *
+ * `box` is the working area's bounding box plus its margin — the acquisition
+ * area. `center` / `radiusMeters` remain as the legacy circular form; either
+ * way the same resolved box filters the response.
+ */
 export async function fetchHousesFromOverpass({
+  box,
   center = AREA_CENTER,
   radiusMeters = AREA_RADIUS_METERS,
   requireAddress = true,
@@ -139,11 +146,16 @@ export async function fetchHousesFromOverpass({
   onProgress,
   ...options
 } = {}) {
-  const query = buildOverpassQuery({ center, radiusMeters, requireAddress });
+  const query = buildOverpassQuery({ box, center, radiusMeters, requireAddress });
   const payload = await runOverpassQuery(query, { signal, onProgress, ...options });
 
   return {
-    houses: normalizeOsmBuildings(payload.elements, { center, radiusMeters, requireAddress }),
+    houses: normalizeOsmBuildings(payload.elements, {
+      box,
+      center,
+      radiusMeters,
+      requireAddress,
+    }),
     generatedAt: payload.osm3s?.timestamp_osm_base ?? null,
   };
 }

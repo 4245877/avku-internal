@@ -9,25 +9,52 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   fetchHouses,
+  fetchHousesFromOsm,
   getAreaMeta,
   resetHouseDetails,
   saveHouseDetails,
 } from './electionsApi.js';
-import { subscribeToWorkspaceArea } from './workspaceArea.js';
+import { hydrateWorkspaceArea, subscribeToWorkspaceArea } from './workspaceArea.js';
 
-const initialState = {
-  status: 'loading',
-  houses: [],
-  streets: [],
-  area: getAreaMeta(),
-  error: null,
-};
+/**
+ * Built per mount rather than kept as a module constant: the working area can
+ * change between two mounts of the page, and a shared object would open the
+ * second one on the territory the first one started with.
+ */
+function createInitialState() {
+  return {
+    status: 'loading',
+    houses: [],
+    streets: [],
+    area: getAreaMeta(),
+    coverage: null,
+    error: null,
+  };
+}
 
 export function useHousesData() {
-  const [state, setState] = useState(initialState);
+  const [state, setState] = useState(createInitialState);
   const [reloadToken, setReloadToken] = useState(0);
   const [savingHouseId, setSavingHouseId] = useState(null);
   const [saveError, setSaveError] = useState(null);
+  const [isRefreshingFromOsm, setIsRefreshingFromOsm] = useState(false);
+
+  /*
+   * The permanent boundary lives on the API; the first render used the local
+   * cache so the map would not open on the wrong district while waiting. If the
+   * two differ, applying the server's copy notifies the workspace store, which
+   * reloads the dataset through the subscription below.
+   */
+  useEffect(() => {
+    const controller = new AbortController();
+
+    hydrateWorkspaceArea({ signal: controller.signal }).catch(() => {
+      // A boundary that cannot be reconciled is not a reason to lose the map:
+      // the cached territory stays in force and the dataset loads against it.
+    });
+
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -46,6 +73,7 @@ export function useHousesData() {
           houses: payload.houses,
           streets: payload.streets,
           area: payload.area,
+          coverage: payload.coverage,
           error: null,
         });
       })
@@ -78,6 +106,40 @@ export function useHousesData() {
    * the new polygon.
    */
   useEffect(() => subscribeToWorkspaceArea(reload), [reload]);
+
+  /**
+   * Pulls buildings for the current boundary straight from OpenStreetMap, for
+   * when the shipped snapshot does not reach the newly traced territory. The
+   * result replaces the dataset for this session only.
+   */
+  const refreshFromOsm = useCallback(async () => {
+    setIsRefreshingFromOsm(true);
+
+    try {
+      const payload = await fetchHousesFromOsm();
+
+      setState({
+        status: 'ready',
+        houses: payload.houses,
+        streets: payload.streets,
+        area: payload.area,
+        coverage: payload.coverage,
+        error: null,
+      });
+
+      return true;
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        status: 'error',
+        error: error?.message ?? 'Не вдалося завантажити дані з OpenStreetMap.',
+      }));
+
+      return false;
+    } finally {
+      setIsRefreshingFromOsm(false);
+    }
+  }, []);
 
   /**
    * Saves one house's survey data. The house object is replaced but its
@@ -121,17 +183,37 @@ export function useHousesData() {
       houses: state.houses,
       streets: state.streets,
       area: state.area,
+      coverage: state.coverage,
       error: state.error,
       isLoading: state.status === 'loading',
       isReady: state.status === 'ready',
       hasError: state.status === 'error',
+      /** The polygon holds ground the dataset was never downloaded for. */
+      hasMissingCoverage: state.status === 'ready' && state.coverage?.isCovered === false,
+      /** The territory is covered and genuinely holds no buildings. */
+      isAreaEmpty:
+        state.status === 'ready' &&
+        state.houses.length === 0 &&
+        state.coverage?.isCovered !== false,
+      isRefreshingFromOsm,
       savingHouseId,
       saveError,
       reload,
+      refreshFromOsm,
       saveDetails,
       resetDemoData,
       dismissSaveError,
     }),
-    [dismissSaveError, reload, resetDemoData, saveDetails, saveError, savingHouseId, state],
+    [
+      dismissSaveError,
+      isRefreshingFromOsm,
+      refreshFromOsm,
+      reload,
+      resetDemoData,
+      saveDetails,
+      saveError,
+      savingHouseId,
+      state,
+    ],
   );
 }

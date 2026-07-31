@@ -1640,24 +1640,6 @@
   margin-top: var(--space-3);
 }
 
-.mapOverlayCardError {
-  border-color: rgba(166, 62, 76, 0.35);
-}
-
-.mapOverlayIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  width: 46px;
-  height: 46px;
-  margin-bottom: var(--space-1);
-
-  color: var(--color-danger);
-  background: var(--color-danger-bg);
-  border-radius: var(--radius-full);
-}
-
 .mapSpinner {
   width: 30px;
   height: 30px;
@@ -1668,6 +1650,108 @@
   border-radius: 50%;
 
   animation: spin 0.85s linear infinite;
+}
+
+/*
+ * States that used to be full-surface overlays: a failed dataset request, a
+ * boundary the local OSM snapshot does not reach, an empty territory.
+ *
+ * They are banners rather than overlays because the map underneath is not
+ * broken — the tiles, the streets and the traced border are all correct and
+ * worth seeing. Hiding them behind an opaque card was what made "no houses"
+ * look like "no map".
+ */
+.mapBanner {
+  position: absolute;
+  /* Clears the base-layer switcher, which owns the top-left corner. */
+  top: calc(var(--space-4) + 52px);
+  left: var(--space-4);
+  z-index: var(--z-raised);
+
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+
+  max-width: min(520px, calc(100% - 100px));
+  padding: var(--space-3) var(--space-4);
+
+  background: var(--panel-surface-solid);
+  border: 1px solid rgba(201, 134, 42, 0.35);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+
+  animation: dropIn var(--duration-base) var(--ease-spring) both;
+}
+
+.mapBannerIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-warning-strong);
+}
+
+.mapBannerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mapBannerText strong {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.mapBannerText small {
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.mapBannerText code {
+  padding: 0 4px;
+
+  font-family: var(--font-mono, monospace);
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+
+  background: var(--panel-inset);
+  border-radius: var(--radius-sm);
+}
+
+.mapBanner button {
+  flex-shrink: 0;
+}
+
+/* Reloading the dataset over a map that is already drawn. */
+.mapStatusBanner {
+  position: absolute;
+  top: var(--space-4);
+  left: 50%;
+  z-index: var(--z-raised);
+  transform: translateX(-50%);
+
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+
+  background: var(--panel-surface-solid);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
+}
+
+/* The inline spinner is a badge, not the centrepiece of a loading card. */
+.mapStatusBanner .mapSpinner {
+  width: 14px;
+  height: 14px;
+  margin-bottom: 0;
+  border-width: 2px;
 }
 
 .mapEmptyBanner {

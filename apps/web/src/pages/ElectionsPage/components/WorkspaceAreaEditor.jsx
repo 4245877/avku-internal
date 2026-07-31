@@ -3,12 +3,15 @@
  *
  * The tracing itself happens on the map — this is the surrounding chrome: how
  * many vertices the outline has, how much ground it covers, the ways to take a
- * step back, and the one button that matters, «Зберегти межу», which puts the
- * outline in force for the whole module straight away.
+ * step back, and the two actions that are deliberately not the same thing:
  *
- * Saving is local to this browser. The export below it is how a boundary
- * becomes everybody's: the file it produces is exactly `workspaceArea.geo.json`,
- * so the path to save it to is spelled out rather than left to be guessed.
+ *   «Зберегти межу»        writes the polygon to the API. That is what makes it
+ *                          the territory — in this browser, in everybody else's,
+ *                          and for `scripts/fetch-osm-buildings.mjs`.
+ *   «Експортувати GeoJSON» hands back the same document as a file, for
+ *                          committing as `workspaceArea.geo.json` so it also
+ *                          becomes the boundary a fresh checkout ships with.
+ *                          On its own it changes nothing.
  */
 
 import { useEffect, useState } from 'react';
@@ -25,12 +28,17 @@ const SAVE_PATH = `apps/web/src/features/elections/${EXPORT_FILE_NAME}`;
 
 /** The standing line under the buttons — what the outline needs, or is. */
 function statusMessage(editor) {
-  if (!editor.isSaveable) {
+  if (editor.isSaving) {
+    return 'Зберігаємо межу на сервері…';
+  }
+
+  if (editor.vertexCount < 3) {
     return 'Клацніть по карті щонайменше 3 рази, щоб окреслити територію.';
   }
 
   if (editor.isSelfIntersecting) {
-    return 'Контур перетинає сам себе — межа вийде непередбачуваною.';
+    return 'Контур перетинає сам себе — виправте перетин, інакше межу неможливо ' +
+      'зберегти: «всередині» перестає бути однозначним.';
   }
 
   if (editor.hasRestoredDraft) {
@@ -62,8 +70,8 @@ function WorkspaceAreaEditor({ editor, onExit, onSave }) {
     setNotice((await editor.copy()) ? 'JSON скопійовано' : 'Не вдалося скопіювати');
   }
 
-  function handleSave() {
-    const result = onSave();
+  async function handleSave() {
+    const result = await onSave();
 
     if (!result?.isSaved) {
       setNotice(result?.error ?? 'Не вдалося зберегти межу.');
@@ -164,12 +172,12 @@ function WorkspaceAreaEditor({ editor, onExit, onSave }) {
 
       <button
         className={styles.areaEditorSave}
-        disabled={!editor.isSaveable}
+        disabled={!editor.isSaveable || editor.isSaving}
         onClick={handleSave}
         type="button"
       >
-        <ElectionsIcon name="check" size={16} />
-        Зберегти межу
+        <ElectionsIcon name={editor.isSaving ? 'refresh' : 'check'} size={16} />
+        {editor.isSaving ? 'Зберігаємо…' : 'Зберегти межу'}
       </button>
 
       <p aria-live="polite" className={styles.areaEditorNotice}>
@@ -177,12 +185,18 @@ function WorkspaceAreaEditor({ editor, onExit, onSave }) {
       </p>
 
       <details className={styles.areaEditorExport}>
-        <summary>Експорт GeoJSON</summary>
+        <summary>Експортувати GeoJSON</summary>
+
+        <p className={styles.areaEditorPath}>
+          Експорт нічого не зберігає — він лише віддає той самий документ
+          файлом. Покладіть його в <code>{SAVE_PATH}</code> і закомітьте, щоб ця
+          межа стала початковою для нових розгортань.
+        </p>
 
         <div className={styles.areaEditorActions}>
           <button
             className={styles.areaEditorButton}
-            disabled={!editor.isSaveable}
+            disabled={!editor.isExportable}
             onClick={editor.download}
             type="button"
           >
@@ -192,18 +206,13 @@ function WorkspaceAreaEditor({ editor, onExit, onSave }) {
 
           <button
             className={styles.areaEditorButton}
-            disabled={!editor.isSaveable}
+            disabled={!editor.isExportable}
             onClick={handleCopy}
             type="button"
           >
             Копіювати JSON
           </button>
         </div>
-
-        <p className={styles.areaEditorPath}>
-          Збережена тут межа діє лише в цьому браузері. Щоб вона стала спільною,
-          покладіть файл у <code>{SAVE_PATH}</code>.
-        </p>
       </details>
     </section>
   );

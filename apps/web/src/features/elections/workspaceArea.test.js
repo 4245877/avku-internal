@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AREA_CENTER, distanceMeters, unprojectFromMeters } from './geo.js';
 import {
@@ -9,12 +9,15 @@ import {
   getWorkspaceArea,
   getWorkspaceMeta,
   isInsideWorkspace,
+  hydrateWorkspaceArea,
+  resetWorkspaceAreaToShipped,
   restoreShippedWorkspaceArea,
   ringFromCoordinates,
   saveWorkspaceArea,
   subscribeToWorkspaceArea,
   toLeafletLatLngs,
   toWorkspaceFeature,
+  workspaceBoundingBox,
   workspaceCoverRadiusMeters,
 } from './workspaceArea.js';
 
@@ -184,16 +187,27 @@ describe('saving a traced boundary', () => {
     { x: -400, y: 400 },
   ].map((point) => unprojectFromMeters(point));
 
-  afterEach(() => {
-    restoreShippedWorkspaceArea();
+  // These tests are about the store, not about persistence: an unreachable API
+  // is the interesting case here, because it is what proves the boundary still
+  // takes effect and still survives a reload through the local cache.
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
+    );
   });
 
-  it('puts the traced polygon in force for every territory predicate', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetWorkspaceAreaToShipped();
+  });
+
+  it('puts the traced polygon in force for every territory predicate', async () => {
     const outside = unprojectFromMeters({ x: 2000, y: 0 });
 
     expect(isInsideWorkspace(outside)).toBe(true);
 
-    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+    await saveWorkspaceArea(toWorkspaceFeature(tracedRing));
 
     expect(isInsideWorkspace(AREA_CENTER)).toBe(true);
     expect(isInsideWorkspace(outside)).toBe(false);
@@ -201,7 +215,7 @@ describe('saving a traced boundary', () => {
     expect(getWorkspaceMeta().vertexCount).toBe(4);
   });
 
-  it('re-cuts the house dataset to the new boundary', () => {
+  it('re-cuts the house dataset to the new boundary', async () => {
     const houses = [
       { id: 'near', footprint: footprintAt({ x: 0, y: 0 }) },
       { id: 'far', footprint: footprintAt({ x: 2000, y: 0 }) },
@@ -212,25 +226,25 @@ describe('saving a traced boundary', () => {
       'far',
     ]);
 
-    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+    await saveWorkspaceArea(toWorkspaceFeature(tracedRing));
 
     expect(filterHousesToWorkspace(houses).map((house) => house.id)).toEqual(['near']);
   });
 
-  it('notifies subscribers on save and on a return to the shipped boundary', () => {
+  it('notifies subscribers on save and on a return to the shipped boundary', async () => {
     const seen = [];
     const unsubscribe = subscribeToWorkspaceArea((area) => seen.push(area.vertexCount));
 
-    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
-    restoreShippedWorkspaceArea();
+    await saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+    await restoreShippedWorkspaceArea();
     unsubscribe();
-    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+    await saveWorkspaceArea(toWorkspaceFeature(tracedRing));
 
     expect(seen).toEqual([4, SHIPPED_WORKSPACE_AREA.outerRing.length]);
   });
 
-  it('survives a reload through storage', () => {
-    saveWorkspaceArea(toWorkspaceFeature(tracedRing, { name: 'Квартал' }));
+  it('survives a reload through storage', async () => {
+    await saveWorkspaceArea(toWorkspaceFeature(tracedRing, { name: 'Квартал' }));
 
     const stored = JSON.parse(window.localStorage.getItem('avku-elections-area-v1'));
 
@@ -238,24 +252,24 @@ describe('saving a traced boundary', () => {
     expect(ringFromCoordinates(stored.geometry.coordinates[0])).toHaveLength(4);
   });
 
-  it('refuses a polygon that encloses nothing', () => {
-    expect(() => saveWorkspaceArea(toWorkspaceFeature(tracedRing.slice(0, 2)))).toThrow(
-      /щонайменше 3 точки/,
-    );
+  it('refuses a polygon that encloses nothing', async () => {
+    await expect(
+      saveWorkspaceArea(toWorkspaceFeature(tracedRing.slice(0, 2))),
+    ).rejects.toThrow(/щонайменше 3 точки/);
     expect(getWorkspaceArea().isCustom).toBe(false);
   });
 
-  it('treats saving the shipped outline as a return to it, not a new boundary', () => {
-    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
-    saveWorkspaceArea(toWorkspaceFeature(SHIPPED_WORKSPACE_AREA.outerRing));
+  it('treats saving the shipped outline as a return to it, not a new boundary', async () => {
+    await saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+    await saveWorkspaceArea(toWorkspaceFeature(SHIPPED_WORKSPACE_AREA.outerRing));
 
     expect(getWorkspaceArea()).toBe(SHIPPED_WORKSPACE_AREA);
     expect(window.localStorage.getItem('avku-elections-area-v1')).toBeNull();
   });
 
-  it('restores the shipped boundary and forgets the saved one', () => {
-    saveWorkspaceArea(toWorkspaceFeature(tracedRing));
-    restoreShippedWorkspaceArea();
+  it('restores the shipped boundary and forgets the saved one', async () => {
+    await saveWorkspaceArea(toWorkspaceFeature(tracedRing));
+    await restoreShippedWorkspaceArea();
 
     expect(getWorkspaceArea()).toBe(SHIPPED_WORKSPACE_AREA);
     expect(window.localStorage.getItem('avku-elections-area-v1')).toBeNull();

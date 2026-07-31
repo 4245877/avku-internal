@@ -1,7 +1,16 @@
 /**
- * Overlay states for the map surface: initial load, load failure, and "the
- * current filters match nothing". Each is a self-contained overlay so the map
- * itself never has to branch on status.
+ * Overlay states for the map surface.
+ *
+ * The load of the *house dataset* and the load of the *map* are two different
+ * things, and only one of them is allowed to hide the other. Tiles, streets and
+ * the traced border come from Leaflet and are drawn as soon as the map has a
+ * size; the dataset is a separate request that can be slow, empty, out of area
+ * or broken. So every state below a full-map skeleton is a banner that leaves
+ * the cartography visible — a canvasser with no house data can still see which
+ * streets the territory covers, and an error no longer looks like a dead map.
+ *
+ * Only the very first load, when there is nothing on the map at all yet, earns
+ * the full-surface treatment.
  */
 
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
@@ -16,6 +25,10 @@ const SKELETON_LINES = [
 
 const SKELETON_COLUMNS = ['24%', '52%', '78%'];
 
+/**
+ * The first paint, before Leaflet has tiles to show. Opaque on purpose: there
+ * is nothing underneath worth seeing yet.
+ */
 export function MapLoadingState() {
   return (
     <div className={styles.mapOverlay} data-map-overlay="" role="status">
@@ -51,22 +64,102 @@ export function MapLoadingState() {
   );
 }
 
+/** House data is reloading over a map that is already drawn. */
+export function MapBusyState({ label = 'Оновлюємо будинки за новою межею…' }) {
+  return (
+    <p className={styles.mapStatusBanner} data-map-overlay="" role="status">
+      <span aria-hidden="true" className={styles.mapSpinner} />
+      {label}
+    </p>
+  );
+}
+
+/**
+ * The dataset request failed. The map stays visible behind the banner, so the
+ * territory and its streets are still readable while the retry runs.
+ */
 export function MapErrorState({ message, onRetry }) {
   return (
-    <div className={styles.mapOverlay} data-map-overlay="" role="alert">
-      <div className={`${styles.mapOverlayCard} ${styles.mapOverlayCardError}`}>
-        <span aria-hidden="true" className={styles.mapOverlayIcon}>
-          <ElectionsIcon name="warning" size={24} />
-        </span>
+    <div className={styles.mapBanner} data-map-overlay="" role="alert">
+      <span aria-hidden="true" className={styles.mapBannerIcon}>
+        <ElectionsIcon name="warning" size={20} />
+      </span>
 
-        <strong>Не вдалося завантажити карту</strong>
-        <span>{message}</span>
+      <span className={styles.mapBannerText}>
+        <strong>Не вдалося завантажити будинки</strong>
+        <small>{message}</small>
+      </span>
 
-        <button className={styles.primaryButton} onClick={onRetry} type="button">
-          <ElectionsIcon name="refresh" size={17} />
-          Спробувати ще раз
-        </button>
-      </div>
+      <button className={styles.primaryButton} onClick={onRetry} type="button">
+        <ElectionsIcon name="refresh" size={17} />
+        Спробувати ще раз
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The boundary was re-traced onto ground the local OSM snapshot never covered.
+ *
+ * This is the state that used to present itself as an empty map: the polygon is
+ * right, the filter is right, and the dataset simply does not reach there. It
+ * offers both ways out — a live download for this session, and the command that
+ * makes the refreshed snapshot permanent.
+ */
+export function MapCoverageState({ coverage, isRefreshing, onRefresh }) {
+  return (
+    <div className={styles.mapBanner} data-map-overlay="" role="status">
+      <span aria-hidden="true" className={styles.mapBannerIcon}>
+        <ElectionsIcon name="warning" size={20} />
+      </span>
+
+      <span className={styles.mapBannerText}>
+        <strong>
+          {coverage.houseCount > 0
+            ? 'Локальний набір OSM покриває межу лише частково'
+            : 'Локальний набір OSM не покриває нову межу'}
+        </strong>
+        <small>
+          {coverage.houseCount > 0
+            ? `Показано ${coverage.houseCount} буд. із завантаженої раніше ділянки. `
+            : 'Будинки для цієї території ще не завантажено. '}
+          Оновіть набір із OpenStreetMap або виконайте{' '}
+          <code>{coverage.command}</code>.
+        </small>
+      </span>
+
+      <button
+        className={styles.primaryButton}
+        disabled={isRefreshing}
+        onClick={onRefresh}
+        type="button"
+      >
+        <ElectionsIcon name="refresh" size={17} />
+        {isRefreshing ? 'Завантажуємо…' : 'Завантажити з OSM'}
+      </button>
+    </div>
+  );
+}
+
+/** The territory is covered by the dataset and genuinely holds no buildings. */
+export function MapEmptyAreaState({ onEditArea }) {
+  return (
+    <div className={styles.mapBanner} data-map-overlay="" role="status">
+      <span aria-hidden="true" className={styles.mapBannerIcon}>
+        <ElectionsIcon name="pin" size={20} />
+      </span>
+
+      <span className={styles.mapBannerText}>
+        <strong>У межах території немає жодного будинку</strong>
+        <small>
+          Дані OSM для цієї ділянки завантажено, але адресних будівель тут немає.
+          Розширте межу або обведіть територію заново.
+        </small>
+      </span>
+
+      <button className={styles.ghostButton} onClick={onEditArea} type="button">
+        Редагувати межу
+      </button>
     </div>
   );
 }

@@ -15,12 +15,25 @@
  * (`workspaceArea.geo.json`) before it leaves this module — a house the polygon
  * does not cover never reaches the map, the list or the counters.
  *
+ * A snapshot covers a fixed patch of ground, and the boundary can be re-traced
+ * to any other patch. So every load also reports **coverage**: whether the
+ * dataset actually reaches the territory it is being filtered against. That is
+ * the difference between "there are no houses here" and "we never downloaded
+ * here", and the UI has to say which one it is instead of showing an empty map.
+ *
  * Survey edits are held in a details overlay keyed by house id. Today that
  * overlay is localStorage; when the backend lands, `saveHouseDetails` becomes a
  * `PATCH` and the rest of the module stays as it is.
  */
 
-import { filterHousesToWorkspace, getWorkspaceMeta } from './workspaceArea.js';
+import { boxCoversBox, boxFromCircle, expandBox } from './geo.js';
+import {
+  AREA_DOWNLOAD_MARGIN_METERS,
+  filterHousesToWorkspace,
+  getWorkspaceArea,
+  getWorkspaceMeta,
+  workspaceBoundingBox,
+} from './workspaceArea.js';
 import { createEmptyDetails } from './electionsTypes.js';
 import { listStreetNames } from './osmBuildings.js';
 import { fetchHousesFromOverpass } from './overpassClient.js';
@@ -111,11 +124,55 @@ function hydrateHouse(house) {
   return { ...house, details: createEmptyDetails() };
 }
 
+/**
+ * The patch of ground a dataset actually contains buildings for.
+ *
+ * Recorded explicitly by the current snapshot script; a snapshot written before
+ * the switch to bounding boxes only records the circle it was downloaded as, so
+ * that is converted. When neither is present the extent of the houses
+ * themselves is the honest answer — it under-reports an area whose edges happen
+ * to be unmapped, which errs towards offering a refresh rather than hiding one.
+ */
+function readDatasetBox(snapshot) {
+  if (snapshot?.coverage?.box) {
+    return snapshot.coverage.box;
+  }
+
+  const { center, radiusMeters, downloadRadiusMeters } = snapshot?.area ?? {};
+  const radius = downloadRadiusMeters ?? radiusMeters;
+
+  if (center && Number.isFinite(radius)) {
+    return boxFromCircle(center, radius);
+  }
+
+  const houses = snapshot?.houses ?? [];
+
+  if (houses.length === 0) {
+    return null;
+  }
+
+  return houses.reduce(
+    (box, house) => ({
+      minLat: Math.min(box.minLat, house.location.lat),
+      maxLat: Math.max(box.maxLat, house.location.lat),
+      minLon: Math.min(box.minLon, house.location.lon),
+      maxLon: Math.max(box.maxLon, house.location.lon),
+    }),
+    {
+      minLat: Infinity,
+      maxLat: -Infinity,
+      minLon: Infinity,
+      maxLon: -Infinity,
+    },
+  );
+}
+
 async function loadDataset(signal) {
   if (SOURCE === 'overpass') {
-    const { houses } = await fetchHousesFromOverpass({ signal });
+    const box = workspaceBoundingBox();
+    const { houses, generatedAt } = await fetchHousesFromOverpass({ box, signal });
 
-    return { houses };
+    return { houses, osmTimestamp: generatedAt, datasetBox: box };
   }
 
   if (SOURCE === 'backend') {
@@ -125,7 +182,10 @@ async function loadDataset(signal) {
 
     const payload = await fetchJson(`${BACKEND_URL.replace(/\/$/, '')}/houses`, signal);
 
-    return { houses: payload.houses ?? [] };
+    return {
+      houses: payload.houses ?? [],
+      datasetBox: readDatasetBox(payload),
+    };
   }
 
   const snapshot = await fetchJson(SNAPSHOT_URL, signal);
@@ -134,12 +194,56 @@ async function loadDataset(signal) {
     houses: (snapshot.houses ?? []).map(hydrateHouse),
     osmTimestamp: snapshot.osmTimestamp ?? null,
     attribution: snapshot.license ?? null,
+    datasetBox: readDatasetBox(snapshot),
+  };
+}
+
+/** The command that rebuilds the shipped dataset for the current boundary. */
+export const REFRESH_DATASET_COMMAND = 'pnpm --filter @avku/web data:houses';
+
+/**
+ * Slack allowed when asking whether a dataset reaches the territory, in metres.
+ *
+ * The comparison is between a box derived one way (a snapshot's recorded
+ * coverage, or a circle converted to a box) and a box derived another (the
+ * polygon's extent, from coordinates rounded to six decimals). Those agree to
+ * within a metre or two, and an exact test turns that last metre into a
+ * "dataset does not cover the territory" banner on the shipped configuration
+ * itself. A margin far smaller than a city block, and far smaller than the
+ * download margin, makes the answer mean what it says.
+ */
+const COVERAGE_TOLERANCE_METERS = 25;
+
+/**
+ * Whether the dataset reaches the territory it is about to be filtered against.
+ *
+ * `isCovered: false` is the state that used to present itself as an empty map:
+ * the boundary was re-traced onto ground the snapshot never covered, so the
+ * polygon is correct, the filter is correct, and there is simply nothing there
+ * to find. Saying so — and offering the live refresh — is the whole point.
+ */
+function describeCoverage({ datasetBox, houseCount }) {
+  const areaBox = getWorkspaceArea().box;
+
+  return {
+    areaBox,
+    datasetBox: datasetBox ?? null,
+    marginMeters: AREA_DOWNLOAD_MARGIN_METERS,
+    isCovered:
+      Boolean(datasetBox) &&
+      boxCoversBox(expandBox(datasetBox, COVERAGE_TOLERANCE_METERS), areaBox),
+    houseCount,
+    command: REFRESH_DATASET_COMMAND,
   };
 }
 
 /**
- * `GET /elections/houses` — every building inside the covered radius, with any
- * saved survey data already merged in.
+ * `GET /elections/houses` — every building the working-area polygon covers,
+ * with any saved survey data already merged in.
+ *
+ * An empty result is a state, not a failure: the map, its tiles and the traced
+ * border still have to be drawn, and only a genuinely broken request (no
+ * dataset at all, HTTP error) rejects.
  */
 export async function fetchHouses({ signal } = {}) {
   if (isMockErrorRequested()) {
@@ -148,37 +252,59 @@ export async function fetchHouses({ signal } = {}) {
 
   const dataset = await loadDataset(signal);
 
-  if (dataset.houses.length === 0) {
+  if (dataset.houses.length === 0 && SOURCE !== 'overpass') {
     throw new Error(
-      'Набір будинків порожній. Оновіть його командою `node scripts/fetch-osm-buildings.mjs`.',
+      `Набір будинків порожній. Оновіть його командою \`${REFRESH_DATASET_COMMAND}\`.`,
     );
   }
 
-  // The download is a circle wide enough to contain the polygon; the polygon
+  // The download is a box wide enough to contain the polygon; the polygon
   // itself is what the module works with. Filtering here — and not in the map —
   // is what keeps the list, the filters, the counters and the outlines talking
   // about the same set of buildings.
   const covered = filterHousesToWorkspace(dataset.houses);
-
-  if (covered.length === 0) {
-    throw new Error(
-      'Жоден будинок із набору не потрапляє в межі робочої території. ' +
-        'Відкрийте «Редагувати межу» і поверніть початкову межу або обведіть ' +
-        'територію заново.',
-    );
-  }
-
   const overrides = readOverrides();
 
   return {
     ...dataset,
     area: getAreaMeta(),
+    coverage: describeCoverage({
+      datasetBox: dataset.datasetBox,
+      houseCount: covered.length,
+    }),
     streets: listStreetNames(covered).sort(compareStreetNames),
     houses: covered.map((house) =>
       overrides[house.id]
         ? { ...house, details: normalizeDetails(overrides[house.id]) }
         : house,
     ),
+  };
+}
+
+/**
+ * Downloads buildings for the current boundary straight from OpenStreetMap.
+ *
+ * This is the answer to "the shipped snapshot does not reach my new district"
+ * that does not require a terminal: it queries Overpass for the polygon's own
+ * bounding box. The result lives for this session only — committing a refreshed
+ * `houses.json` is what makes it everybody's, and that is still the CLI's job.
+ */
+export async function fetchHousesFromOsm({ signal } = {}) {
+  const box = workspaceBoundingBox();
+  const { houses, generatedAt } = await fetchHousesFromOverpass({ box, signal });
+  const covered = filterHousesToWorkspace(houses);
+  const overrides = readOverrides();
+
+  return {
+    houses: covered.map((house) =>
+      overrides[house.id]
+        ? { ...house, details: normalizeDetails(overrides[house.id]) }
+        : house,
+    ),
+    osmTimestamp: generatedAt,
+    area: getAreaMeta(),
+    coverage: describeCoverage({ datasetBox: box, houseCount: covered.length }),
+    streets: listStreetNames(covered).sort(compareStreetNames),
   };
 }
 

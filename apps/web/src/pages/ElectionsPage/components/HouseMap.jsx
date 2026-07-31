@@ -30,7 +30,14 @@ import MapBasemapSwitcher from './MapBasemapSwitcher.jsx';
 import MapControls from './MapControls.jsx';
 import MapLegend from './MapLegend.jsx';
 import WorkspaceAreaEditor from './WorkspaceAreaEditor.jsx';
-import { MapEmptyResultState, MapErrorState, MapLoadingState } from './MapStates.jsx';
+import {
+  MapBusyState,
+  MapCoverageState,
+  MapEmptyAreaState,
+  MapEmptyResultState,
+  MapErrorState,
+  MapLoadingState,
+} from './MapStates.jsx';
 import styles from '../ElectionsPage.module.css';
 
 /** Below this distance from the top edge the tooltip flips under the cursor. */
@@ -38,6 +45,30 @@ const TOOLTIP_FLIP_THRESHOLD_PIXELS = 76;
 
 /** How long the confirmation of a saved boundary stays on the map. */
 const AREA_NOTICE_TIMEOUT_MS = 6000;
+
+/**
+ * How durable a save turned out to be. The three outcomes are genuinely
+ * different promises to the user, and a boundary that only lives in one browser
+ * must never read as one that everybody now shares.
+ */
+const SAVE_OUTCOMES = {
+  server: {
+    text: 'Нову межу збережено на сервері — карта, список і дані будинків уже за нею.',
+    isWarning: false,
+  },
+  local: {
+    text:
+      'Межу застосовано і збережено в цьому браузері, але сервер недоступний — ' +
+      'для інших користувачів територія поки не змінилася.',
+    isWarning: true,
+  },
+  memory: {
+    text:
+      'Межу застосовано, але зберегти її не вдалося — вона діятиме лише до ' +
+      'перезавантаження сторінки.',
+    isWarning: true,
+  },
+};
 
 function HouseMap({
   houses,
@@ -53,15 +84,30 @@ function HouseMap({
   onFillStatusChange,
   onResetFilters,
   hasEmptyResult,
+  coverage,
+  hasMissingCoverage,
+  isAreaEmpty,
+  isRefreshingFromOsm,
+  onRefreshFromOsm,
   isAreaEditing,
+  onEnterAreaEditing,
   onExitAreaEditing,
 }) {
   const [basemapId, setBasemapId] = useState(DEFAULT_BASEMAP_ID);
   const [hoveredHouseId, setHoveredHouseId] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState(null);
   const [areaNotice, setAreaNotice] = useState(null);
+  /* Whether the map has ever finished a load — the full-surface skeleton is
+   * only honest before there is any cartography underneath it. */
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const area = useWorkspaceArea();
+
+  useEffect(() => {
+    if (status === 'ready') {
+      setHasLoadedOnce(true);
+    }
+  }, [status]);
 
   const {
     containerRef,
@@ -82,24 +128,12 @@ function HouseMap({
    * surface is out of the way, and seeing them is the confirmation that the
    * boundary took effect. The banner covers what a redrawn map cannot say.
    */
-  const handleSaveArea = useCallback(() => {
-    const result = areaEditor.save();
+  const handleSaveArea = useCallback(async () => {
+    const result = await areaEditor.save();
 
     if (result.isSaved) {
       onExitAreaEditing();
-      setAreaNotice(
-        result.isPersisted
-          ? {
-              text: 'Нову межу збережено — карта і список будинків уже за нею.',
-              isWarning: false,
-            }
-          : {
-              text:
-                'Межу застосовано, але браузер не дав її зберегти — вона діятиме ' +
-                'до перезавантаження сторінки.',
-              isWarning: true,
-            },
-      );
+      setAreaNotice(SAVE_OUTCOMES[result.storage] ?? SAVE_OUTCOMES.memory);
     }
 
     return result;
@@ -260,11 +294,30 @@ function HouseMap({
           />
         )}
 
-        {status === 'loading' && <MapLoadingState />}
+        {/* Only the very first load hides the map: from then on the tiles, the
+            streets and the traced border stay visible under a banner, whatever
+            the dataset is doing. */}
+        {status === 'loading' && !hasLoadedOnce && <MapLoadingState />}
+
+        {status === 'loading' && hasLoadedOnce && <MapBusyState />}
 
         {status === 'error' && <MapErrorState message={error} onRetry={onRetry} />}
 
-        {status === 'ready' && hasEmptyResult && (
+        {status === 'ready' && !isAreaEditing && hasMissingCoverage && (
+          <MapCoverageState
+            coverage={coverage}
+            isRefreshing={isRefreshingFromOsm}
+            onRefresh={onRefreshFromOsm}
+          />
+        )}
+
+        {status === 'ready' && !isAreaEditing && isAreaEmpty && (
+          <MapEmptyAreaState onEditArea={onEnterAreaEditing} />
+        )}
+
+        {/* One banner owns the top-left corner at a time, and a missing dataset
+            is the more urgent thing to say than an over-narrow filter. */}
+        {status === 'ready' && hasEmptyResult && !hasMissingCoverage && (
           <MapEmptyResultState onResetFilters={onResetFilters} />
         )}
       </div>

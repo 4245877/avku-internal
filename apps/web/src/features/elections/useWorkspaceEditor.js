@@ -3,10 +3,16 @@
  *
  * The border is traced directly over the live map — click to drop a vertex,
  * drag a vertex to move it, drag the hollow midpoint handle to add one between
- * two neighbours, right-click to remove one. Saving puts the outline in force
- * straight away (see the store in `workspaceArea.js`); the same outline can
- * also be exported as the exact `workspaceArea.geo.json` document the app ships
- * with, which is how a boundary becomes permanent for everybody.
+ * two neighbours, right-click to remove one.
+ *
+ * There are two deliberately separate actions:
+ *
+ *   «Зберегти межу»      — puts the outline in force and writes it to the API,
+ *                          so it is the territory in every browser and for
+ *                          `scripts/fetch-osm-buildings.mjs`. This is saving.
+ *   «Експортувати GeoJSON» — hands back the same document as a file, for
+ *                          committing as `workspaceArea.geo.json`. This changes
+ *                          nothing on its own.
  *
  * The mode is opened from the page's «Редагувати межу» button and mirrored into
  * the URL as `?areaEdit=1`, so it can be linked to and left by reloading. The
@@ -148,6 +154,7 @@ export function useWorkspaceEditor({ map, isActive = false }) {
   const ringRef = useRef(ring);
   const historyRef = useRef([]);
   const [historyDepth, setHistoryDepth] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
 
   const layersRef = useRef(null);
 
@@ -177,6 +184,26 @@ export function useWorkspaceEditor({ map, isActive = false }) {
   }, []);
 
   const clear = useCallback(() => commit([]), [commit]);
+
+  /*
+   * The territory can change without this editor asking: the permanent boundary
+   * arrives from the API a moment after the page mounts, and another tab can
+   * save one at any time. When the outline on screen is still just a copy of
+   * the old territory, it follows the new one — but an outline the user has
+   * actually touched is never overwritten, because that is unsaved work.
+   */
+  const lastAreaRef = useRef(area);
+
+  if (lastAreaRef.current !== area) {
+    const wasUntouched = ringsAreEqual(ringRef.current, lastAreaRef.current.outerRing);
+
+    lastAreaRef.current = area;
+
+    if (wasUntouched) {
+      ringRef.current = area.outerRing;
+      setRing(area.outerRing);
+    }
+  }
 
   /** Back to the boundary that is currently in force. */
   const resetToSaved = useCallback(() => commit(area.outerRing), [area, commit]);
@@ -347,29 +374,50 @@ export function useWorkspaceEditor({ map, isActive = false }) {
     [feature],
   );
 
+  // Quadratic in the vertex count, so it is computed per outline rather than
+  // per render — a hand-traced district runs to a few hundred points.
+  const isSelfIntersecting = useMemo(
+    () => ring.length >= 4 && isRingSelfIntersecting(ring),
+    [ring],
+  );
+
   /**
-   * Puts the traced outline in force: the map redraws its border and mask, and
-   * the dataset is re-cut to it. Nothing else has to happen for the new
-   * territory to be the one the module works with — committing the exported
-   * file to the repository is what makes it everybody's boundary, not this.
+   * Puts the traced outline in force and makes it permanent: the map redraws
+   * its border and mask, the dataset is re-cut to it, and the polygon is
+   * written to the API so every browser and the snapshot script see it.
+   *
+   * The outline applies before the request finishes, so the map answers the
+   * click immediately; `storage` in the result says how durable it turned out
+   * to be, which is what the banner reports.
    */
-  const save = useCallback(() => {
+  const save = useCallback(async () => {
     if (!feature) {
       return { isSaved: false, error: 'Потрібно щонайменше 3 точки.' };
     }
 
+    if (isSelfIntersecting) {
+      return {
+        isSaved: false,
+        error: 'Контур перетинає сам себе — виправте його перед збереженням.',
+      };
+    }
+
+    setIsSaving(true);
+
     try {
-      const { area: saved, isPersisted } = saveWorkspaceArea(feature);
+      const { area: saved, isPersisted, storage, error } = await saveWorkspaceArea(feature);
 
       clearDraft();
       ringRef.current = saved.outerRing;
       setRing(saved.outerRing);
 
-      return { isSaved: true, isPersisted };
+      return { isSaved: true, isPersisted, storage, error };
     } catch (error) {
       return { isSaved: false, error: error?.message ?? 'Не вдалося зберегти межу.' };
+    } finally {
+      setIsSaving(false);
     }
-  }, [feature]);
+  }, [feature, isSelfIntersecting]);
 
   /** Offers the traced boundary as a file, ready to replace the shipped one. */
   const download = useCallback(() => {
@@ -403,13 +451,6 @@ export function useWorkspaceEditor({ map, isActive = false }) {
 
   const hasUnsavedChanges = !ringsAreEqual(ring, area.outerRing);
 
-  // Quadratic in the vertex count, so it is computed per outline rather than
-  // per render — a hand-traced district runs to a few hundred points.
-  const isSelfIntersecting = useMemo(
-    () => ring.length >= 4 && isRingSelfIntersecting(ring),
-    [ring],
-  );
-
   return {
     ring,
     geoJson,
@@ -417,9 +458,16 @@ export function useWorkspaceEditor({ map, isActive = false }) {
     areaName: area.name,
     vertexCount: ring.length,
     areaSqm: ring.length >= 3 ? ringAreaSquareMeters(ring) : 0,
-    /** Three points are the least that encloses ground; below that, nothing. */
-    isSaveable: ring.length >= 3,
+    /**
+     * Three points are the least that encloses ground, and a self-crossing
+     * outline has no unambiguous inside — the store rejects one, so the button
+     * has to as well rather than offering a save that cannot succeed.
+     */
+    isSaveable: ring.length >= 3 && !isSelfIntersecting,
+    /** Exporting a broken outline is still useful — it is how you fix it. */
+    isExportable: ring.length >= 3,
     isSelfIntersecting,
+    isSaving,
     hasUnsavedChanges,
     /** An interrupted session was picked up rather than the saved boundary. */
     hasRestoredDraft: Boolean(restoredDraft) && hasUnsavedChanges,

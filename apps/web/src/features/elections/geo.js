@@ -31,13 +31,74 @@ export const AREA_CENTER = {
 };
 
 /**
- * Radius of the OSM download around the campaign address, in metres.
+ * Radius of the *original* OSM download around the campaign address, in metres.
  *
- * This is an acquisition parameter, not the territory: what the module actually
- * covers is the traced polygon in `workspaceArea.geo.json`. The download only
- * has to be wide enough to contain it — see `workspaceCoverRadiusMeters()`.
+ * Kept only as the fallback for a snapshot old enough to record no coverage box
+ * of its own: everything that acquires data now works from the bounding box of
+ * the working-area polygon (see `workspaceBoundingBox()`), because a circle
+ * around a fixed address cannot follow a boundary that was re-traced somewhere
+ * else on the map.
  */
 export const AREA_RADIUS_METERS = 3000;
+
+/** Degrees of latitude per metre — constant everywhere on the ellipsoid. */
+const DEGREES_PER_METER = 1 / (DEGREES_TO_RADIANS * EARTH_RADIUS_METERS);
+
+/**
+ * Grows a lat/lon box by a margin measured in metres on the ground.
+ *
+ * The longitude margin is divided by the cosine of the latitude, so the slack
+ * is the same number of metres east–west as it is north–south rather than the
+ * same number of degrees — at Kyiv's latitude that is a 1.57× difference, which
+ * is the width of a city block at the margins this is used with.
+ */
+export function expandBox(box, marginMeters = 0) {
+  const latitudeMargin = marginMeters * DEGREES_PER_METER;
+  const midLatitude = (box.minLat + box.maxLat) / 2;
+  const scale = Math.max(Math.cos(midLatitude * DEGREES_TO_RADIANS), 1e-6);
+
+  return {
+    minLat: Math.max(-90, box.minLat - latitudeMargin),
+    maxLat: Math.min(90, box.maxLat + latitudeMargin),
+    minLon: Math.max(-180, box.minLon - latitudeMargin / scale),
+    maxLon: Math.min(180, box.maxLon + latitudeMargin / scale),
+  };
+}
+
+/** True when `outer` contains every point of `inner`. */
+export function boxCoversBox(outer, inner) {
+  return (
+    outer.minLat <= inner.minLat &&
+    outer.maxLat >= inner.maxLat &&
+    outer.minLon <= inner.minLon &&
+    outer.maxLon >= inner.maxLon
+  );
+}
+
+/** True when a point falls inside a lat/lon box, borders included. */
+export function isPointInBox(point, box) {
+  return (
+    point.lat >= box.minLat &&
+    point.lat <= box.maxLat &&
+    point.lon >= box.minLon &&
+    point.lon <= box.maxLon
+  );
+}
+
+/** A box as Overpass writes it: `(south,west,north,east)`. */
+export function formatBoxForOverpass(box, precision = 6) {
+  return [box.minLat, box.minLon, box.maxLat, box.maxLon]
+    .map((value) => Number(value.toFixed(precision)))
+    .join(',');
+}
+
+/** The circle a legacy snapshot was downloaded as, expressed as a box. */
+export function boxFromCircle(center, radiusMeters) {
+  return expandBox(
+    { minLat: center.lat, maxLat: center.lat, minLon: center.lon, maxLon: center.lon },
+    radiusMeters,
+  );
+}
 
 /** Projects a WGS84 point onto a local metre plane around `origin`. */
 export function projectToMeters(point, origin = AREA_CENTER) {

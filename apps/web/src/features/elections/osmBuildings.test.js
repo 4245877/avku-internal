@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { AREA_CENTER, unprojectFromMeters } from './geo.js';
+import {
+  AREA_CENTER,
+  distanceMeters,
+  formatBoxForOverpass,
+  unprojectFromMeters,
+} from './geo.js';
 import {
   HEADQUARTERS_OSM_ID,
   buildOverpassQuery,
   listStreetNames,
   normalizeOsmBuildings,
+  resolveAcquisitionBox,
 } from './osmBuildings.js';
 
 /** A closed OSM way ring, given local-grid offsets in metres from the centre. */
@@ -39,10 +45,13 @@ function apartmentBlock({ id = 1, at = { x: 0, y: 0 }, tags = {} } = {}) {
 }
 
 describe('buildOverpassQuery', () => {
-  it('asks for ways and relations around the campaign address', () => {
-    const query = buildOverpassQuery({ center: AREA_CENTER, radiusMeters: 3000 });
+  it('asks for ways and relations inside the acquisition box', () => {
+    const query = buildOverpassQuery({
+      box: { minLat: 50.4, minLon: 30.3, maxLat: 50.5, maxLon: 30.4 },
+    });
 
-    expect(query).toContain(`around:3000,${AREA_CENTER.lat},${AREA_CENTER.lon}`);
+    // Overpass writes a box as (south,west,north,east).
+    expect(query).toContain('(50.4,30.3,50.5,30.4)');
     expect(query).toContain('way(');
     expect(query).toContain('relation(');
     expect(query).toContain('["addr:housenumber"]');
@@ -50,10 +59,35 @@ describe('buildOverpassQuery', () => {
     expect(query).toContain('out body geom;');
   });
 
+  it('converts the legacy circle into the same box the filter uses', () => {
+    const query = buildOverpassQuery({ center: AREA_CENTER, radiusMeters: 3000 });
+    const box = resolveAcquisitionBox({ center: AREA_CENTER, radiusMeters: 3000 });
+
+    expect(query).toContain(formatBoxForOverpass(box));
+    expect(query).not.toContain('around:');
+  });
+
   it('drops the address filter when unaddressed buildings are wanted', () => {
     expect(buildOverpassQuery({ requireAddress: false })).not.toContain(
       '["addr:housenumber"]',
     );
+  });
+});
+
+describe('resolveAcquisitionBox', () => {
+  it('prefers an explicit box over the legacy circle', () => {
+    const box = { minLat: 1, minLon: 2, maxLat: 3, maxLon: 4 };
+
+    expect(resolveAcquisitionBox({ box, radiusMeters: 9999 })).toBe(box);
+  });
+
+  it('grows the legacy circle into a box that contains it', () => {
+    const box = resolveAcquisitionBox({ center: AREA_CENTER, radiusMeters: 3000 });
+
+    expect(distanceMeters(AREA_CENTER, { lat: box.maxLat, lon: AREA_CENTER.lon }))
+      .toBeCloseTo(3000, -1);
+    expect(distanceMeters(AREA_CENTER, { lat: AREA_CENTER.lat, lon: box.maxLon }))
+      .toBeCloseTo(3000, -1);
   });
 });
 
@@ -154,6 +188,30 @@ describe('normalizeOsmBuildings', () => {
       { radiusMeters: 3000 },
     );
 
+    expect(houses.map((house) => house.id)).toEqual(['way/1']);
+  });
+
+  it('drops buildings whose centroid falls outside the acquisition box', () => {
+    // Overpass keeps any way with a node inside the box, so the fringe it
+    // returns has to be re-checked against the very same box here.
+    const inside = unprojectFromMeters({ x: 500, y: 0 });
+    const outside = unprojectFromMeters({ x: 5000, y: 0 });
+    const box = {
+      minLat: inside.lat - 0.01,
+      maxLat: inside.lat + 0.01,
+      minLon: Math.min(AREA_CENTER.lon, inside.lon) - 0.01,
+      maxLon: Math.max(AREA_CENTER.lon, inside.lon) + 0.01,
+    };
+
+    const houses = normalizeOsmBuildings(
+      [
+        apartmentBlock({ id: 1, at: { x: 500, y: 0 } }),
+        apartmentBlock({ id: 2, at: { x: 5000, y: 0 } }),
+      ],
+      { box },
+    );
+
+    expect(outside.lon).toBeGreaterThan(box.maxLon);
     expect(houses.map((house) => house.id)).toEqual(['way/1']);
   });
 

@@ -17,7 +17,10 @@
 import {
   AREA_CENTER,
   AREA_RADIUS_METERS,
+  boxFromCircle,
   distanceMeters,
+  formatBoxForOverpass,
+  isPointInBox,
   ringAreaSquareMeters,
   ringCentroid,
   ringDimensions,
@@ -256,34 +259,52 @@ function footprintOf(element) {
 }
 
 /**
+ * Normalizes the two ways an acquisition area can be described into the one the
+ * query and the filter both use.
+ *
+ * A bounding box is the current model — it follows the traced polygon wherever
+ * it is drawn. The `center` + `radiusMeters` circle is what the module was
+ * built on and what an older snapshot records, so it is still accepted and
+ * converted rather than being a second code path.
+ */
+export function resolveAcquisitionBox({
+  box,
+  center = AREA_CENTER,
+  radiusMeters = AREA_RADIUS_METERS,
+} = {}) {
+  return box ?? boxFromCircle(center, radiusMeters);
+}
+
+/**
  * The Overpass QL for the covered territory. Kept next to the normalizer so the
  * query and the parser can never drift apart.
  *
- * `around` measures from the nearest node of a way, so it returns a thin ring of
- * buildings just outside the radius; {@link normalizeOsmBuildings} re-checks
- * every centroid and drops them.
+ * Overpass keeps any way with *a node* inside the box, so the result includes a
+ * thin fringe of buildings hanging over the edge; {@link normalizeOsmBuildings}
+ * re-checks every centroid against the same box and drops them.
  */
 export function buildOverpassQuery({
+  box,
   center = AREA_CENTER,
   radiusMeters = AREA_RADIUS_METERS,
   timeoutSeconds = 300,
   requireAddress = true,
 } = {}) {
-  const around = `around:${Math.round(radiusMeters)},${center.lat},${center.lon}`;
+  const bounds = formatBoxForOverpass(resolveAcquisitionBox({ box, center, radiusMeters }));
   const addressFilter = requireAddress ? '["addr:housenumber"]' : '';
 
   // `body geom` rather than `tags geom`: the `tags` verbosity omits relation
   // members, which would silently drop every multipolygon building.
   return `[out:json][timeout:${timeoutSeconds}];
 (
-  way(${around})["building"]${addressFilter};
-  relation(${around})["building"]${addressFilter};
+  way(${bounds})["building"]${addressFilter};
+  relation(${bounds})["building"]${addressFilter};
 );
 out body geom;`;
 }
 
 /** One Overpass element → a house record, or `null` if it is not a house. */
-function normalizeElement(element, { center, radiusMeters, requireAddress }) {
+function normalizeElement(element, { center, box, requireAddress }) {
   const tags = element.tags ?? {};
 
   if (!tags.building || IGNORED_BUILDING_VALUES.has(tags.building)) {
@@ -310,11 +331,14 @@ function normalizeElement(element, { center, radiusMeters, requireAddress }) {
   }
 
   const location = ringCentroid(footprint);
-  const distance = distanceMeters(center, location);
 
-  if (distance > radiusMeters) {
+  if (!isPointInBox(location, box)) {
     return null;
   }
+
+  // Distance from the campaign address is what the results list sorts by; it
+  // has nothing to do with membership of the territory any more.
+  const distance = distanceMeters(center, location);
 
   const id = `${element.type}/${element.id}`;
   const houseType = classifyHouse(tags);
@@ -362,12 +386,18 @@ function normalizeElement(element, { center, radiusMeters, requireAddress }) {
  */
 export function normalizeOsmBuildings(
   elements,
-  { center = AREA_CENTER, radiusMeters = AREA_RADIUS_METERS, requireAddress = true } = {},
+  {
+    box,
+    center = AREA_CENTER,
+    radiusMeters = AREA_RADIUS_METERS,
+    requireAddress = true,
+  } = {},
 ) {
+  const bounds = resolveAcquisitionBox({ box, center, radiusMeters });
   const housesById = new Map();
 
   for (const element of elements ?? []) {
-    const house = normalizeElement(element, { center, radiusMeters, requireAddress });
+    const house = normalizeElement(element, { center, box: bounds, requireAddress });
 
     if (house && !housesById.has(house.id)) {
       housesById.set(house.id, house);

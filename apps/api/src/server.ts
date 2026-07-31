@@ -9,15 +9,18 @@ import {
   createEmployeeRepository,
   createLogisticsRepository,
   createWarehouseRepository,
+  createWorkspaceAreaRepository,
 } from "./config";
 import type { CertificateRepository } from "./modules/certificates/certificate-records";
 import type { WarehouseRepository } from "./modules/warehouse/warehouse-records";
 import type { LogisticsRepository } from "./modules/logistics/logistics-records";
 import type { EmployeeRepository } from "./modules/employees/employee-records";
+import type { WorkspaceAreaRepository } from "./modules/elections/workspace-area-records";
 import type { AccessAuthenticator } from "./http/access-auth";
 import { handleCertificateRequest } from "./routes/certificates";
 import { handleWarehouseRequest } from "./routes/warehouse";
 import { handleLogisticsRequest } from "./routes/logistics";
+import { handleElectionsRequest } from "./routes/elections";
 import { handleMeRequest } from "./routes/employees";
 import {
   applyCors,
@@ -86,6 +89,17 @@ async function dispatchRequest(
     return;
   }
 
+  if (pathname.startsWith("/api/elections/")) {
+    await handleElectionsRequest(
+      request,
+      response,
+      repositories.workspaceAreaRepository,
+      pathname,
+      employee,
+    );
+    return;
+  }
+
   await handleCertificateRequest(
     request,
     response,
@@ -98,6 +112,7 @@ export interface CertificateApiRepositories {
   warehouseRepository: WarehouseRepository;
   logisticsRepository: LogisticsRepository;
   employeeRepository: EmployeeRepository;
+  workspaceAreaRepository: WorkspaceAreaRepository;
 }
 
 export interface CertificateApiServerOptions {
@@ -118,6 +133,8 @@ export function createCertificateApiServer(
       repositories?.logisticsRepository ?? createLogisticsRepository(),
     employeeRepository:
       repositories?.employeeRepository ?? createEmployeeRepository(),
+    workspaceAreaRepository:
+      repositories?.workspaceAreaRepository ?? createWorkspaceAreaRepository(),
   };
   const authenticator =
     options?.authenticator ?? createAccessAuthenticatorFromEnv();

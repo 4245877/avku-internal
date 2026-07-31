@@ -81,15 +81,19 @@ function ElectionsPage() {
   }, [saveNotice]);
 
   /** Opens the editor and brings the map — the drawing surface — into view. */
+  function enterAreaEditing() {
+    areaEdit.enter();
+    setIsEditing(false);
+    workspaceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   function toggleAreaEditing() {
     if (areaEdit.isActive) {
       areaEdit.exit();
       return;
     }
 
-    areaEdit.enter();
-    setIsEditing(false);
-    workspaceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    enterAreaEditing();
   }
 
   function updateFilters(patch) {
@@ -161,15 +165,21 @@ function ElectionsPage() {
 
       <div className={styles.workspace} ref={workspaceRef}>
         <HouseMap
+          coverage={data.coverage}
           error={data.error}
           fillStatusFilter={filters.fillStatus}
           focusRequest={focusRequest}
           hasEmptyResult={isMapEmpty}
+          hasMissingCoverage={data.hasMissingCoverage}
           houses={data.houses}
           isAreaEditing={areaEdit.isActive}
+          isAreaEmpty={data.isAreaEmpty}
+          isRefreshingFromOsm={data.isRefreshingFromOsm}
           matchedIds={matchedIds}
+          onEnterAreaEditing={enterAreaEditing}
           onExitAreaEditing={areaEdit.exit}
           onFillStatusChange={(fillStatus) => updateFilters({ fillStatus })}
+          onRefreshFromOsm={data.refreshFromOsm}
           onResetFilters={resetFilters}
           onRetry={data.reload}
           onSelectHouse={selectHouse}

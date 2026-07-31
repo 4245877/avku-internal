@@ -90,7 +90,8 @@ Elections map variables (all optional — the map works with no configuration):
 | Variable | Default | Description |
 | --- | --- | --- |
 | `VITE_ELECTIONS_SOURCE` | `snapshot` | Where houses come from: `snapshot` (the shipped OSM dataset), `backend` (`VITE_ELECTIONS_API_URL`), or `overpass` (a live OpenStreetMap query). |
-| `VITE_ELECTIONS_API_URL` | unset | Base URL of the houses API. Required when `VITE_ELECTIONS_SOURCE=backend`. |
+| `VITE_ELECTIONS_API_URL` | unset | Base URL of the elections API. Required when `VITE_ELECTIONS_SOURCE=backend`; also where the working-area boundary is read from and saved to (falls back to `VITE_API_URL`, then `/api`). |
+| `ELECTIONS_STORAGE_ROOT` | `<DATA_ROOT>/elections` | API-side directory holding the saved working-area boundary. |
 | `VITE_MAP_BASEMAP` | `osm` | Base layer selected on load: `osm`, `carto-voyager`, `carto-light`, `esri-imagery`, or a configured commercial provider. |
 | `VITE_MAPTILER_KEY` | unset | Adds MapTiler Streets to the base-layer switcher. |
 | `VITE_MAPBOX_TOKEN` | unset | Adds Mapbox Streets to the base-layer switcher. |
@@ -234,20 +235,35 @@ polygons. Replace it with a boundary traced over the real map:
    satellite base layer is available for tracing over imagery.
 3. Press **Зберегти межу**. The boundary takes effect immediately — the map
    re-fits to it, the dimming mask follows it and the dataset is re-cut to it —
-   and is kept in `localStorage` under `avku-elections-area-v1`. This is
-   per-browser: it changes the district for whoever traced it, not for the team.
-4. To make it everybody's, open **Експорт GeoJSON** in the same panel, press
-   **Завантажити файл** (or copy the JSON) and commit the result over
-   `apps/web/src/features/elections/workspaceArea.geo.json`.
+   and is written to the API at `PUT /api/elections/area`, which stores it under
+   `<DATA_ROOT>/elections/workspace-area.geo.json`. That is the permanent copy:
+   every browser reads it on load, and `scripts/fetch-osm-buildings.mjs` reads
+   it to decide what to download. `localStorage` (`avku-elections-area-v1`) is
+   only a cache, so the first paint opens on the right territory and the page
+   keeps working when the API is down. The confirmation banner says which of the
+   two actually happened.
+4. **Експортувати GeoJSON** is a separate action and saves nothing. It hands
+   back the same document as a file, for committing over
+   `apps/web/src/features/elections/workspaceArea.geo.json` so a fresh checkout
+   ships with it.
 
 An unfinished outline survives a reload on its own — it is kept in
 `localStorage` under `avku-elections-area-draft-v1` until it is saved. A saved
 boundary can always be taken back: reopen the editor and press **Початкова
-межа**, then **Зберегти межу**, which drops the override and returns the
-district to the file in the repository.
+межа**, then **Зберегти межу**, which deletes the stored boundary
+(`DELETE /api/elections/area`) and returns the district to the file in the
+repository.
 
-Re-run the dataset script after enlarging the boundary: Overpass is queried by
-radius, and the default radius is derived from the polygon.
+The polygon is validated on both sides before it is stored: closed rings, at
+least three points, coordinates in `[longitude, latitude]` order and in range, a
+non-zero enclosed area, and no self-intersection (a figure-of-eight has no
+unambiguous inside, so the dimming mask and the house filter would disagree
+about which half is the district).
+
+Re-run the dataset script after moving or enlarging the boundary — see below.
+The map itself will say when that is needed: if the local snapshot does not
+reach the new territory, a banner reports it and offers a one-click live
+download from OpenStreetMap for the session.
 
 ### Buildings dataset
 
@@ -260,21 +276,36 @@ node scripts/fetch-osm-buildings.mjs
 # or, from apps/web:  pnpm run data:houses
 ```
 
+The script downloads the **bounding box of whichever boundary is in force**,
+plus a 250 m margin — not a fixed circle around the campaign address. It resolves
+that boundary in order: `--area <file>`, then the API (the boundary saved from
+**Редагувати межу**, which is what users are actually looking at), then the
+shipped `workspaceArea.geo.json`. That order is what makes a re-traced district
+download its own ground rather than the old one's.
+
 Useful flags:
 
 ```bash
-node scripts/fetch-osm-buildings.mjs --radius 4000   # default covers the polygon + 250 m
+node scripts/fetch-osm-buildings.mjs --area ~/Downloads/workspaceArea.geo.json
+node scripts/fetch-osm-buildings.mjs --margin 400            # default 250 m of slack
+node scripts/fetch-osm-buildings.mjs --api http://localhost:3001/api
+node scripts/fetch-osm-buildings.mjs --no-server             # ignore the saved boundary
 node scripts/fetch-osm-buildings.mjs --out apps/web/public/data/elections/houses.json
 node scripts/fetch-osm-buildings.mjs --include-unaddressed   # also keep buildings with no addr:housenumber
 ```
 
-The snapshot keeps the whole circular download; the polygon is applied when the
-app loads it, so re-tracing the border does not require re-downloading OSM.
+The snapshot keeps the whole download and records the box it covers under
+`coverage.box`; the polygon is applied when the app loads it, so re-tracing the
+border inside the covered box does not require re-downloading OSM — and moving
+it outside that box is detected and reported instead of showing an empty map.
 
 The script walks several public Overpass mirrors and retries, because any single
 instance is regularly busy. It refuses to overwrite the snapshot with an empty
-result. Current snapshot: ~3 550 addressed buildings, ~2.8 MB (~0.4 MB gzipped —
-`infra/nginx/web.conf` compresses `/data/`).
+result. Current snapshot: ~5 900 addressed buildings, ~4.7 MB (~0.65 MB gzipped —
+`infra/nginx/web.conf` compresses `/data/`), of which ~3 590 fall inside the
+shipped placeholder boundary. It is larger than the old circular download on
+purpose: covering the polygon's whole bounding box is what lets the boundary be
+re-traced anywhere inside it without another download.
 
 Attributes come straight from OSM tags: `addr:street`, `addr:housenumber`,
 `building`, `building:levels`, `start_date`. Anything OSM does not carry stays
@@ -349,7 +380,7 @@ exposed beyond the LAN/Cloudflare Access perimeter, add an authentication layer
 
 ## Partially Ready Modules
 
-- Elections: the map itself is real. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own survey card. The working area is a GeoJSON polygon (`workspaceArea.geo.json`) — the shipped one is still the placeholder circle until a boundary is traced with **Редагувати межу**; a boundary saved there applies at once but lives in browser `localStorage` (`avku-elections-area-v1`) until the exported file is committed. Survey data entered into those cards is still kept in browser `localStorage` under `avku-elections-details-v1`; there is no API persistence yet.
+- Elections: the map itself is real. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own survey card. The working area is a GeoJSON polygon (`workspaceArea.geo.json`) — the shipped one is still the placeholder circle until a boundary is traced with **Редагувати межу**; a boundary saved there applies at once and is persisted through `PUT /api/elections/area`, so it is the territory for everybody and for the dataset script (browser `localStorage` is only a cache). Survey data entered into those cards is still kept in browser `localStorage` under `avku-elections-details-v1`; there is no API persistence yet.
 - SMM: frontend prototype only. Data is kept in browser `localStorage` under `avku-smm-data-v1`; there is no API persistence yet.
 - Dashboard: uses static in-client data and export helpers; it is not connected to live aggregate API data yet.
 - Deploy automation: `infra/scripts/deploy.sh` exists but is empty. Current GitHub workflow is CI only.

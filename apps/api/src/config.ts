@@ -8,6 +8,7 @@ import {
 import { WarehouseRepository } from "./modules/warehouse/warehouse-records";
 import { LogisticsRepository } from "./modules/logistics/logistics-records";
 import { EmployeeRepository } from "./modules/employees/employee-records";
+import { WorkspaceAreaRepository } from "./modules/elections/workspace-area-records";
 import {
   type AccessAuthenticator,
   createAccessAuthenticator,
@@ -164,6 +165,20 @@ export function createEmployeeRepository(): EmployeeRepository {
     );
 
   return new EmployeeRepository({
+    storageRoot,
+  });
+}
+
+export function createWorkspaceAreaRepository(): WorkspaceAreaRepository {
+  const dataRoot = getDataRoot(getRepositoryRoot());
+  const storageRoot =
+    readEnv("ELECTIONS_STORAGE_ROOT") ??
+    path.join(
+      dataRoot,
+      "elections",
+    );
+
+  return new WorkspaceAreaRepository({
     storageRoot,
   });
 }
