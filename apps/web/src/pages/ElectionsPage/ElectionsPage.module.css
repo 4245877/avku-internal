@@ -891,9 +891,15 @@
 }
 
 /*
- * Satellite imagery is far darker than a street map, so the polygon palette —
- * tuned for a light basemap — needs the tiles pulled towards it, not the other
- * way round.
+ * Base tiles come in three kinds and the theme may not treat them alike.
+ *
+ * A *street map* is a drawing, so the dark theme re-colours it by inverting —
+ * the standard trick that turns a light cartography into a dark one.
+ *
+ * An *orthophoto* is a photograph. Inverting it produces a negative, not a dark
+ * map: grass turns magenta and roofs turn cyan. So imagery is only ever dimmed,
+ * never inverted — and the same holds for the hybrid label overlay printed on
+ * top of it, whose halos are already drawn to read against a photo.
  */
 .mapCanvas :global(.elections-basemap-tiles) {
   filter: saturate(0.92);
@@ -901,6 +907,24 @@
 
 :global([data-theme='dark']) .mapCanvas :global(.elections-basemap-tiles) {
   filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.7);
+}
+
+.mapCanvas :global(.elections-basemap-imagery) {
+  filter: saturate(0.96);
+}
+
+:global([data-theme='dark']) .mapCanvas :global(.elections-basemap-imagery) {
+  filter: brightness(0.82) saturate(0.9);
+}
+
+/* Roads, street names and house numbers over the photo — the hybrid half of
+   «Супутник». Slightly firmer than the imagery so the type keeps its edge. */
+.mapCanvas :global(.elections-basemap-labels) {
+  filter: contrast(1.06) saturate(1.02);
+}
+
+:global([data-theme='dark']) .mapCanvas :global(.elections-basemap-labels) {
+  filter: contrast(1.1) brightness(1.05);
 }
 
 /* Border of the working area — the traced polygon the district covers. */
@@ -1030,6 +1054,19 @@
   transform: translate(-50%, -50%);
 }
 
+/*
+ * Over imagery the theme's label colours stop applying: the ground below is a
+ * photograph, dark in both themes, so the numbers this app draws from its own
+ * dataset go white-on-shadow regardless of light or dark. Scoped to the numbers
+ * alone — the scale bar behind them keeps the panel palette.
+ */
+.mapCanvas[data-map-mode='satellite'] :global(.elections-house-number) span {
+  color: #ffffff;
+  text-shadow:
+    0 0 3px rgba(6, 14, 22, 0.9),
+    0 0 3px rgba(6, 14, 22, 0.9);
+}
+
 /* Tooltip */
 .mapTooltip {
   position: absolute;
@@ -1121,7 +1158,7 @@
   cursor: not-allowed;
 }
 
-/* Base layer switcher — top-left, opposite the zoom controls. */
+/* «Карта» ⇄ «Супутник» — top-left, opposite the zoom controls. */
 .mapBasemaps {
   position: absolute;
   top: var(--space-4);
@@ -1129,10 +1166,9 @@
   z-index: var(--z-raised);
 
   display: flex;
-  gap: var(--space-3);
   align-items: center;
 
-  padding: var(--space-2) var(--space-3);
+  padding: 3px;
 
   background: var(--panel-surface);
   border: 1px solid var(--panel-border);
@@ -1141,32 +1177,22 @@
   backdrop-filter: blur(12px);
 }
 
-.mapBasemapsTitle {
+.mapBasemapList {
+  display: flex;
+  gap: 2px;
+}
+
+.mapBasemapButton {
   display: flex;
   gap: var(--space-2);
   align-items: center;
 
-  padding-left: var(--space-1, 2px);
-
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.mapBasemapList {
-  display: flex;
-  gap: 4px;
-}
-
-.mapBasemapButton {
   padding: 5px var(--space-3);
 
   font-size: var(--text-2xs);
   color: var(--color-text-secondary);
 
-  background: var(--panel-inset);
+  background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-full, 999px);
 
@@ -1183,6 +1209,22 @@
   background: var(--color-info-bg);
   border-color: var(--panel-border);
   font-weight: var(--weight-medium);
+}
+
+/*
+ * Tiles on the way. It rides inside the active mode's button rather than in a
+ * banner: a base layer that is still arriving is a detail of that button, and
+ * the banner slot belongs to things that need a decision.
+ */
+.mapBasemapSpinner {
+  width: 11px;
+  height: 11px;
+
+  border: 2px solid color-mix(in srgb, var(--ice-deep) 25%, transparent);
+  border-top-color: var(--ice-deep);
+  border-radius: 50%;
+
+  animation: spin 0.85s linear infinite;
 }
 
 /*

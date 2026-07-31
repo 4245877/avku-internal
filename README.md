@@ -92,9 +92,15 @@ Elections map variables (all optional — the map works with no configuration):
 | `VITE_ELECTIONS_SOURCE` | `snapshot` | Where houses come from: `snapshot` (the shipped OSM dataset), `backend` (`VITE_ELECTIONS_API_URL`), or `overpass` (a live OpenStreetMap query). |
 | `VITE_ELECTIONS_API_URL` | unset | Base URL of the elections API. Required when `VITE_ELECTIONS_SOURCE=backend`; also where the working-area boundary is read from and saved to (falls back to `VITE_API_URL`, then `/api`). |
 | `ELECTIONS_STORAGE_ROOT` | `<DATA_ROOT>/elections` | API-side directory holding the saved working-area boundary. |
-| `VITE_MAP_BASEMAP` | `osm` | Base layer selected on load: `osm`, `carto-voyager`, `carto-light`, `esri-imagery`, or a configured commercial provider. |
-| `VITE_MAPTILER_KEY` | unset | Adds MapTiler Streets to the base-layer switcher. |
-| `VITE_MAPBOX_TOKEN` | unset | Adds Mapbox Streets to the base-layer switcher. |
+| `VITE_MAP_MODE` | `streets` | Base layer selected on load: `streets` («Карта») or `satellite` («Супутник»). A mode picked in the UI is remembered per browser and wins over this. |
+| `VITE_MAP_PROVIDER` | auto | Forces the tile provider for **both** modes: `osm`, `maptiler` or `mapbox`. Unset means: a configured commercial token if there is one, otherwise the key-free set. |
+| `VITE_MAPTILER_KEY` | unset | MapTiler key. Moves both modes to MapTiler (Streets v2 + Satellite Hybrid). |
+| `VITE_MAPBOX_TOKEN` | unset | Mapbox token. Moves both modes to Mapbox (Streets v12 + Satellite Streets v12). |
+
+Tiles are third-party images loaded by the browser, so a host that is not in the
+`img-src` list of the Content-Security-Policy in `infra/nginx/app.conf` renders
+nothing at all — no error, just a blank base layer. Keep that list in step with
+`apps/web/src/features/elections/basemaps.js` when changing providers.
 
 ## Run API Locally
 
@@ -201,9 +207,28 @@ Before migrating existing SQLite files, stop the API or use `sqlite3 .backup`. I
 ## Elections Map Data
 
 The "Вибори" map is backed by real OpenStreetMap data, not by generated
-geometry. The base layer is served by a map provider (OpenStreetMap raster tiles
-by default), and every building inside the working area is overlaid as its own
-interactive polygon carrying its OSM address.
+geometry. Every building inside the working area is overlaid as its own
+interactive polygon carrying its OSM address, on top of one of two base layers:
+
+| Mode | Base | What it shows |
+| --- | --- | --- |
+| «Карта» | OpenStreetMap raster | Roads, street names, building outlines, house numbers from z18. |
+| «Супутник» | Esri World Imagery + CARTO Voyager labels | Orthophoto (real pixels to z19 over Kyiv, stretched beyond) with roads, street names and house numbers printed over it — a hybrid, not a bare photo. |
+
+Switching modes replaces the tile layers and nothing else: the zoom, the
+position, the selected house, the traced boundary and any open editor survive
+untouched, and the chosen mode is restored on the next visit.
+
+Licensing, in short: OpenStreetMap tiles are used under the [OSMF tile usage
+policy](https://operations.osmfoundation.org/policies/tiles/) (attribution, no
+bulk downloading, a real `Referer`); Esri World Imagery is a public ArcGIS
+Online service under the Esri Master License Agreement (attribution required,
+tile export for offline use is not); CARTO basemaps are free for non-commercial
+use with attribution. All three are keyless and rate-limited by fair use, which
+is why a single tenant with a real quota — `VITE_MAPTILER_KEY`, 100k tile
+requests/month on the free plan — is the recommended setup for sustained
+fieldwork. Google Maps tiles are deliberately not an option: their terms forbid
+loading them into a third-party renderer such as Leaflet.
 
 Campaign address: **вулиця Зодчих, 58А, Київ, 03170** (`50.4307636,
 30.3640481` — the OSM position of the building itself).

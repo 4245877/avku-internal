@@ -1,10 +1,15 @@
 /**
  * The interactive district map.
  *
- * Base cartography comes from a real map service (OpenStreetMap by default,
- * see `features/elections/basemaps.js`), so streets, yards, house numbers and
- * building outlines are the actual ones on the ground. On top of it every
- * surveyed building from the OSM dataset is its own clickable polygon.
+ * Base cartography comes from a real map service (OpenStreetMap and Esri by
+ * default, see `features/elections/basemaps.js`), so streets, yards, house
+ * numbers and building outlines are the actual ones on the ground, in both
+ * «Карта» and «Супутник». On top of it every surveyed building from the OSM
+ * dataset is its own clickable polygon.
+ *
+ * The mode is state here rather than inside the map hook because it is a user
+ * preference, not a property of the map: it is restored from the last visit and
+ * written back on every change, while the map instance below it never restarts.
  *
  * Keyboard users reach individual houses through the results list, which is the
  * accessible equivalent of clicking a shape; the map surface itself keeps
@@ -14,7 +19,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
 
-import { DEFAULT_BASEMAP_ID, getBasemap } from '../../../features/elections/basemaps.js';
+import {
+  DEFAULT_MAP_MODE_ID,
+  getMapMode,
+  readStoredMapMode,
+  writeStoredMapMode,
+} from '../../../features/elections/basemaps.js';
 import { useHouseLayer } from '../../../features/elections/useHouseLayer.js';
 import { useLeafletMap } from '../../../features/elections/useLeafletMap.js';
 import { useWorkspaceArea } from '../../../features/elections/useWorkspaceArea.js';
@@ -25,6 +35,7 @@ import {
   resolveApartments,
 } from '../../../features/elections/houseUtils.js';
 import { fillStatusesById } from '../../../features/elections/electionsTypes.js';
+import { AREA_CENTER } from '../../../features/elections/geo.js';
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
 import MapBasemapSwitcher from './MapBasemapSwitcher.jsx';
 import MapControls from './MapControls.jsx';
@@ -37,6 +48,7 @@ import {
   MapEmptyResultState,
   MapErrorState,
   MapLoadingState,
+  MapTilesErrorState,
 } from './MapStates.jsx';
 import styles from '../ElectionsPage.module.css';
 
@@ -93,7 +105,9 @@ function HouseMap({
   onEnterAreaEditing,
   onExitAreaEditing,
 }) {
-  const [basemapId, setBasemapId] = useState(DEFAULT_BASEMAP_ID);
+  /* Read once, before the first paint: the map must open on the mode the user
+   * left it in, not switch under them a frame later. */
+  const [mapModeId, setMapModeId] = useState(() => readStoredMapMode() ?? DEFAULT_MAP_MODE_ID);
   const [hoveredHouseId, setHoveredHouseId] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState(null);
   const [areaNotice, setAreaNotice] = useState(null);
@@ -109,6 +123,8 @@ function HouseMap({
     }
   }, [status]);
 
+  const mapMode = getMapMode(mapModeId);
+
   const {
     containerRef,
     map,
@@ -118,7 +134,17 @@ function HouseMap({
     zoomOut,
     resetView,
     focusOnBounds,
-  } = useLeafletMap({ basemapId, isAreaEditing });
+    tileStatus,
+    retryTiles,
+  } = useLeafletMap({ mapModeId, isAreaEditing });
+
+  /* Switching the base layer changes nothing but the tiles — the view, the
+   * selected house, the traced boundary and the editor all outlive it. All that
+   * is left to do is remember the choice for the next visit. */
+  const handleModeChange = useCallback((id) => {
+    setMapModeId(id);
+    writeStoredMapMode(id);
+  }, []);
 
   const areaEditor = useWorkspaceEditor({ map, isActive: isAreaEditing });
 
@@ -165,7 +191,7 @@ function HouseMap({
     matchedIds,
     selectedHouseId: selectedHouse?.id ?? null,
     hoveredHouseId,
-    isImageryBasemap: Boolean(getBasemap(basemapId).isImagery),
+    isImageryBasemap: mapMode.isImagery,
     isSelectionEnabled: !isAreaEditing,
     onSelectHouse: handleSelectHouse,
     onHoverHouse: handleHoverHouse,
@@ -225,15 +251,19 @@ function HouseMap({
           aria-describedby="elections-map-hint"
           aria-label={`Карта будинків у межах території «${area.name}»`}
           className={styles.mapCanvas}
+          /* The photo underneath decides how the app's own labels are drawn. */
+          data-map-mode={mapModeId}
           ref={containerRef}
           role="application"
         />
 
         <p className="sr-only" id="elections-map-hint">
           Карта показує реальні будинки з OpenStreetMap у межах робочої
-          території — окресленого полігона навколо адреси вулиця Якуба Коласа, 6.
+          території — окресленого полігона навколо адреси {AREA_CENTER.address}.
           Територія поза межами затемнена, будинки на ній недоступні.
           Перетягуйте карту стрілками, змінюйте масштаб клавішами плюс і мінус.
+          Перемикач «Карта» / «Супутник» ліворуч угорі змінює підкладку:
+          схему вулиць або супутникові знімки з дорогами та номерами будинків.
           Щоб вибрати будинок за допомогою клавіатури, скористайтеся списком
           будинків поруч із картою.
         </p>
@@ -261,7 +291,11 @@ function HouseMap({
           onZoomOut={zoomOut}
         />
 
-        <MapBasemapSwitcher activeId={basemapId} onChange={setBasemapId} />
+        <MapBasemapSwitcher
+          activeId={mapModeId}
+          onChange={handleModeChange}
+          tileStatus={tileStatus}
+        />
 
         {isAreaEditing && (
           <WorkspaceAreaEditor
@@ -303,7 +337,14 @@ function HouseMap({
 
         {status === 'error' && <MapErrorState message={error} onRetry={onRetry} />}
 
-        {status === 'ready' && !isAreaEditing && hasMissingCoverage && (
+        {/* A dead tile service is the second-most urgent thing the map can
+            say, and unlike the states below it, it is true in every mode and
+            at every stage of the dataset's life. */}
+        {status !== 'error' && tileStatus === 'error' && (
+          <MapTilesErrorState mode={mapMode} onRetry={retryTiles} />
+        )}
+
+        {status === 'ready' && tileStatus !== 'error' && !isAreaEditing && hasMissingCoverage && (
           <MapCoverageState
             coverage={coverage}
             isRefreshing={isRefreshingFromOsm}
@@ -311,15 +352,17 @@ function HouseMap({
           />
         )}
 
-        {status === 'ready' && !isAreaEditing && isAreaEmpty && (
+        {status === 'ready' && tileStatus !== 'error' && !isAreaEditing && isAreaEmpty && (
           <MapEmptyAreaState onEditArea={onEnterAreaEditing} />
         )}
 
         {/* One banner owns the top-left corner at a time, and a missing dataset
-            is the more urgent thing to say than an over-narrow filter. */}
-        {status === 'ready' && hasEmptyResult && !hasMissingCoverage && (
-          <MapEmptyResultState onResetFilters={onResetFilters} />
-        )}
+            or missing cartography is the more urgent thing to say than an
+            over-narrow filter. */}
+        {status === 'ready' &&
+          tileStatus !== 'error' &&
+          hasEmptyResult &&
+          !hasMissingCoverage && <MapEmptyResultState onResetFilters={onResetFilters} />}
       </div>
     </div>
   );

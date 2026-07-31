@@ -1,44 +1,56 @@
 /**
- * Base layer picker. Which providers appear here is decided in
- * `features/elections/basemaps.js` — commercial ones show up automatically once
- * their token is configured.
+ * «Карта» ⇄ «Супутник».
+ *
+ * Two modes, because those are the two questions the map is asked: where the
+ * streets and numbers are, and what the ground actually looks like. Which
+ * provider serves each is decided in `features/elections/basemaps.js` — a
+ * configured commercial token moves both modes at once, and this control does
+ * not change.
+ *
+ * A radiogroup rather than a toggle button: the active mode has to be readable,
+ * not inferred from which label is showing.
  */
 
-import { BASEMAPS } from '../../../features/elections/basemaps.js';
+import { MAP_MODES } from '../../../features/elections/basemaps.js';
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
 import styles from '../ElectionsPage.module.css';
 
-function MapBasemapSwitcher({ activeId, onChange }) {
-  if (BASEMAPS.length < 2) {
+function MapBasemapSwitcher({ activeId, onChange, tileStatus }) {
+  if (MAP_MODES.length < 2) {
     return null;
   }
 
   return (
     <div className={styles.mapBasemaps} data-map-overlay="">
-      <p className={styles.mapBasemapsTitle}>
-        <ElectionsIcon name="layers" size={15} />
-        <span className="sr-only">Базова карта</span>
-      </p>
-
       <div className={styles.mapBasemapList} role="radiogroup" aria-label="Базова карта">
-        {BASEMAPS.map((basemap) => (
-          <button
-            aria-checked={activeId === basemap.id}
-            className={[
-              styles.mapBasemapButton,
-              activeId === basemap.id ? styles.mapBasemapButtonActive : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            key={basemap.id}
-            onClick={() => onChange(basemap.id)}
-            role="radio"
-            title={basemap.hint}
-            type="button"
-          >
-            {basemap.label}
-          </button>
-        ))}
+        {MAP_MODES.map((mode) => {
+          const isActive = activeId === mode.id;
+
+          return (
+            <button
+              aria-checked={isActive}
+              className={[
+                styles.mapBasemapButton,
+                isActive ? styles.mapBasemapButtonActive : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              key={mode.id}
+              onClick={() => onChange(mode.id)}
+              role="radio"
+              title={mode.hint}
+              type="button"
+            >
+              <ElectionsIcon name={mode.icon} size={15} />
+              {mode.label}
+              {/* The chip lives inside the active button so the wait is
+                  attached to the layer being waited for. */}
+              {isActive && tileStatus === 'loading' && (
+                <span aria-hidden="true" className={styles.mapBasemapSpinner} />
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

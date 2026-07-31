@@ -99,6 +99,39 @@ export function MapErrorState({ message, onRetry }) {
 }
 
 /**
+ * The tile service itself failed — a blocked host, an exhausted quota, a wrong
+ * key, or no route out of the network.
+ *
+ * This is a different failure from a missing dataset and has to say so: the
+ * houses, the boundary and the survey data are all still there, and what is
+ * gone is the cartography under them. Naming the provider is the difference
+ * between "the map is broken" and one line in an nginx policy.
+ */
+export function MapTilesErrorState({ mode, onRetry }) {
+  return (
+    <div className={styles.mapBanner} data-map-overlay="" role="alert">
+      <span aria-hidden="true" className={styles.mapBannerIcon}>
+        <ElectionsIcon name="warning" size={20} />
+      </span>
+
+      <span className={styles.mapBannerText}>
+        <strong>Не вдалося завантажити тайли карти</strong>
+        <small>
+          Підкладку не віддає {mode.provider}. Будинки, межа й дані залишаються
+          на місці — перевірте зʼєднання, доступ до сервера тайлів або ліміти
+          провайдера.
+        </small>
+      </span>
+
+      <button className={styles.primaryButton} onClick={onRetry} type="button">
+        <ElectionsIcon name="refresh" size={17} />
+        Повторити
+      </button>
+    </div>
+  );
+}
+
+/**
  * The boundary was re-traced onto ground the local OSM snapshot never covered.
  *
  * This is the state that used to present itself as an empty map: the polygon is

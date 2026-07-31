@@ -13,6 +13,12 @@
  * (`isAreaEditing`) both overlays and the pan limits step aside, so the new
  * outline can be drawn beyond the old one — and when a re-traced boundary is
  * saved, the overlays, the pan limits and the home view all follow it.
+ *
+ * Switching «Карта» ⇄ «Супутник» replaces the base layer set and nothing else.
+ * The map instance, the view, the pan limits, the traced boundary, the mask,
+ * the house polygons, the selection and the editor all belong to other effects
+ * and are never torn down by a mode change — which is why the switch keeps the
+ * zoom, the position and the work in progress exactly where they were.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -21,7 +27,7 @@ import L from 'leaflet';
 import { AREA_CENTER } from './geo.js';
 import { toLeafletLatLngs } from './workspaceArea.js';
 import { useWorkspaceArea } from './useWorkspaceArea.js';
-import { getBasemap } from './basemaps.js';
+import { LABELS_PANE, MAP_MAX_ZOOM, getMapMode, layersOf } from './basemaps.js';
 
 /** Padding around the working area when the whole district is fitted. */
 const FIT_PADDING_PIXELS = 24;
@@ -29,6 +35,28 @@ const FIT_PADDING_PIXELS = 24;
 const PAN_MARGIN_RATIO = 0.3;
 /** Closest zoom a single-house focus is allowed to reach. */
 const FOCUS_MAX_ZOOM = 19;
+/**
+ * Failed tiles in one batch before the map calls the tile service broken. A
+ * viewport is a dozen-odd tiles, so this distinguishes "the host is blocked or
+ * out of quota" from "one tile fell outside coverage".
+ */
+export const TILE_ERROR_THRESHOLD = 4;
+
+/**
+ * One verdict from the per-layer tile counters.
+ *
+ * Exported because the rule it encodes is easy to get subtly wrong and worth
+ * pinning down: Leaflet fires `load` at the end of a batch whether the tiles
+ * arrived or failed, so "nothing pending" must never be read as "ready" while a
+ * layer's failures stand. Errors therefore outrank both other states.
+ */
+export function foldTileStatus(health, threshold = TILE_ERROR_THRESHOLD) {
+  if (health.some((layer) => layer.failed >= threshold)) {
+    return 'error';
+  }
+
+  return health.some((layer) => layer.pending > 0) ? 'loading' : 'ready';
+}
 
 /**
  * Leaflet needs a real element size to compute the fitted zoom, which is not
@@ -76,10 +104,10 @@ function maskRings(bounds, rings) {
   ];
 }
 
-export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing = false } = {}) {
+export function useLeafletMap({ center = AREA_CENTER, mapModeId, isAreaEditing = false } = {}) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
-  const tileLayerRef = useRef(null);
+  const baseLayersRef = useRef([]);
   const homeBoundsRef = useRef(null);
 
   const area = useWorkspaceArea();
@@ -92,7 +120,15 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
 
   const [map, setMap] = useState(null);
   const [zoom, setZoom] = useState(null);
-  const [zoomRange, setZoomRange] = useState({ min: 0, max: 19 });
+  const [zoomRange, setZoomRange] = useState({ min: 0, max: MAP_MAX_ZOOM });
+  /**
+   * How the cartography itself is doing — separate from the house dataset, and
+   * the only thing that can report a blocked, throttled or unreachable tile
+   * service. `error` survives until tiles load again, because a half-drawn map
+   * that silently stopped fetching is exactly what looks like a broken feature.
+   */
+  const [tileStatus, setTileStatus] = useState('loading');
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -114,7 +150,15 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
         zoomSnap: 0.5,
         wheelPxPerZoomLevel: 90,
         preferCanvas: true,
+        // Owned by the map, not by the layer set: every mode reaches the same
+        // depth, so switching to imagery can never clamp the current zoom.
+        maxZoom: MAP_MAX_ZOOM,
       });
+
+      // Hybrid labels ride between the imagery and the buildings: above the
+      // photo they annotate, below the polygons a canvasser clicks.
+      instance.createPane(LABELS_PANE).style.zIndex = 250;
+      instance.getPane(LABELS_PANE).style.pointerEvents = 'none';
 
       // The starting view is whatever fits the traced boundary — the polygon is
       // the only thing that decides how far out the district opens.
@@ -148,36 +192,95 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
       stopWaiting();
       instance?.remove();
       mapRef.current = null;
-      tileLayerRef.current = null;
+      baseLayersRef.current = [];
       setMap(null);
     };
   }, [center]);
 
-  /* Base layer, swapped in place so overlays keep their stacking order. */
+  /*
+   * The base layer set.
+   *
+   * The old layers are removed only after the new ones are added, so the map
+   * never flashes empty mid-switch, and the swap touches nothing but the tile
+   * pane: view, limits, boundary, houses and selection all stay as they were.
+   *
+   * Tile events are the map's own health report. `loading`/`load` drive the
+   * quiet progress chip; `tileerror` is what a blocked host, an exhausted quota
+   * or a bad key look like from inside the browser, and it is only believed
+   * after a whole batch fails — a single missing tile at the edge of coverage
+   * is normal and must not raise an alarm.
+   *
+   * Health is tracked per layer and folded together afterwards, for two reasons
+   * a shared counter got wrong: Leaflet fires `load` at the end of a batch even
+   * when every tile in it failed, so "finished" is not "succeeded"; and in the
+   * hybrid mode the imagery and the labels are separate services that can fail
+   * independently.
+   */
   useEffect(() => {
     if (!map) {
       return undefined;
     }
 
-    const basemap = getBasemap(basemapId);
-    const layer = L.tileLayer(basemap.url, {
-      attribution: basemap.attribution,
-      subdomains: basemap.subdomains ?? 'abc',
-      maxZoom: basemap.maxZoom,
-      maxNativeZoom: basemap.maxNativeZoom,
-      tileSize: basemap.tileSize ?? 256,
-      zoomOffset: basemap.zoomOffset ?? 0,
-      detectRetina: true,
-      className: 'elections-basemap-tiles',
+    const mode = getMapMode(mapModeId);
+    const previous = baseLayersRef.current;
+    const specs = layersOf(mode);
+    const health = specs.map(() => ({ pending: 0, failed: 0 }));
+
+    let isCurrent = true;
+
+    const sync = () => {
+      if (isCurrent) {
+        setTileStatus(foldTileStatus(health));
+      }
+    };
+
+    const layers = specs.map((spec, index) => {
+      const layer = L.tileLayer(spec.url, {
+        attribution: spec.attribution,
+        subdomains: spec.subdomains ?? 'abc',
+        maxZoom: MAP_MAX_ZOOM,
+        maxNativeZoom: spec.maxNativeZoom,
+        tileSize: spec.tileSize ?? 256,
+        zoomOffset: spec.zoomOffset ?? 0,
+        detectRetina: spec.detectRetina ?? false,
+        className: spec.className,
+        ...(spec.pane ? { pane: spec.pane } : {}),
+      });
+
+      const state = health[index];
+
+      // A fresh batch starts the failure count over: whatever went wrong last
+      // time, this is the map asking the service again.
+      layer.on('loading', () => {
+        state.pending += 1;
+        state.failed = 0;
+        sync();
+      });
+
+      layer.on('load', () => {
+        state.pending = Math.max(0, state.pending - 1);
+        sync();
+      });
+
+      layer.on('tileerror', () => {
+        state.failed += 1;
+        sync();
+      });
+
+      return layer.addTo(map);
     });
 
-    layer.addTo(map);
-    map.setMaxZoom(basemap.maxZoom);
-    tileLayerRef.current?.remove();
-    tileLayerRef.current = layer;
+    baseLayersRef.current = layers;
+    setTileStatus('loading');
 
-    return undefined;
-  }, [basemapId, map]);
+    for (const layer of previous) {
+      layer.remove();
+    }
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [mapModeId, map, retryToken]);
 
   /* A newly saved boundary becomes the district: it is what "show the whole
    * territory" means from now on, and the view moves to it once. The guard is
@@ -294,6 +397,9 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
     });
   }, []);
 
+  /** Rebuilds the layer set — the one honest answer to a tile host that failed. */
+  const retryTiles = useCallback(() => setRetryToken((current) => current + 1), []);
+
   return {
     containerRef,
     map,
@@ -304,5 +410,7 @@ export function useLeafletMap({ center = AREA_CENTER, basemapId, isAreaEditing =
     zoomOut,
     resetView,
     focusOnBounds,
+    tileStatus,
+    retryTiles,
   };
 }
