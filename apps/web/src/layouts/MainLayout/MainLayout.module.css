@@ -100,6 +100,14 @@
 .navigation {
   flex: 1;
   min-height: 0;
+  /* The sidebar is exactly 100vh, so the section list is the only part that can
+     give. On a 16:9 laptop (1366×768 leaves ~680px of viewport) the sections
+     plus the theme toggle and the footer no longer fit, and with the default
+     `visible` the list silently drew *over* the toggle. Scroll the list
+     instead — the pinned controls below it stay reachable. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .navigationLabel {

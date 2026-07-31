@@ -46,17 +46,21 @@
   --panel-border: rgba(168, 221, 247, 0.5);
   --panel-inset: rgba(235, 243, 250, 0.7);
 
-  --elections-map-height: clamp(460px, 68vh, 780px);
+  /* The map is the page. Give it more vertical room once the viewport is tall
+     enough to spend, so a wider workspace does not turn into a letterbox. */
+  --elections-map-height: clamp(460px, 68vh, 820px);
 
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
 
+  /* Workspace page: fills the column left of the sidebar and only stops
+     growing at --page-max-width. See variables.css for the two width rules. */
   width: 100%;
-  max-width: calc(var(--content-max-width) + var(--space-24));
+  max-width: var(--page-max-width);
   min-height: 100%;
   margin-inline: auto;
-  padding: var(--space-10) var(--space-12) var(--space-12);
+  padding: var(--space-10) var(--page-padding-inline) var(--space-12);
 
   animation: pageReveal var(--duration-reveal) var(--ease-out) both;
 }
@@ -117,7 +121,9 @@
 /* ── HERO ──────────────────────────────────────────────────── */
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  /* Same rule as .workspace: the stats block is a bounded share, not a free
+     fraction, so the tiles grow from ~170px to ~300px and then stop. */
+  grid-template-columns: minmax(0, 1.15fr) clamp(340px, 42%, 660px);
   gap: var(--space-8);
   align-items: start;
 
@@ -787,9 +793,17 @@
 }
 
 /* ── WORKSPACE ─────────────────────────────────────────────── */
+/*
+ * Map takes the growth, the panel takes a share.
+ *
+ * The side column is a *proportion* of the workspace clamped at both ends, so
+ * it needs no width breakpoints of its own: it holds its 330px floor on a 1366
+ * laptop, drifts up to ~470px at 1920, and stops at 500px on ultra-wide, where
+ * every further pixel goes to the map instead of stretching a form.
+ */
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(350px, 420px);
+  grid-template-columns: minmax(0, 1fr) clamp(330px, 25%, 500px);
   gap: var(--space-5);
   align-items: stretch;
 }
@@ -3163,10 +3177,8 @@ a.contactValue:hover {
 
 /* ── RESPONSIVE ────────────────────────────────────────────── */
 @media (max-width: 1240px) {
-  .workspace {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
-  }
-
+  /* .workspace needs no override — its clamped share already bottoms out at
+     330px here. Only the hero, which cannot stack itself, is stacked. */
   .hero {
     grid-template-columns: 1fr;
   }

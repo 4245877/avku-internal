@@ -129,10 +129,10 @@
   flex-direction: column;
   gap: var(--space-8);
   width: 100%;
-  max-width: calc(var(--content-max-width) + var(--space-24));
+  max-width: var(--page-max-width);
   min-height: 100%;
   margin-inline: auto;
-  padding: var(--space-10) var(--space-12) var(--space-12);
+  padding: var(--space-10) var(--page-padding-inline) var(--space-12);
   animation: pageReveal var(--duration-reveal) var(--ease-out) both;
 }
 
@@ -151,7 +151,9 @@
 .hero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
+  /* Bounded share, not a free fraction: past ~600px the side block is only
+     stretching its own padding. */
+  grid-template-columns: minmax(0, 1.25fr) clamp(340px, 36%, 600px);
   align-items: stretch;
   gap: var(--space-6);
   overflow: hidden;
@@ -687,7 +689,7 @@
 
 .materialsLayout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 22%, 460px);
   align-items: start;
   gap: var(--space-6);
 }
@@ -1083,7 +1085,7 @@
 
 .publicationForm {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.6fr);
+  grid-template-columns: minmax(0, 1.4fr) clamp(280px, 30%, 480px);
   gap: var(--space-6);
   padding-top: var(--space-6);
 }

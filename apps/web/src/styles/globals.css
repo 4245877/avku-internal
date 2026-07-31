@@ -1052,6 +1052,7 @@ a.link-animated:hover::after {
   :root {
     --sidebar-width: 200px;
     --content-padding: var(--space-5);
+    --page-padding-inline: var(--space-6);
   }
 
   h1 { font-size: var(--text-3xl); }
@@ -1067,6 +1068,7 @@ a.link-animated:hover::after {
      top bar); root font-size and input zoom-guard live once in reset.css. */
   :root {
     --content-padding: var(--space-4);
+    --page-padding-inline: var(--space-4);
     --card-padding: var(--space-5);
     --grid-gap: var(--space-4);
   }
@@ -1108,6 +1110,7 @@ a.link-animated:hover::after {
 @media (max-width: 480px) {
   :root {
     --content-padding: var(--space-3);
+    --page-padding-inline: var(--space-3);
     --card-padding: var(--space-4);
   }
 

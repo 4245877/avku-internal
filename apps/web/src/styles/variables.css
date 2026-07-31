@@ -236,7 +236,22 @@
   --z-tooltip:   700;
 
   /* ── LAYOUT ──────────────────────────────────────────── */
+  /*
+   * Two different widths, for two different jobs:
+   *
+   * --content-max-width is a *reading* width — prose, forms, anything whose
+   *   line length must stay comfortable. Never widen a text column past it.
+   *
+   * --page-max-width is the *workspace* width — the outer shell of a page whose
+   *   value grows with the screen (maps, tables, board layouts). It caps well
+   *   above 16:9 desktops so a 1920 or 2560 monitor is actually used, while the
+   *   cap plus --page-padding-inline keeps a margin on ultra-wide displays.
+   *   It applies to the page column *after* the sidebar, so the sidebar width
+   *   never has to be subtracted by hand.
+   */
   --content-max-width: 1280px;
+  --page-max-width:    2160px;
+  --page-padding-inline: clamp(var(--space-6), 3vw, var(--space-16));
   --content-padding:   var(--space-6);
   --grid-gap:          var(--space-6);
 

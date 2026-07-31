@@ -312,27 +312,79 @@ export function useLeafletMap({ center = AREA_CENTER, mapModeId, isAreaEditing =
     return undefined;
   }, [area, isAreaEditing, map]);
 
-  /* Pan and zoom limits — lifted while a new boundary is being traced. */
+  /*
+   * Container resize.
+   *
+   * Leaflet only watches the *window*, so every resize that leaves the window
+   * alone — a responsive column that re-proportions itself, a panel opening,
+   * the layout switching between the wide and stacked workspace grids — leaves
+   * the map drawing at its old pixel size: tiles stop short of the new edge and
+   * clicks land on the wrong building. A ResizeObserver on the container is the
+   * only thing that sees those.
+   *
+   * Measurement is deferred to the next frame because the observer fires inside
+   * layout, and `invalidateSize` reads back geometry.
+   */
   useEffect(() => {
-    const bounds = homeBoundsRef.current;
+    const container = containerRef.current;
 
-    if (!map || !bounds) {
+    if (!map || !container) {
       return undefined;
     }
 
-    if (isAreaEditing) {
-      map.setMaxBounds(null);
-      map.setMinZoom(0);
+    let frame = 0;
 
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        // `pan: false` keeps the centre put: a wider column should reveal more
+        // map, not slide the district sideways.
+        map.invalidateSize({ animate: false, pan: false });
+      });
+    });
+
+    observer.observe(container);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [map]);
+
+  /* Pan and zoom limits — lifted while a new boundary is being traced.
+   * Re-applied on `resize` as well: the minimum zoom is "whatever fits the
+   * territory", which is a function of the container's pixel size. */
+  useEffect(() => {
+    if (!map) {
       return undefined;
     }
 
-    const fitted = map.getBoundsZoom(bounds, false, [FIT_PADDING_PIXELS, FIT_PADDING_PIXELS]);
+    const applyLimits = () => {
+      const bounds = homeBoundsRef.current;
 
-    map.setMinZoom(fitted - 1);
-    map.setMaxBounds(bounds.pad(PAN_MARGIN_RATIO));
+      if (!bounds) {
+        return;
+      }
 
-    return undefined;
+      if (isAreaEditing) {
+        map.setMaxBounds(null);
+        map.setMinZoom(0);
+
+        return;
+      }
+
+      const fitted = map.getBoundsZoom(bounds, false, [FIT_PADDING_PIXELS, FIT_PADDING_PIXELS]);
+
+      map.setMinZoom(fitted - 1);
+      map.setMaxBounds(bounds.pad(PAN_MARGIN_RATIO));
+    };
+
+    applyLimits();
+    map.on('resize', applyLimits);
+
+    return () => {
+      map.off('resize', applyLimits);
+    };
   }, [area, isAreaEditing, map]);
 
   /* The working area: dimmed surroundings, outlined border, campaign anchor. */
