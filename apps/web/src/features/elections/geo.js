@@ -16,17 +16,17 @@ const EARTH_RADIUS_METERS = 6378137;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 
 /**
- * Campaign anchor — вулиця Якуба Коласа, 6, Київ, 03146 (Святошинський район).
+ * Campaign anchor — вулиця Зодчих, 58А, Київ, 03170 (Святошинський район).
  *
  * Coordinates are the OSM position of the building itself
- * (way/1001457592), not a hand-placed guess.
+ * (way/180170140), not a hand-placed guess.
  */
 export const AREA_CENTER = {
-  lat: 50.4345086,
-  lon: 30.3774787,
-  address: 'вулиця Якуба Коласа, 6',
+  lat: 50.4307636,
+  lon: 30.3640481,
+  address: 'вулиця Зодчих, 58А',
   city: 'Київ',
-  postalCode: '03146',
+  postalCode: '03170',
   district: 'Святошинський район',
 };
 

@@ -205,8 +205,8 @@ geometry. The base layer is served by a map provider (OpenStreetMap raster tiles
 by default), and every building inside the working area is overlaid as its own
 interactive polygon carrying its OSM address.
 
-Campaign address: **вулиця Якуба Коласа, 6, Київ, 03146** (`50.4345086,
-30.3774787` — the OSM position of the building itself).
+Campaign address: **вулиця Зодчих, 58А, Київ, 03170** (`50.4307636,
+30.3640481` — the OSM position of the building itself).
 
 ### Working area boundary
 

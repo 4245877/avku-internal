@@ -52,7 +52,7 @@ function MapLegend({ summary, activeStatus, onStatusChange }) {
 
       <p className={styles.mapLegendHint}>
         <span aria-hidden="true" className={styles.swatchAnchor} />
-        Штаб — вул. Якуба Коласа, 6
+        Штаб — вул. Зодчих, 58А
       </p>
     </div>
   );

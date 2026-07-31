@@ -55,9 +55,9 @@ describe('projection', () => {
 });
 
 describe('AREA_CENTER', () => {
-  it('is the OSM position of вулиця Якуба Коласа, 6', () => {
-    expect(AREA_CENTER.lat).toBeCloseTo(50.43451, 4);
-    expect(AREA_CENTER.lon).toBeCloseTo(30.37748, 4);
+  it('is the OSM position of вулиця Зодчих, 58А', () => {
+    expect(AREA_CENTER.lat).toBeCloseTo(50.43076, 4);
+    expect(AREA_CENTER.lon).toBeCloseTo(30.36405, 4);
   });
 });
 

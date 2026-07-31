@@ -28,8 +28,8 @@ import {
 import { createEmptyDetails } from './electionsTypes.js';
 import { abbreviateStreet } from './streetNames.js';
 
-/** The campaign office itself — OSM way for вулиця Якуба Коласа, 6. */
-export const HEADQUARTERS_OSM_ID = 'way/1001457592';
+/** The campaign office itself — OSM way for вулиця Зодчих, 58А. */
+export const HEADQUARTERS_OSM_ID = 'way/180170140';
 
 /**
  * `building=*` → the house type shown in the card and the filter. Values that
