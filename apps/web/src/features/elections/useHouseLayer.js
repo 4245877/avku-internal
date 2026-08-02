@@ -10,13 +10,25 @@
  *     changes; saving a survey re-styles one polygon instead of rebuilding the
  *     district;
  *   • a style is re-applied only when its computed key actually changed;
- *   • pointer events are bound to the containing `FeatureGroup`, not per layer.
+ *   • mouse events are bound to the containing `FeatureGroup`, not per layer.
+ *
+ * Selection runs on two paths, because one of them cannot cover both devices:
+ *
+ *   mouse       Leaflet's own `click`, hit-tested by the canvas renderer.
+ *   touch, pen  the pointer gesture below, hit-tested here. A canvas has no
+ *               shapes for a browser to aim at, so Leaflet can only listen for
+ *               mouse events — and on a touchscreen those are *compatibility*
+ *               events the browser sends only for a fast tap. A press held much
+ *               past a quarter of a second produces none of them, so a tap on a
+ *               building simply vanished. See the gesture below.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 
+import { isPointInBox } from './geo.js';
 import { campaignStateOf, getHouseFlags } from './houseUtils.js';
+import { isPointInRing, ringBox } from './polygonGeometry.js';
 
 /** Zoom at which house numbers are worth drawing on top of the building. */
 const HOUSE_NUMBER_ZOOM = 18;
@@ -30,10 +42,34 @@ const BADGE_ZOOM = 17;
 const MAX_BADGES = 150;
 /**
  * How long a finger has to stay down to mean "tell me about this" rather than
- * "open this". Long enough not to fire while panning, short enough that nobody
- * assumes the tap was missed.
+ * "open this" — the platform norm, and only ever applied to a finger or a pen.
+ *
+ * Exported because the tests press for exactly this long on either side of it.
  */
-const LONG_PRESS_MS = 450;
+export const LONG_PRESS_MS = 500;
+/**
+ * How far the finger may drift and still count as a press. Past this the
+ * gesture is a pan, and a pan that started on a building is not a question
+ * about that building.
+ */
+const LONG_PRESS_SLOP_PIXELS = 10;
+/**
+ * How far outside a footprint a finger may land and still mean that building.
+ *
+ * A tap is not a pixel, and at the zoom a canvasser works at a house is a few
+ * pixels across with an outline two of them wide — a tap on the outline is the
+ * commonest way to aim at a building, and it must not miss. Leaflet gives a
+ * mouse the same courtesy by counting the stroke as part of the shape.
+ */
+const TOUCH_TOLERANCE_PIXELS = 8;
+/**
+ * How long the compatibility click that ends a touch gesture stays suppressed.
+ *
+ * A backstop, not the mechanism: the suppression is cleared by the next press
+ * as well, because no browser promises that click at all — and a flag left
+ * standing would be paid for by somebody's next tap.
+ */
+const CLICK_SUPPRESSION_MS = 700;
 
 /**
  * The map palette lives in CSS custom properties so light and dark themes stay
@@ -164,6 +200,71 @@ const styleKeyOf = (state, fillScale) =>
     fillScale,
   ].join('');
 
+/** No slack at all — an exact point-in-footprint test. */
+const NO_TOLERANCE = { lat: 0, lon: 0 };
+
+/**
+ * The building under a geographic point, or `null`.
+ *
+ * The touch gesture cannot borrow Leaflet's hit test the way a mouse click
+ * does — see the gesture itself, below — so it looks the building up here, from
+ * the same footprints the polygons are drawn from, under the same two rules the
+ * polygons' `interactive` flag follows: a filtered-out building is not there,
+ * and while the boundary is being traced nothing is.
+ *
+ * `tolerance` is how far outside a footprint still counts, as a lat/lon radius.
+ * A finger is not a pixel, and the outline of a house on a phone is a couple of
+ * pixels wide — Leaflet's own mouse test counts the stroke as part of the shape
+ * for exactly this reason, and a tap on the outline of a building has to select
+ * that building. Inside a footprint always wins outright; slack only decides
+ * between buildings that were all missed, and picks the nearest.
+ */
+export function findHouseAt(point, houses, isSelectable, tolerance = NO_TOLERANCE) {
+  let nearestId = null;
+  let nearestDistance = Infinity;
+
+  for (const house of houses) {
+    const ring = house.footprint;
+
+    if (!ring?.length || !isSelectable(house.id)) {
+      continue;
+    }
+
+    // The box first: a district runs to a few thousand buildings, and all but
+    // a handful are rejected by four comparisons.
+    const box = ringBox(ring);
+
+    if (
+      !isPointInBox(point, {
+        minLat: box.minLat - tolerance.lat,
+        maxLat: box.maxLat + tolerance.lat,
+        minLon: box.minLon - tolerance.lon,
+        maxLon: box.maxLon + tolerance.lon,
+      })
+    ) {
+      continue;
+    }
+
+    if (isPointInBox(point, box) && isPointInRing(point, ring)) {
+      return house.id;
+    }
+
+    // Measured in units of the tolerance itself, so a tall thin slack in
+    // latitude and a wide one in longitude compare on the same scale.
+    const distance = Math.hypot(
+      (point.lat - (box.minLat + box.maxLat) / 2) / (tolerance.lat || 1),
+      (point.lon - (box.minLon + box.maxLon) / 2) / (tolerance.lon || 1),
+    );
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestId = house.id;
+    }
+  }
+
+  return nearestId;
+}
+
 /** Everything the styling and the badges need, derived once per house. */
 function describeHouseState(house, { isMatched, isSelected, isHovered }) {
   const flags = getHouseFlags(house);
@@ -207,12 +308,26 @@ export function useHouseLayer({
   const callbacksRef = useRef({ onSelectHouse, onHoverHouse, onLongPressHouse });
   callbacksRef.current = { onSelectHouse, onHoverHouse, onLongPressHouse };
 
-  /** Pending long press: the timer, and the house the finger went down on. */
-  const longPressRef = useRef({ timeoutId: null, houseId: null, didFire: false });
+  /** The touch gesture in flight: which finger, which house, where it began. */
+  const pressRef = useRef({
+    pointerId: null,
+    houseId: null,
+    origin: null,
+    timeoutId: null,
+    didFire: false,
+  });
+  /** Set by a gesture that answered itself, to drop the click ending it. */
+  const suppressClickRef = useRef({ isActive: false, timeoutId: null });
 
   /* Read inside the delegated handlers, which are bound once per map. */
   const isSelectionEnabledRef = useRef(isSelectionEnabled);
   isSelectionEnabledRef.current = isSelectionEnabled;
+
+  const housesRef = useRef(houses);
+  housesRef.current = houses;
+
+  const matchedIdsRef = useRef(matchedIds);
+  matchedIdsRef.current = matchedIds;
 
   const housesById = useMemo(
     () => new Map(houses.map((house) => [house.id, house])),
@@ -234,19 +349,51 @@ export function useHouseLayer({
     // without touching the building outlines, which are the expensive part.
     const badges = L.layerGroup().addTo(map);
 
+    /*
+     * The compatibility click, and when it must be ignored.
+     *
+     * A touch gesture answers for itself below, on `pointerup`. Whatever the
+     * browser decides to send afterwards would answer a second time, so it is
+     * dropped — but *only* the one click that ends that gesture. The flag is
+     * cleared when the next press starts and by a timer of its own, because no
+     * browser promises a compatibility click at all: one that never arrived
+     * used to leave the flag standing, and the next building somebody tapped
+     * was the one that paid for it.
+     */
+    const clearSuppression = () => {
+      clearTimeout(suppressClickRef.current.timeoutId);
+      suppressClickRef.current = { isActive: false, timeoutId: null };
+    };
+
+    const suppressNextClick = () => {
+      clearSuppression();
+      suppressClickRef.current = {
+        isActive: true,
+        timeoutId: setTimeout(clearSuppression, CLICK_SUPPRESSION_MS),
+      };
+    };
+
+    /** True once, for the click that ends a gesture already answered. */
+    const takeSuppressedClick = () => {
+      if (!suppressClickRef.current.isActive) {
+        return false;
+      }
+
+      clearSuppression();
+
+      return true;
+    };
+
     // `bubblingMouseEvents: false` on the polygons stops a building click from
     // also reaching the map, so this only fires on roads, yards and open ground.
     const clearSelection = () => {
-      if (isSelectionEnabledRef.current) {
+      if (!takeSuppressedClick() && isSelectionEnabledRef.current) {
         callbacksRef.current.onSelectHouse(null);
       }
     };
 
     group.on('click', (event) => {
-      // A click that follows a long press is the finger lifting off the gesture
-      // that already answered — opening the card as well would defeat it.
-      if (longPressRef.current.didFire) {
-        longPressRef.current.didFire = false;
+      if (takeSuppressedClick()) {
         return;
       }
 
@@ -256,39 +403,145 @@ export function useHouseLayer({
     });
 
     /*
-     * Long press → the same preview a desktop gets on hover.
+     * Touch and pen: the whole gesture, handled here rather than by Leaflet.
      *
-     * Touch devices never fire `mouseover`, so a phone had no way to see what a
-     * building was without committing to opening its card. The timer is armed on
-     * `mousedown` (Leaflet raises it for touch too) and disarmed by anything
-     * that means the user is doing something else — lifting off, panning, or
-     * pinching.
+     * Leaflet's canvas renderer hit-tests on mouse events only — a canvas has no
+     * shapes for the browser to aim at, so there is nothing else for it to bind
+     * to. On a touchscreen those events are *compatibility* events, and a
+     * browser sends them only for what it judges to be a fast tap: Firefox stops
+     * at somewhere around a quarter of a second. Past that a tap produces
+     * `pointerdown`, `touchstart`, `pointerup`, `touchend` and nothing else — no
+     * `mousedown`, no `click`, so no hit test, so no selection. A canvasser
+     * aiming a thumb at a building a few pixels across is well past that limit,
+     * which is how a map full of houses came to be a map you cannot pick a house
+     * off.
+     *
+     * So a finger selects on `pointerup`, from our own hit test, and does not
+     * depend on the browser being generous. Holding past `LONG_PRESS_MS` asks
+     * for the preview instead — the touch equivalent of hovering, which a
+     * touchscreen cannot do.
+     *
+     * A mouse is deliberately left alone: Leaflet's `click` has always worked
+     * for it, and it has the hover tooltip already. Reading a slow mouse press
+     * as a long press is what stopped deliberate clicks opening the card.
      */
-    const cancelLongPress = () => {
-      if (longPressRef.current.timeoutId) {
-        clearTimeout(longPressRef.current.timeoutId);
-        longPressRef.current.timeoutId = null;
-      }
+    const cancelPress = () => {
+      clearTimeout(pressRef.current.timeoutId);
+      pressRef.current = {
+        pointerId: null,
+        houseId: null,
+        origin: null,
+        timeoutId: null,
+        didFire: false,
+      };
     };
 
-    group.on('mousedown', (event) => {
-      const houseId = event.layer?.options?.houseId ?? null;
+    const container = map.getContainer();
 
-      if (!houseId || !isSelectionEnabledRef.current) {
+    const onPointerDown = (event) => {
+      // Whatever the previous gesture was still holding open, it is over.
+      clearSuppression();
+
+      // A second finger is a pinch, not a tap: it ends the gesture rather than
+      // starting one, and neither finger coming up may select anything.
+      const isSecondFinger = pressRef.current.pointerId !== null;
+
+      cancelPress();
+
+      if (
+        isSecondFinger ||
+        event.pointerType === 'mouse' ||
+        !isSelectionEnabledRef.current ||
+        event.target?.closest?.('.leaflet-control')
+      ) {
         return;
       }
 
-      cancelLongPress();
-      longPressRef.current.houseId = houseId;
-      longPressRef.current.timeoutId = setTimeout(() => {
-        longPressRef.current.didFire = true;
-        longPressRef.current.timeoutId = null;
-        callbacksRef.current.onLongPressHouse?.(houseId);
-      }, LONG_PRESS_MS);
-    });
+      const origin = map.mouseEventToContainerPoint(event);
+      const { lat, lng } = map.containerPointToLatLng(origin);
+      // The finger's slack, in degrees at this zoom — the projection changes
+      // with both, so it is measured rather than assumed.
+      const slack = map.containerPointToLatLng([
+        origin.x + TOUCH_TOLERANCE_PIXELS,
+        origin.y + TOUCH_TOLERANCE_PIXELS,
+      ]);
+      // `null` over open ground — the gesture is still recorded, because
+      // tapping open ground is how a selection is cleared.
+      const houseId = findHouseAt(
+        { lat, lon: lng },
+        housesRef.current,
+        (id) => matchedIdsRef.current.has(id),
+        { lat: Math.abs(slack.lat - lat), lon: Math.abs(slack.lng - lng) },
+      );
 
-    group.on('mouseup', cancelLongPress);
-    map.on('movestart zoomstart', cancelLongPress);
+      pressRef.current = {
+        pointerId: event.pointerId,
+        houseId,
+        origin,
+        didFire: false,
+        timeoutId: houseId
+          ? setTimeout(() => {
+              pressRef.current.timeoutId = null;
+              pressRef.current.didFire = true;
+              callbacksRef.current.onLongPressHouse?.(houseId);
+            }, LONG_PRESS_MS)
+          : null,
+      };
+    };
+
+    const isSamePointer = (event) =>
+      pressRef.current.pointerId !== null && event.pointerId === pressRef.current.pointerId;
+
+    const onPointerMove = (event) => {
+      if (!isSamePointer(event) || pressRef.current.didFire) {
+        return;
+      }
+
+      // Past the slop the gesture is a pan, and a pan that began on a building
+      // is not a question about that building.
+      if (
+        map.mouseEventToContainerPoint(event).distanceTo(pressRef.current.origin) >
+        LONG_PRESS_SLOP_PIXELS
+      ) {
+        cancelPress();
+      }
+    };
+
+    // Bound on the window: a finger that slides off the map still ends the
+    // gesture, and a pointer captured elsewhere would never report back here.
+    const onPointerUp = (event) => {
+      if (!isSamePointer(event)) {
+        return;
+      }
+
+      const { houseId, didFire } = pressRef.current;
+
+      cancelPress();
+
+      if (!isSelectionEnabledRef.current) {
+        return;
+      }
+
+      // This gesture has answered. Whatever compatibility click the browser
+      // decides to send afterwards must not answer it a second time.
+      suppressNextClick();
+
+      // A press that showed the preview has said its piece; opening the card as
+      // well would defeat the gesture.
+      if (!didFire) {
+        callbacksRef.current.onSelectHouse(houseId);
+      }
+    };
+
+    /** A cancelled pointer selected nothing — it stopped being a gesture. */
+    const onPointerCancel = () => cancelPress();
+
+    container.addEventListener('pointerdown', onPointerDown, { passive: true });
+    container.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerup', onPointerUp, { passive: true });
+    window.addEventListener('pointercancel', onPointerCancel, { passive: true });
+    map.on('movestart zoomstart', cancelPress);
+
     // The pointer position travels with the event, so the tooltip can appear on
     // the same frame the building is entered instead of on the next move.
     group.on('mouseover', (event) =>
@@ -305,8 +558,13 @@ export function useHouseLayer({
     badgesRef.current = badges;
 
     return () => {
-      cancelLongPress();
-      map.off('movestart zoomstart', cancelLongPress);
+      cancelPress();
+      clearSuppression();
+      container.removeEventListener('pointerdown', onPointerDown);
+      container.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      map.off('movestart zoomstart', cancelPress);
       map.off('click', clearSelection);
       group.remove();
       labels.remove();
