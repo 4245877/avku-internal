@@ -126,7 +126,7 @@ const HOUSE_B = makeHouse('b', 0.0005, 0.001);
 let map = null;
 
 function Layer(props) {
-  useHouseLayer({
+  const api = useHouseLayer({
     map,
     houses: props.houses,
     matchedIds: props.matchedIds,
@@ -137,6 +137,8 @@ function Layer(props) {
     onLongPressHouse: props.onLongPressHouse ?? (() => {}),
     isSelectionEnabled: props.isSelectionEnabled ?? true,
   });
+
+  props.onApi?.(api);
 
   return null;
 }
@@ -156,11 +158,13 @@ function mountLayer(overrides = {}) {
   });
 
   const houses = overrides.houses ?? [HOUSE_A, HOUSE_B];
+  const api = {};
   const props = {
     houses,
     matchedIds: overrides.matchedIds ?? new Set(houses.map((house) => house.id)),
     onSelectHouse: vi.fn(),
     onLongPressHouse: vi.fn(),
+    onApi: (value) => Object.assign(api, value),
     ...overrides,
   };
 
@@ -169,7 +173,12 @@ function mountLayer(overrides = {}) {
   // The hook binds its handlers once the map exists, which is one commit later.
   view.rerender(<Layer {...props} />);
 
-  return { ...props, view, rerender: (next) => view.rerender(<Layer {...props} {...next} />) };
+  return {
+    ...props,
+    api,
+    view,
+    rerender: (next) => view.rerender(<Layer {...props} {...next} />),
+  };
 }
 
 /** Where a house sits on screen right now. */
@@ -544,6 +553,135 @@ describe('tapping a building', () => {
     });
 
     expect(layer.onLongPressHouse).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * The second half of the reported bug, and the half a mouse feels.
+ *
+ * Leaflet gives a polygon half its stroke width of slack when a mouse aims at
+ * it — under a pixel. The map opens on the whole district, where a house is
+ * three or four pixels across, so a cursor a hair off the outline hit nothing:
+ * no highlight, no pointer cursor, and a click that cleared the selection
+ * instead of opening the card. The renderer is given a real tolerance now, and
+ * these press exactly at the edge of it.
+ */
+describe('aiming at a building with a mouse', () => {
+  /** A point `offset` pixels east of the middle of a house's east wall. */
+  function justOutside(house, offset) {
+    const east = Math.max(...house.footprint.map((point) => point.lon));
+    const at = map.latLngToContainerPoint([house.location.lat, east]);
+
+    return { x: at.x + offset, y: at.y };
+  }
+
+  async function clickAt({ x, y }) {
+    const at = { x, y, pointerType: 'mouse' };
+
+    await act(async () => {
+      dispatch('pointerdown', at);
+      dispatch('mousedown', at);
+      dispatch('pointerup', at);
+      dispatch('mouseup', at);
+      dispatch('click', at);
+    });
+  }
+
+  it('selects the building the cursor was a few pixels short of', async () => {
+    const layer = mountLayer();
+
+    await clickAt(justOutside(HOUSE_A, 4));
+
+    expect(layer.onSelectHouse).toHaveBeenCalledWith('a');
+  });
+
+  /* The slack is for aiming, not for guessing: open ground a long way from any
+   * building still means "close the card". */
+  it('clears the selection well outside a building', async () => {
+    const layer = mountLayer();
+
+    await clickAt(justOutside(HOUSE_A, 60));
+
+    expect(layer.onSelectHouse).toHaveBeenCalledWith(null);
+  });
+});
+
+/*
+ * Hovering, and the move Leaflet throws away.
+ *
+ * Its canvas hit test is throttled to 32 ms with no trailing run, so a move
+ * arriving inside that window is dropped outright — and the dropped one is
+ * very often the last, the one that brought the cursor to rest on a building.
+ * The building then stayed unlit and the cursor stayed the map's grab hand
+ * until the mouse was jiggled.
+ */
+describe('coming to rest on a building', () => {
+  async function moveTo(point) {
+    await act(async () => {
+      dispatch('mousemove', { ...point, pointerType: 'mouse' });
+    });
+  }
+
+  it('highlights it even when Leaflet drops the move that arrived there', async () => {
+    const onHoverHouse = vi.fn();
+
+    mountLayer({ onHoverHouse });
+
+    // The first move is hit-tested and starts Leaflet's throttle; the second,
+    // the one that lands on the building, is swallowed by it.
+    await moveTo({ x: 4, y: 4 });
+    await moveTo(pointOf(HOUSE_A));
+
+    expect(onHoverHouse).not.toHaveBeenCalledWith('a', expect.anything());
+
+    // Nothing more happens: the cursor is simply resting on the house.
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(onHoverHouse).toHaveBeenCalledWith('a', expect.anything());
+  });
+
+  it('reports the building the cursor actually stopped on', async () => {
+    const onHoverHouse = vi.fn();
+
+    mountLayer({ onHoverHouse });
+
+    await moveTo(pointOf(HOUSE_A));
+    await moveTo(pointOf(HOUSE_B));
+
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(onHoverHouse).toHaveBeenLastCalledWith('b', expect.anything());
+  });
+});
+
+/*
+ * A house with no outline: typed in by hand, or imported from a list rather
+ * than from OSM. It used to become a polygon with no points — invisible,
+ * unhittable, and counted among the layers all the same, so asking the map to
+ * show it flew the view at an empty rectangle off the coast of Africa.
+ */
+describe('a house the dataset has no footprint for', () => {
+  const SHAPELESS = { ...makeHouse('c'), footprint: [] };
+  const UNMAPPED = { ...makeHouse('d'), footprint: undefined };
+
+  it('is left off the map rather than added as an invisible one', async () => {
+    const layer = mountLayer({ houses: [HOUSE_A, SHAPELESS, UNMAPPED] });
+
+    expect(layer.api.getHouseBounds('c')).toBeNull();
+    expect(layer.api.getHouseBounds('d')).toBeNull();
+    expect(layer.api.getHouseBounds('a')).not.toBeNull();
+  });
+
+  it('leaves the buildings around it selectable', async () => {
+    const layer = mountLayer({ houses: [SHAPELESS, HOUSE_A] });
+
+    await pressWithMouse(HOUSE_A);
+
+    expect(layer.onSelectHouse).toHaveBeenCalledWith('a');
   });
 });
 

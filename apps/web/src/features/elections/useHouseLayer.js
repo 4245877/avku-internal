@@ -54,14 +54,31 @@ export const LONG_PRESS_MS = 500;
  */
 const LONG_PRESS_SLOP_PIXELS = 10;
 /**
- * How far outside a footprint a finger may land and still mean that building.
+ * How far outside a footprint a pointer may land and still mean that building.
  *
- * A tap is not a pixel, and at the zoom a canvasser works at a house is a few
- * pixels across with an outline two of them wide — a tap on the outline is the
- * commonest way to aim at a building, and it must not miss. Leaflet gives a
- * mouse the same courtesy by counting the stroke as part of the shape.
+ * A tap is not a pixel — and neither is a mouse. The map opens on the whole
+ * district, where a house is three or four pixels across; Leaflet gives a
+ * polygon half its stroke width of slack for a mouse, which is *half a pixel*
+ * here. Buildings therefore behaved as though they were not on the map at all:
+ * nothing lit up under the cursor, the cursor stayed the map's own grab hand,
+ * and a click that missed by a pixel cleared the selection instead of opening
+ * a card.
+ *
+ * The same number is handed to the canvas renderer, which applies it to every
+ * pointing device, and used by the touch hit test below — so the mouse and the
+ * finger now aim at exactly the same target.
  */
-const TOUCH_TOLERANCE_PIXELS = 8;
+const POINTER_TOLERANCE_PIXELS = 8;
+/** Fewer points than this is not a shape, so there is nothing to draw or hit. */
+const MIN_FOOTPRINT_POINTS = 3;
+/**
+ * How long after the pointer comes to rest its last position is hit-tested
+ * again. Past Leaflet's own 32 ms throttle, and short enough to read as the
+ * same movement rather than as a delayed reaction. See the replay below.
+ */
+const HOVER_REPLAY_MS = 40;
+/** Marks a replayed move, so the replay can never feed itself. */
+const REPLAYED_MOVE = Symbol('replayed pointer move');
 /**
  * How long the compatibility click that ends a touch gesture stays suppressed.
  *
@@ -125,9 +142,19 @@ const IMAGERY_FILL_SCALE = 0.35;
  */
 function styleFor(state, palette, fillScale = 1) {
   const tone = palette[state.stage] ?? palette.not_started;
-  // Data nobody has confirmed for months is shown faded rather than recoloured:
-  // "we are not sure about this" is not a stage of work.
-  const staleScale = state.isStale ? 0.55 : 1;
+  /*
+   * Data nobody has confirmed for months is shown faded rather than recoloured:
+   * "we are not sure about this" is not a stage of work.
+   *
+   * The fade is deliberately slight, and that is the whole of the lesson here.
+   * A district that has just been imported is *entirely* unverified, so this
+   * flag is true of every building on the map — at the 0.55 it used to be, the
+   * one thing it reliably did was sink the whole layer into the basemap's own
+   * grey buildings, until nothing on the map read as a thing you could pick.
+   * A signal that is true of everything must not be the signal that decides
+   * whether anything is visible.
+   */
+  const staleScale = state.isStale ? 0.8 : 1;
   const fill = (opacity) => Math.min(1, opacity * fillScale * staleScale);
   const dashArray = state.hasNoAssignee ? '4 3' : undefined;
 
@@ -177,10 +204,18 @@ function styleFor(state, palette, fillScale = 1) {
     };
   }
 
+  /*
+   * The resting state — every building on the map, nearly all of the time.
+   *
+   * It is drawn on top of cartography that already draws buildings, in its own
+   * grey, so an outline any lighter than this does not say "this one is mine
+   * and you can pick it" — it says nothing, and the map reads as a plain street
+   * map with a tint on it.
+   */
   return {
     color: state.isUrgent ? palette.urgent : tone.line,
-    weight: state.isUrgent ? 2.5 : 1,
-    opacity: 0.9,
+    weight: state.isUrgent ? 2.5 : 1.5,
+    opacity: 1,
     fillColor: tone.fill,
     fillOpacity: fill(0.82),
     dashArray,
@@ -226,7 +261,9 @@ export function findHouseAt(point, houses, isSelectable, tolerance = NO_TOLERANC
   for (const house of houses) {
     const ring = house.footprint;
 
-    if (!ring?.length || !isSelectable(house.id)) {
+    // The same rule the polygons follow: no outline, nothing on the map to aim
+    // at — so there is nothing here to hit either.
+    if (!ring || ring.length < MIN_FOOTPRINT_POINTS || !isSelectable(house.id)) {
       continue;
     }
 
@@ -341,7 +378,13 @@ export function useHouseLayer({
     }
 
     paletteRef.current = readPalette(map.getContainer());
-    rendererRef.current = L.canvas({ padding: CANVAS_PADDING });
+    // `tolerance` is what makes a building on this map aimable at all: the
+    // renderer adds it to every polygon's hit area, for hover and for clicks,
+    // whatever the pointing device. See `POINTER_TOLERANCE_PIXELS`.
+    rendererRef.current = L.canvas({
+      padding: CANVAS_PADDING,
+      tolerance: POINTER_TOLERANCE_PIXELS,
+    });
 
     const group = L.featureGroup().addTo(map);
     const labels = L.layerGroup().addTo(map);
@@ -462,8 +505,8 @@ export function useHouseLayer({
       // The finger's slack, in degrees at this zoom — the projection changes
       // with both, so it is measured rather than assumed.
       const slack = map.containerPointToLatLng([
-        origin.x + TOUCH_TOLERANCE_PIXELS,
-        origin.y + TOUCH_TOLERANCE_PIXELS,
+        origin.x + POINTER_TOLERANCE_PIXELS,
+        origin.y + POINTER_TOLERANCE_PIXELS,
       ]);
       // `null` over open ground — the gesture is still recorded, because
       // tapping open ground is how a selection is cleared.
@@ -536,11 +579,51 @@ export function useHouseLayer({
     /** A cancelled pointer selected nothing — it stopped being a gesture. */
     const onPointerCancel = () => cancelPress();
 
+    /*
+     * The move Leaflet always throws away, played back.
+     *
+     * Its canvas hit test is throttled to 32 ms and has no trailing run: a move
+     * that arrives inside the window is dropped outright, and the one that
+     * arrives inside the window is very often the *last* one — the move that
+     * brought the pointer to rest on a building. So the building under the
+     * cursor stayed unlit and the cursor stayed the map's grab hand until the
+     * mouse was jiggled, which is what "the houses do not highlight" looks like
+     * from a chair.
+     *
+     * Replaying the final position once the window has passed is the whole of
+     * the fix. Only genuine moves are replayed, so a replay cannot feed itself,
+     * and the event is dispatched on the element that received the original —
+     * the renderer's canvas, which is the only thing that hit-tests.
+     */
+    let replayTimeoutId = null;
+
+    const cancelReplay = () => clearTimeout(replayTimeoutId);
+
+    const onMouseMove = (event) => {
+      if (event[REPLAYED_MOVE]) {
+        return;
+      }
+
+      const { clientX, clientY, target } = event;
+
+      cancelReplay();
+      replayTimeoutId = setTimeout(() => {
+        const replay = new MouseEvent('mousemove', { bubbles: true, clientX, clientY });
+
+        replay[REPLAYED_MOVE] = true;
+        target.dispatchEvent(replay);
+      }, HOVER_REPLAY_MS);
+    };
+
     container.addEventListener('pointerdown', onPointerDown, { passive: true });
     container.addEventListener('pointermove', onPointerMove, { passive: true });
+    container.addEventListener('mousemove', onMouseMove, { passive: true });
     window.addEventListener('pointerup', onPointerUp, { passive: true });
     window.addEventListener('pointercancel', onPointerCancel, { passive: true });
     map.on('movestart zoomstart', cancelPress);
+    // A moving map re-tests everything by itself; a replay landing mid-flight
+    // would only be asking about ground that has already gone past.
+    map.on('movestart zoomstart', cancelReplay);
 
     // The pointer position travels with the event, so the tooltip can appear on
     // the same frame the building is entered instead of on the next move.
@@ -559,12 +642,15 @@ export function useHouseLayer({
 
     return () => {
       cancelPress();
+      cancelReplay();
       clearSuppression();
       container.removeEventListener('pointerdown', onPointerDown);
       container.removeEventListener('pointermove', onPointerMove);
+      container.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
       map.off('movestart zoomstart', cancelPress);
+      map.off('movestart zoomstart', cancelReplay);
       map.off('click', clearSelection);
       group.remove();
       labels.remove();
@@ -621,6 +707,20 @@ export function useHouseLayer({
     const present = new Set();
 
     for (const house of houses) {
+      const ring = house.footprint ?? [];
+
+      /*
+       * A house the dataset has no outline for — one typed in by hand, or
+       * imported from a list rather than from OSM — used to become a polygon
+       * with no points: invisible, unhittable, and counted among the layers all
+       * the same, so "show this house" from the list flew the map at nothing.
+       * It has no place on the map until somebody draws it; the list and the
+       * card are where it is worked on.
+       */
+      if (ring.length < MIN_FOOTPRINT_POINTS) {
+        continue;
+      }
+
       present.add(house.id);
 
       if (layers.has(house.id)) {
@@ -628,7 +728,7 @@ export function useHouseLayer({
       }
 
       const polygon = L.polygon(
-        house.footprint.map((point) => [point.lat, point.lon]),
+        ring.map((point) => [point.lat, point.lon]),
         {
           houseId: house.id,
           renderer,
@@ -837,11 +937,17 @@ export function useHouseLayer({
     };
   }, [houses, map, matchedIds]);
 
-  /** Bounds of one building, for "show this house" from the list or search. */
-  const getHouseBounds = useCallback(
-    (houseId) => layersRef.current.get(houseId)?.getBounds() ?? null,
-    [],
-  );
+  /**
+   * Bounds of one building, for "show this house" from the list or search.
+   *
+   * `null` for anything the map cannot show, so the caller keeps the view it
+   * has rather than flying to an empty rectangle off the coast of Africa.
+   */
+  const getHouseBounds = useCallback((houseId) => {
+    const bounds = layersRef.current.get(houseId)?.getBounds();
+
+    return bounds?.isValid() ? bounds : null;
+  }, []);
 
   return { getHouseBounds };
 }
