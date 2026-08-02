@@ -1814,6 +1814,16 @@
   animation: dropIn var(--duration-base) var(--ease-spring) both;
 }
 
+/*
+ * A banner that can be closed keeps a strip of its right edge free for the
+ * button that closes it. Reserving the space in the padding rather than letting
+ * the button float over the card is what guarantees it never lands on the copy
+ * or on the primary action, at any width and however long the sentence is.
+ */
+.mapBanner:has(.mapBannerDismiss) {
+  padding-right: calc(var(--space-4) + 30px);
+}
+
 .mapBannerIcon {
   display: inline-flex;
   flex-shrink: 0;
@@ -1888,6 +1898,35 @@
 
 .mapBanner button {
   flex-shrink: 0;
+}
+
+/*
+ * Puts the warning away. Deliberately quieter than the download beside it —
+ * closing is the second-best answer to a real gap, not the recommended one —
+ * but a full-size hit area with a visible hover and the page's own focus ring,
+ * because a control nobody can find or reach by keyboard is not an escape.
+ */
+.mapBannerDismiss {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 30px;
+  height: 30px;
+
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+
+  transition: var(--transition-fast);
+}
+
+.mapBannerDismiss:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
 }
 
 /* Reloading the dataset over a map that is already drawn. */
@@ -3571,10 +3610,16 @@ a.contactValue:hover {
     overscroll-behavior: contain;
   }
 
-  .mapBanner button,
+  /* The close button is out of the flex flow in its reserved corner, and a
+     full-width primary action must not drag it along. */
+  .mapBanner button:not(.mapBannerDismiss),
   .mapEmptyBanner button {
     flex: 1 0 100%;
     width: 100%;
+  }
+
+  .mapBanner:has(.mapBannerDismiss) {
+    padding-right: calc(var(--space-3) + 30px);
   }
 
   /*

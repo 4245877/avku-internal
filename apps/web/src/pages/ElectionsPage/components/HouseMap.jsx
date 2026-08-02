@@ -25,6 +25,7 @@ import {
   readStoredMapMode,
   writeStoredMapMode,
 } from '../../../features/elections/basemaps.js';
+import { useCoverageNotice } from '../../../features/elections/coverageNotice.js';
 import { useHouseLayer } from '../../../features/elections/useHouseLayer.js';
 import { useLeafletMap } from '../../../features/elections/useLeafletMap.js';
 import { useWorkspaceArea } from '../../../features/elections/useWorkspaceArea.js';
@@ -118,6 +119,10 @@ function HouseMap({
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   const area = useWorkspaceArea();
+
+  /* Closed by hand, and closed for one particular gap: a remount, a reload or
+   * a rebuild does not reopen it, a re-traced boundary or a new dataset does. */
+  const coverageNotice = useCoverageNotice(coverage);
 
   useEffect(() => {
     if (status === 'ready') {
@@ -371,14 +376,19 @@ function HouseMap({
           <MapTilesErrorState mode={mapMode} onRetry={retryTiles} />
         )}
 
-        {status === 'ready' && tileStatus !== 'error' && !isAreaEditing && hasMissingCoverage && (
-          <MapCoverageState
-            coverage={coverage}
-            onCancel={onCancelRefreshFromOsm}
-            onRefresh={onRefreshFromOsm}
-            refresh={osmRefresh}
-          />
-        )}
+        {status === 'ready' &&
+          tileStatus !== 'error' &&
+          !isAreaEditing &&
+          hasMissingCoverage &&
+          !coverageNotice.isDismissed && (
+            <MapCoverageState
+              coverage={coverage}
+              onCancel={onCancelRefreshFromOsm}
+              onDismiss={coverageNotice.dismiss}
+              onRefresh={onRefreshFromOsm}
+              refresh={osmRefresh}
+            />
+          )}
 
         {status === 'ready' && tileStatus !== 'error' && !isAreaEditing && isAreaEmpty && (
           <MapEmptyAreaState onEditArea={onEnterAreaEditing} />

@@ -170,8 +170,15 @@ function describeGap(coverage) {
  * that download — running, failed, done — instead of handing a failure to the
  * page-wide error state, which would blame the map for a busy Overpass mirror
  * and offer a retry of the wrong request.
+ *
+ * Downloading is not the only way out, though: the gap can be real and still be
+ * ground nobody canvasses, and "I have read this" deserves an answer that is
+ * not a minute of Overpass. Hence the close button, which is available in every
+ * stage of that download — a banner that locks itself open while a mirror
+ * grinds, or that has just told the user it failed, is exactly when being able
+ * to put it away matters most.
  */
-export function MapCoverageState({ coverage, refresh, onRefresh, onCancel }) {
+export function MapCoverageState({ coverage, refresh, onRefresh, onCancel, onDismiss }) {
   const isRefreshing = refresh.status === 'loading';
   const hasFailed = refresh.status === 'error';
   const progress = refresh.progress;
@@ -240,6 +247,17 @@ export function MapCoverageState({ coverage, refresh, onRefresh, onCancel }) {
           {hasFailed ? 'Спробувати ще раз' : 'Завантажити з OSM'}
         </button>
       )}
+
+      {/* Last in the DOM as well as on screen: a screen-reader user should hear
+          what the banner says and what it offers before the way to silence it. */}
+      <button
+        aria-label="Закрити попередження про неповне покриття OSM"
+        className={styles.mapBannerDismiss}
+        onClick={onDismiss}
+        type="button"
+      >
+        <ElectionsIcon name="close" size={16} />
+      </button>
     </div>
   );
 }
