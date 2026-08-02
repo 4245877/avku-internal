@@ -40,6 +40,18 @@ storage/warehouse/*.sqlite-*
 # Logistics database (regenerated/seeded on startup)
 storage/logistics/*.sqlite
 storage/logistics/*.sqlite-*
+# Employee directory (provisioned just-in-time from Cloudflare Access; holds
+# staff emails and their elections roles)
+storage/employees/*.sqlite
+storage/employees/*.sqlite-*
+# Elections: the campaign database holds real contact details of residents, and
+# the attachments directory holds photographs taken in the field. Neither ever
+# belongs in the repository — the database is rebuilt with
+# `tsx src/scripts/import-osm-snapshot.ts`.
+storage/elections/*.sqlite
+storage/elections/*.sqlite-*
+storage/elections/attachments/*
+!storage/elections/attachments/.gitkeep
 storage/backups/
 runtime/
 

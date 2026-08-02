@@ -7,7 +7,8 @@ import {
   unprojectFromMeters,
 } from './geo.js';
 import {
-  HEADQUARTERS_OSM_ID,
+  DEFAULT_HEADQUARTERS_OSM_ID,
+  computeHouseEstimate,
   buildOverpassQuery,
   listStreetNames,
   normalizeOsmBuildings,
@@ -260,18 +261,38 @@ describe('normalizeOsmBuildings', () => {
     expect(houses.map((house) => house.id)).toEqual(['way/2', 'way/3', 'way/1']);
   });
 
-  it('flags the campaign office itself', () => {
-    const [, osmId] = HEADQUARTERS_OSM_ID.split('/');
+  it('flags the campaign office when one is named', () => {
+    const [, osmId] = DEFAULT_HEADQUARTERS_OSM_ID.split('/');
     const [house] = normalizeOsmBuildings([apartmentBlock({ id: Number(osmId) })]);
 
     expect(house.isHeadquarters).toBe(true);
     expect(normalizeOsmBuildings([apartmentBlock()])[0].isHeadquarters).toBe(false);
   });
 
-  it('starts every house with empty survey details', () => {
+  /*
+   * The headquarters belongs to a campaign, not to the district. Passing no id
+   * is how the working UI normalizes — it marks the office from
+   * `campaigns.hq_house_id` afterwards — and nothing may be flagged by default.
+   */
+  it('marks nothing as the office when the caller names none', () => {
+    const [, osmId] = DEFAULT_HEADQUARTERS_OSM_ID.split('/');
+    const houses = normalizeOsmBuildings(
+      [apartmentBlock({ id: Number(osmId) })],
+      { headquartersOsmId: null },
+    );
+
+    expect(houses[0].isHeadquarters).toBe(false);
+  });
+
+  /*
+   * Estimates are derived on read and never stored, so a normalized record
+   * carries no survey payload at all — the API keeps confirmed counts only.
+   */
+  it('carries no survey payload, and estimates recompute from the footprint', () => {
     const [house] = normalizeOsmBuildings([apartmentBlock()]);
 
-    expect(house.details).toMatchObject({ residents: [], contacts: [], updatedAt: null });
+    expect(house.details).toBeUndefined();
+    expect(computeHouseEstimate(house)).toEqual(house.estimate);
   });
 });
 

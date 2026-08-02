@@ -242,7 +242,12 @@ describe('fetchHouses coverage reporting', () => {
       ),
     );
 
-    await expect(fetchHouses()).rejects.toThrow(/порожній/);
+    // With the backend as the source an empty result is a state, not a
+    // failure — a campaign with no houses yet still has to render a map.
+    const payload = await fetchHouses();
+
+    expect(payload.houses).toEqual([]);
+    expect(payload.coverage.houseCount).toBe(0);
   });
 
   it('surfaces an HTTP failure as an error rather than an empty district', async () => {
@@ -363,6 +368,6 @@ describe('a live refresh answers the coverage warning for the session', () => {
     const payload = await fetchHouses();
 
     expect(payload.coverage.isCovered).toBe(false);
-    expect(payload.coverage.source).toBe('snapshot');
+    expect(payload.coverage.source).toBe('backend');
   });
 });

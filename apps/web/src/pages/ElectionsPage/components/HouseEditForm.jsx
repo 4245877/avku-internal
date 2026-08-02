@@ -1,22 +1,27 @@
 /**
- * Edit form for one house's survey data.
+ * Edit form for one house.
  *
- * The whole record is edited as a single controlled draft and submitted in one
- * call, which is exactly the shape a `PATCH /houses/:id/details` request needs.
- * The parent keys this component by house id, so switching houses always starts
- * from a clean draft.
+ * Split in two, because the record is two different things with two different
+ * lifetimes and two different permissions:
+ *
+ *   **Характеристики будинку** — how many entrances it has, who manages it, how
+ *   to get in. Permanent facts about the building; they do not change when a
+ *   campaign starts or ends, and they go to `PATCH /houses/:id`.
+ *
+ *   **Стан у кампанії** — the stage, the priority and what is planned next.
+ *   Specific to the campaign in view; they go to `PATCH /houses/:id/state` and
+ *   leave any other campaign's record untouched.
+ *
+ * The old «Хто вносив дані» field is gone. It was free text, so it recorded
+ * whatever somebody typed; the author now comes from the verified identity on
+ * every write, and is visible in the Історія tab.
  */
 
 import { useMemo, useState } from 'react';
 
-import {
-  CANVASS_STATUSES,
-  PRIORITIES,
-} from '../../../features/elections/electionsTypes.js';
-import { formatNumber } from '../../../features/elections/houseUtils.js';
+import { PRIORITIES, WORK_STAGES } from '../../../features/elections/electionsTypes.js';
+import { campaignStateOf, formatNumber } from '../../../features/elections/houseUtils.js';
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
-import ContactsFieldset from './ContactsFieldset.jsx';
-import ResidentsFieldset from './ResidentsFieldset.jsx';
 import styles from '../ElectionsPage.module.css';
 
 /**
@@ -32,6 +37,10 @@ function parseCount(rawValue) {
 
 const toInputValue = (value) => (value === null || value === undefined ? '' : String(value));
 
+/**
+ * Client-side validation is a courtesy, not a guarantee — the API re-checks
+ * every one of these bounds, because a form is not a trust boundary.
+ */
 function validate(draft) {
   const errors = {};
 
@@ -39,7 +48,7 @@ function validate(draft) {
     ['entrances', 'Кількість підʼїздів', 60],
     ['apartments', 'Кількість квартир', 2000],
     ['residentsCount', 'Кількість мешканців', 6000],
-    ['householdsCount', 'Кількість домогосподарств', 2000],
+    ['households', 'Кількість домогосподарств', 2000],
   ];
 
   for (const [field, label, max] of countFields) {
@@ -56,25 +65,34 @@ function validate(draft) {
     }
   }
 
-  for (const contact of draft.contacts) {
-    if (!contact.value.trim()) {
-      errors.contacts = 'Заповніть або видаліть порожні контакти.';
-      break;
-    }
-  }
-
-  for (const resident of draft.residents) {
-    if (!resident.name.trim()) {
-      errors.residents = 'У кожного мешканця має бути імʼя, або видаліть рядок.';
-      break;
-    }
-  }
-
   return errors;
 }
 
-function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
-  const [draft, setDraft] = useState(() => ({ ...house.details }));
+function toDateInput(isoValue) {
+  return isoValue ? String(isoValue).slice(0, 10) : '';
+}
+
+function HouseEditForm({ house, onCancel, onSubmitAttributes, onSubmitState, isSaving, saveError }) {
+  const state = campaignStateOf(house);
+
+  const [draft, setDraft] = useState(() => ({
+    entrances: house.entrances,
+    apartments: house.apartments,
+    residentsCount: house.residentsCount,
+    households: house.households,
+    accessNote: house.accessNote ?? '',
+    managingOrg: house.managingOrg ?? '',
+    verified: false,
+  }));
+
+  const [stateDraft, setStateDraft] = useState(() => ({
+    stage: state.stage,
+    priority: state.priority,
+    priorityReason: state.priorityReason ?? '',
+    summary: state.summary ?? '',
+    nextActionAt: toDateInput(state.nextActionAt),
+  }));
+
   const [wasSubmitted, setWasSubmitted] = useState(false);
 
   const errors = useMemo(() => validate(draft), [draft]);
@@ -85,7 +103,11 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
     setDraft((current) => ({ ...current, ...patch }));
   }
 
-  function handleSubmit(event) {
+  function updateStateDraft(patch) {
+    setStateDraft((current) => ({ ...current, ...patch }));
+  }
+
+  async function handleSubmit(event) {
     event.preventDefault();
     setWasSubmitted(true);
 
@@ -93,22 +115,26 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
       return;
     }
 
-    onSubmit({
+    // Two requests, attributes first: if the second is refused (a role that may
+    // record work but not edit the building, say), the first has still landed
+    // and the user is told which half failed rather than losing both.
+    const savedAttributes = await onSubmitAttributes({
       ...draft,
       accessNote: draft.accessNote.trim(),
-      notes: draft.notes.trim(),
-      updatedBy: draft.updatedBy.trim(),
-      residents: draft.residents.map((resident) => ({
-        ...resident,
-        name: resident.name.trim(),
-        apartment: resident.apartment.trim(),
-        note: resident.note.trim(),
-      })),
-      contacts: draft.contacts.map((contact) => ({
-        ...contact,
-        value: contact.value.trim(),
-        label: contact.label.trim(),
-      })),
+      managingOrg: draft.managingOrg.trim(),
+    });
+
+    if (!savedAttributes) {
+      return;
+    }
+
+    await onSubmitState({
+      ...stateDraft,
+      priorityReason: stateDraft.priorityReason.trim(),
+      summary: stateDraft.summary.trim(),
+      nextActionAt: stateDraft.nextActionAt
+        ? new Date(`${stateDraft.nextActionAt}T12:00:00`).toISOString()
+        : null,
     });
   }
 
@@ -117,8 +143,12 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
       <div className={styles.formSection}>
         <h3 className={styles.formSectionTitle}>
           <ElectionsIcon name="door" size={16} />
-          Будинок
+          Характеристики будинку
         </h3>
+
+        <p className={styles.formSectionHint}>
+          Постійні дані про будівлю. Вони не залежать від кампанії.
+        </p>
 
         <div className={styles.formGrid}>
           <label className={styles.formField}>
@@ -126,7 +156,9 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
             <input
               inputMode="numeric"
               onChange={(event) => updateDraft({ entrances: parseCount(event.target.value) })}
-              placeholder={`Оціночно ${house.estimate.entrances}`}
+              placeholder={
+                house.estimate?.entrances ? `Оціночно ${house.estimate.entrances}` : '—'
+              }
               type="text"
               value={toInputValue(draft.entrances)}
             />
@@ -136,11 +168,13 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
           </label>
 
           <label className={styles.formField}>
-            <span>Квартир, орієнтовно</span>
+            <span>Кількість квартир</span>
             <input
               inputMode="numeric"
               onChange={(event) => updateDraft({ apartments: parseCount(event.target.value) })}
-              placeholder={`Оціночно ${house.estimate.apartments}`}
+              placeholder={
+                house.estimate?.apartments ? `Оціночно ${house.estimate.apartments}` : '—'
+              }
               type="text"
               value={toInputValue(draft.apartments)}
             />
@@ -156,7 +190,9 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
               onChange={(event) =>
                 updateDraft({ residentsCount: parseCount(event.target.value) })
               }
-              placeholder={`Оціночно ${house.estimate.residents}`}
+              placeholder={
+                house.estimate?.residents ? `Оціночно ${house.estimate.residents}` : '—'
+              }
               type="text"
               value={toInputValue(draft.residentsCount)}
             />
@@ -166,18 +202,16 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
           </label>
 
           <label className={styles.formField}>
-            <span>Домогосподарств</span>
+            <span>Заселених квартир</span>
             <input
               inputMode="numeric"
-              onChange={(event) =>
-                updateDraft({ householdsCount: parseCount(event.target.value) })
-              }
+              onChange={(event) => updateDraft({ households: parseCount(event.target.value) })}
               placeholder="Скільки квартир заселено"
               type="text"
-              value={toInputValue(draft.householdsCount)}
+              value={toInputValue(draft.households)}
             />
-            {errors.householdsCount && showErrors && (
-              <em className={styles.fieldError}>{errors.householdsCount}</em>
+            {errors.households && showErrors && (
+              <em className={styles.fieldError}>{errors.households}</em>
             )}
           </label>
 
@@ -190,25 +224,50 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
               value={draft.accessNote}
             />
           </label>
+
+          <label className={`${styles.formField} ${styles.formFieldWide}`}>
+            <span>Керуюча організація</span>
+            <input
+              onChange={(event) => updateDraft({ managingOrg: event.target.value })}
+              placeholder="ОСББ, ЖЕК, керуюча компанія"
+              type="text"
+              value={draft.managingOrg}
+            />
+          </label>
         </div>
+
+        {/* The date and the author of a check are stamped by the server from the
+            signed-in identity — there is deliberately no field for either. */}
+        <label className={styles.checkboxField}>
+          <input
+            checked={draft.verified}
+            onChange={(event) => updateDraft({ verified: event.target.checked })}
+            type="checkbox"
+          />
+          <span>Я перевірив(ла) ці дані на місці — зафіксувати дату й автора перевірки</span>
+        </label>
       </div>
 
       <div className={styles.formSection}>
         <h3 className={styles.formSectionTitle}>
           <ElectionsIcon name="list" size={16} />
-          Стан обходу
+          Стан у поточній кампанії
         </h3>
+
+        <p className={styles.formSectionHint}>
+          Стосується лише активної кампанії. Результати інших кампаній не змінюються.
+        </p>
 
         <div className={styles.formGrid}>
           <label className={styles.formField}>
-            <span>Статус</span>
+            <span>Етап роботи</span>
             <select
-              onChange={(event) => updateDraft({ canvassStatus: event.target.value })}
-              value={draft.canvassStatus}
+              onChange={(event) => updateStateDraft({ stage: event.target.value })}
+              value={stateDraft.stage}
             >
-              {CANVASS_STATUSES.map((status) => (
-                <option key={status.id} value={status.id}>
-                  {status.label}
+              {WORK_STAGES.map((stage) => (
+                <option key={stage.id} value={stage.id}>
+                  {stage.label}
                 </option>
               ))}
             </select>
@@ -217,8 +276,8 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
           <label className={styles.formField}>
             <span>Пріоритет</span>
             <select
-              onChange={(event) => updateDraft({ priority: event.target.value })}
-              value={draft.priority}
+              onChange={(event) => updateStateDraft({ priority: event.target.value })}
+              value={stateDraft.priority}
             >
               {PRIORITIES.map((priority) => (
                 <option key={priority.id} value={priority.id}>
@@ -228,50 +287,33 @@ function HouseEditForm({ house, onCancel, onSubmit, isSaving, saveError }) {
             </select>
           </label>
 
-          <label className={styles.formField}>
-            <span>Дата обходу</span>
+          <label className={`${styles.formField} ${styles.formFieldWide}`}>
+            <span>Причина пріоритету</span>
             <input
-              onChange={(event) => updateDraft({ surveyedAt: event.target.value })}
-              type="date"
-              value={draft.surveyedAt}
+              onChange={(event) => updateStateDraft({ priorityReason: event.target.value })}
+              placeholder="Чому цей будинок важливіший за сусідній"
+              type="text"
+              value={stateDraft.priorityReason}
             />
           </label>
 
           <label className={styles.formField}>
-            <span>Хто вносив дані</span>
+            <span>Наступна дія</span>
             <input
-              onChange={(event) => updateDraft({ updatedBy: event.target.value })}
-              placeholder="Імʼя координатора"
-              type="text"
-              value={draft.updatedBy}
+              onChange={(event) => updateStateDraft({ nextActionAt: event.target.value })}
+              type="date"
+              value={stateDraft.nextActionAt}
             />
           </label>
         </div>
-      </div>
-
-      <ResidentsFieldset
-        onChange={(residents) => updateDraft({ residents })}
-        residents={draft.residents}
-      />
-
-      <ContactsFieldset
-        contacts={draft.contacts}
-        onChange={(contacts) => updateDraft({ contacts })}
-      />
-
-      <div className={styles.formSection}>
-        <h3 className={styles.formSectionTitle}>
-          <ElectionsIcon name="note" size={16} />
-          Нотатки та додаткова інформація
-        </h3>
 
         <label className={styles.formField}>
-          <span className="sr-only">Нотатки</span>
+          <span>Коротке резюме</span>
           <textarea
-            onChange={(event) => updateDraft({ notes: event.target.value })}
-            placeholder="Настрої мешканців, зручний час обходу, локальні проблеми, домовленості…"
-            rows="4"
-            value={draft.notes}
+            onChange={(event) => updateStateDraft({ summary: event.target.value })}
+            placeholder="Одне-два речення про поточний стан роботи з будинком"
+            rows="3"
+            value={stateDraft.summary}
           />
         </label>
       </div>

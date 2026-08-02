@@ -14,6 +14,8 @@ function ElectionsToolbar({
   filters,
   summary,
   streets,
+  precincts,
+  assignees,
   resultCount,
   hasActiveFilters,
   isDisabled,
@@ -41,11 +43,13 @@ function ElectionsToolbar({
       </div>
 
       <HouseFilters
+        assignees={assignees}
         disabled={isDisabled}
         filters={filters}
         hasActive={hasActiveFilters}
         onChange={onFiltersChange}
         onReset={onResetFilters}
+        precincts={precincts}
         streets={streets}
         summary={summary}
       />

@@ -89,9 +89,11 @@ Elections map variables (all optional — the map works with no configuration):
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `VITE_ELECTIONS_SOURCE` | `snapshot` | Where houses come from: `snapshot` (the shipped OSM dataset), `backend` (`VITE_ELECTIONS_API_URL`), or `overpass` (a live OpenStreetMap query). |
-| `VITE_ELECTIONS_API_URL` | unset | Base URL of the elections API. Required when `VITE_ELECTIONS_SOURCE=backend`; also where the working-area boundary is read from and saved to (falls back to `VITE_API_URL`, then `/api`). |
-| `ELECTIONS_STORAGE_ROOT` | `<DATA_ROOT>/elections` | API-side directory holding the saved working-area boundary. |
+| `VITE_ELECTIONS_SOURCE` | `backend` | Where houses come from: `backend` (the API — the source of truth), `snapshot` (the shipped OSM dataset, for working on the map with no API running), or `overpass` (a live OpenStreetMap query). |
+| `VITE_ELECTIONS_API_URL` | `/api/elections` | Base URL of the elections API. The default is correct for the normal same-origin deployment (Vite proxy in dev, nginx in prod); it is also where the working-area boundary is read from and saved to. |
+| `ELECTIONS_STORAGE_ROOT` | `<DATA_ROOT>/elections` | API-side directory holding the campaign database (`elections.sqlite`), the saved working-area boundary and uploaded attachments. |
+| `ELECTIONS_ADMIN_EMAILS` | unset | Comma-separated bootstrap admins for the elections module. Needed at least once: on a fresh database nobody has a role, so nobody could grant one. |
+| `ELECTIONS_DEV_AUTH` / `ELECTIONS_DEV_ROLE` | unset | Local development only. Both must be set to grant a role without an Access identity; ignored when `NODE_ENV=production`, logged at startup, and shown as a red badge in the UI. |
 | `VITE_MAP_MODE` | `streets` | Base layer selected on load: `streets` («Карта») or `satellite` («Супутник»). A mode picked in the UI is remembered per browser and wins over this. |
 | `VITE_MAP_PROVIDER` | auto | Forces the tile provider for **both** modes: `osm`, `maptiler` or `mapbox`. Unset means: a configured commercial token if there is one, otherwise the key-free set. |
 | `VITE_MAPTILER_KEY` | unset | MapTiler key. Moves both modes to MapTiler (Streets v2 + Satellite Hybrid). |
@@ -342,6 +344,81 @@ canvasser enters measured data.
 
 Map data © OpenStreetMap contributors, [ODbL 1.0](https://www.openstreetmap.org/copyright).
 
+### Elections: campaign data
+
+The OSM snapshot describes *buildings*. Everything a campaign records **about**
+those buildings lives in the API database at
+`<DATA_ROOT>/elections/elections.sqlite`, with uploaded photos under
+`<DATA_ROOT>/elections/attachments/`. Neither is in the repository: the database
+holds residents' contact details, and it is rebuilt from the snapshot by the
+importer below.
+
+A house has its own permanent id, and `osm_type`/`osm_id` are only matching
+attributes. That is what lets the snapshot be regenerated without orphaning
+anything anybody recorded — re-running the importer updates the OSM-derived
+columns and leaves the internal id, and therefore every action, issue, task and
+contact, exactly where it was.
+
+Load (or refresh) the houses table:
+
+```bash
+# First run: also creates the campaign everything hangs off.
+pnpm --filter @avku/api exec tsx src/scripts/import-osm-snapshot.ts \
+  --campaign "Кампанія 2026"
+
+# Later runs, after `pnpm --filter @avku/web data:houses`:
+pnpm --filter @avku/api exec tsx src/scripts/import-osm-snapshot.ts
+```
+
+It is idempotent and reports what it did (`створено / оновлено / без змін /
+зникло з OSM`). An OSM object that has disappeared is flagged
+`osm_status = 'missing'`, never deleted — the building is usually still there,
+and the work on it certainly is.
+
+#### Data entered before the backend existed
+
+Earlier versions kept survey data in one browser, in `localStorage` under
+`avku-elections-details-v1`. For some houses that entry is the only copy. The
+module detects it and shows a banner offering, in this order: **download the
+file**, then **send it to the server**, where it becomes a reviewable import
+batch. The original key is never removed automatically.
+
+The same file can be imported from the command line:
+
+```bash
+# Preview only — writes nothing.
+pnpm --filter @avku/api exec tsx src/scripts/import-local-overrides.ts export.json
+
+# Apply the rows that matched a house outright.
+pnpm --filter @avku/api exec tsx src/scripts/import-local-overrides.ts export.json --apply
+```
+
+Rows that cannot be matched are reported and left in the batch for a person to
+decide; nothing is dropped silently. Every created record is tagged
+`source = import:<batch_id>`, and the whole batch is reversible:
+
+```
+POST /api/elections/import/<batch_id>/rollback
+```
+
+Residents' political positions and age bands from the old data are **not**
+imported. They are dropped while the rows are being built, so they never reach
+storage; the report says how many values were removed and never what they were.
+
+#### Roles
+
+Writing requires a role, held in the `employees` table
+(`agitator` → `coordinator` → `manager` → `admin`). Being on the LAN grants
+nothing: a request with no identity is refused.
+
+| Variable | Effect |
+|---|---|
+| `ELECTIONS_ADMIN_EMAILS` | Comma-separated bootstrap admins. Needed at least once — on a fresh database nobody has a role, so nobody could grant one. |
+| `ELECTIONS_DEV_AUTH=1` + `ELECTIONS_DEV_ROLE=<role>` | Local development only. Both are required, it is ignored when `NODE_ENV=production`, it logs a warning at startup, and the UI shows a red badge while it is active. |
+
+Roles are granted through `PUT /api/elections/roles/<email>` (admin only), or in
+the UI once an admin exists.
+
 ## Backup And Restore
 
 Create a backup:
@@ -355,8 +432,11 @@ By default, backups are read from `DATA_ROOT=/var/lib/avku-internal/data` and wr
 - `certificates/certificates.sqlite`
 - `warehouse/warehouse.sqlite`
 - `logistics/logistics.sqlite`
+- `elections/elections.sqlite` — the campaign database
+- `employees/employees.sqlite` — the staff directory and their elections roles
 - `certificates/registry.json`, if present
 - certificate `photos/` and `generated/` archives, if present
+- `elections/workspace-area.geo.json` and the `elections/attachments/` archive, if present
 
 You can override paths:
 
@@ -376,7 +456,7 @@ There is no dedicated restore script yet. To restore manually:
 
 1. Stop the API process or container.
 2. Copy each backed-up `*.sqlite` file back to its matching storage root under `/var/lib/avku-internal/data` (a single file per database — no sidecars).
-3. If the backup contains `certificates/photos.tar.gz` or `certificates/generated.tar.gz`, extract them into `/var/lib/avku-internal/data/certificates`.
+3. If the backup contains `certificates/photos.tar.gz` or `certificates/generated.tar.gz`, extract them into `/var/lib/avku-internal/data/certificates`; likewise extract `elections/attachments.tar.gz` into `/var/lib/avku-internal/data/elections` and copy `elections/workspace-area.geo.json` back beside it.
 4. Start the API again and run `pnpm check` from `apps/api`, or check `/api/health`.
 
 For Docker production, the host paths above are the source of truth because `/data` is a bind mount, not a Docker named volume.
@@ -405,7 +485,7 @@ exposed beyond the LAN/Cloudflare Access perimeter, add an authentication layer
 
 ## Partially Ready Modules
 
-- Elections: the map itself is real. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own survey card. The working area is a GeoJSON polygon (`workspaceArea.geo.json`) — the shipped one is still the placeholder circle until a boundary is traced with **Редагувати межу**; a boundary saved there applies at once and is persisted through `PUT /api/elections/area`, so it is the territory for everybody and for the dataset script (browser `localStorage` is only a cache). Survey data entered into those cards is still kept in browser `localStorage` under `avku-elections-details-v1`; there is no API persistence yet.
+- Elections: a full multi-user field-work module. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own card. **All campaign data lives in the API** (`<DATA_ROOT>/elections/elections.sqlite`): campaigns, houses, per-campaign house state, precincts, contact people, assignments, actions, issues, tasks, events, shifts, attachments, imports and a change journal. Clearing a browser's site data destroys nothing, and two people see the same card. The working area is a GeoJSON polygon (`workspaceArea.geo.json`) — the shipped one is still the placeholder circle until a boundary is traced with **Редагувати межу**; a boundary saved there applies at once and is persisted through `PUT /api/elections/area` (admin only), so it is the territory for everybody and for the dataset script (browser `localStorage` is only a cache). Data entered before the backend existed lived in `localStorage` under `avku-elections-details-v1`; the module detects it, offers an export, and imports it through the reviewed import pipeline — see [Elections: campaign data](#elections-campaign-data).
 - SMM: frontend prototype only. Data is kept in browser `localStorage` under `avku-smm-data-v1`; there is no API persistence yet.
 - Dashboard: uses static in-client data and export helpers; it is not connected to live aggregate API data yet.
 - Deploy automation: `infra/scripts/deploy.sh` exists but is empty. Current GitHub workflow is CI only.

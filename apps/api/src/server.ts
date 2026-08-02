@@ -6,11 +6,13 @@ import http, {
 import {
   createAccessAuthenticatorFromEnv,
   createCertificateRepository,
+  createElectionsRepository,
   createEmployeeRepository,
   createLogisticsRepository,
   createWarehouseRepository,
   createWorkspaceAreaRepository,
 } from "./config";
+import type { ElectionsRepository } from "./modules/elections/elections-records";
 import type { CertificateRepository } from "./modules/certificates/certificate-records";
 import type { WarehouseRepository } from "./modules/warehouse/warehouse-records";
 import type { LogisticsRepository } from "./modules/logistics/logistics-records";
@@ -93,9 +95,15 @@ async function dispatchRequest(
     await handleElectionsRequest(
       request,
       response,
-      repositories.workspaceAreaRepository,
+      {
+        elections: repositories.electionsRepository,
+        workspaceArea: repositories.workspaceAreaRepository,
+        employees: repositories.employeeRepository,
+        warehouse: repositories.warehouseRepository,
+      },
       pathname,
       employee,
+      url,
     );
     return;
   }
@@ -113,6 +121,7 @@ export interface CertificateApiRepositories {
   logisticsRepository: LogisticsRepository;
   employeeRepository: EmployeeRepository;
   workspaceAreaRepository: WorkspaceAreaRepository;
+  electionsRepository: ElectionsRepository;
 }
 
 export interface CertificateApiServerOptions {
@@ -135,6 +144,8 @@ export function createCertificateApiServer(
       repositories?.employeeRepository ?? createEmployeeRepository(),
     workspaceAreaRepository:
       repositories?.workspaceAreaRepository ?? createWorkspaceAreaRepository(),
+    electionsRepository:
+      repositories?.electionsRepository ?? createElectionsRepository(),
   };
   const authenticator =
     options?.authenticator ?? createAccessAuthenticatorFromEnv();

@@ -1,10 +1,11 @@
 /**
- * "Вибори" — interactive map of residential buildings around the campaign
- * address, with an editable survey card per house.
+ * "Вибори" — the field-work module: an interactive map of the campaign's
+ * buildings, with a working card behind each one.
  *
- * This file is the orchestrator only: it owns selection, filters and edit mode,
- * and wires them to the map, the results list and the details panel. All data
- * access lives in `features/elections`, all rendering in `./components`.
+ * This file is the orchestrator only: it owns selection, filters, edit mode and
+ * the two overlay panels (import, bulk assignment), and wires them to the map,
+ * the results list and the details panel. All data access lives in
+ * `features/elections`, all rendering in `./components`.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -13,17 +14,27 @@ import { useHousesData } from '../../features/elections/useHousesData.js';
 import { useAreaEditMode } from '../../features/elections/useWorkspaceEditor.js';
 import {
   DEFAULT_HOUSE_FILTERS,
+  campaignStateOf,
   filterHouses,
   formatHouses,
   hasActiveFilters as checkActiveFilters,
   summarizeHouses,
 } from '../../features/elections/houseUtils.js';
+import {
+  createImportBatch,
+  fetchPrecincts,
+  updateIssue,
+  updateTask,
+} from '../../features/elections/electionsApi.js';
 import ElectionsIcon from '../../features/elections/ElectionsIcon.jsx';
+import BulkAssignDialog from './components/BulkAssignDialog.jsx';
 import ElectionsHeader from './components/ElectionsHeader.jsx';
 import ElectionsToolbar from './components/ElectionsToolbar.jsx';
 import HouseDetailsPanel from './components/HouseDetailsPanel.jsx';
 import HouseMap from './components/HouseMap.jsx';
 import HouseResultsList from './components/HouseResultsList.jsx';
+import ImportPanel from './components/ImportPanel.jsx';
+import LegacyDataNotice from './components/LegacyDataNotice.jsx';
 import styles from './ElectionsPage.module.css';
 
 /** How long the "saved" confirmation stays visible. */
@@ -48,8 +59,15 @@ function ElectionsPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState('house');
   const [saveNotice, setSaveNotice] = useState('');
+  const [overlay, setOverlay] = useState(null);
+  const [precincts, setPrecincts] = useState([]);
+  /** Bumped after any write, so the open card tab reloads its records. */
+  const [refreshToken, setRefreshToken] = useState(0);
   /** Bumped whenever the map should move to a house it did not select itself. */
   const [focusRequest, setFocusRequest] = useState(null);
+
+  const role = data.viewer?.role ?? null;
+  const canManage = role === 'manager' || role === 'admin';
 
   const summary = useMemo(() => summarizeHouses(data.houses), [data.houses]);
 
@@ -68,7 +86,37 @@ function ElectionsPage() {
     [data.houses, selectedHouseId],
   );
 
+  /** Everybody who is responsible for at least one visible house. */
+  const assignees = useMemo(() => {
+    const emails = new Set();
+
+    for (const house of data.houses) {
+      for (const assignee of campaignStateOf(house).assignees) {
+        emails.add(assignee.email);
+      }
+    }
+
+    return [...emails].sort();
+  }, [data.houses]);
+
   const hasActiveFilters = checkActiveFilters(filters);
+
+  useEffect(() => {
+    if (!data.isBackend) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+
+    fetchPrecincts({ signal: controller.signal })
+      .then(setPrecincts)
+      .catch(() => {
+        // No precinct directory yet is a normal early state, not an error: the
+        // filter simply has nothing to offer until one is created.
+      });
+
+    return () => controller.abort();
+  }, [data.isBackend]);
 
   useEffect(() => {
     if (!saveNotice) {
@@ -127,12 +175,55 @@ function ElectionsPage() {
     }
   }
 
-  async function handleSave(details) {
-    const wasSaved = await data.saveDetails(selectedHouseId, details);
+  /** Runs a write and, when it lands, refreshes the open tab's records. */
+  async function afterWrite(saved, notice) {
+    if (saved) {
+      setRefreshToken((current) => current + 1);
+      setSaveNotice(notice);
+    }
 
-    if (wasSaved) {
+    return saved;
+  }
+
+  async function handleSaveAttributes(patch) {
+    const saved = await data.saveAttributes(selectedHouseId, patch);
+
+    if (saved) {
       setIsEditing(false);
-      setSaveNotice('Дані будинку збережено.');
+    }
+
+    return afterWrite(saved, 'Характеристики будинку збережено.');
+  }
+
+  async function handleSaveState(patch) {
+    const saved = await data.saveState(selectedHouseId, patch);
+
+    if (saved) {
+      setIsEditing(false);
+    }
+
+    return afterWrite(saved, 'Стан у кампанії збережено.');
+  }
+
+  async function handleCompleteTask(taskId) {
+    try {
+      await updateTask(taskId, { status: 'done' }, { campaignId: data.campaignId });
+      await data.refreshHouse(selectedHouseId);
+
+      return afterWrite(true, 'Задачу позначено виконаною.');
+    } catch {
+      return false;
+    }
+  }
+
+  async function handleResolveIssue(issueId) {
+    try {
+      await updateIssue(issueId, { status: 'resolved' }, { campaignId: data.campaignId });
+      await data.refreshHouse(selectedHouseId);
+
+      return afterWrite(true, 'Звернення позначено вирішеним.');
+    } catch {
+      return false;
     }
   }
 
@@ -143,14 +234,50 @@ function ElectionsPage() {
     <main className={styles.page}>
       <ElectionsHeader
         area={data.area}
+        campaign={data.campaign}
+        campaigns={data.campaigns}
         isAreaEditing={areaEdit.isActive}
         isLoading={data.isLoading}
-        onResetDemoData={data.resetDemoData}
+        onOpenBulkAssign={() => setOverlay('bulk')}
+        onOpenImport={() => setOverlay('import')}
+        onSelectCampaign={data.selectCampaign}
         onToggleAreaEditing={toggleAreaEditing}
         summary={summary}
+        viewer={data.viewer}
       />
 
+      {/* Work that only exists in this browser has to be rescued before
+          anything else — the banner stays until it has been dealt with. */}
+      <LegacyDataNotice
+        canImport={role === 'admin'}
+        onUpload={(document) =>
+          createImportBatch(
+            {
+              kind: 'legacy_local',
+              fileName: 'avku-elections-details-v1.json',
+              document,
+            },
+            { campaignId: data.campaignId },
+          )
+        }
+      />
+
+      {overlay === 'import' && (
+        <ImportPanel campaignId={data.campaignId} onClose={() => setOverlay(null)} />
+      )}
+
+      {overlay === 'bulk' && canManage && (
+        <BulkAssignDialog
+          campaignId={data.campaignId}
+          houses={filteredHouses}
+          knownAssignees={assignees}
+          onApplied={data.reload}
+          onClose={() => setOverlay(null)}
+        />
+      )}
+
       <ElectionsToolbar
+        assignees={assignees}
         filters={filters}
         hasActiveFilters={hasActiveFilters}
         houses={data.houses}
@@ -158,6 +285,7 @@ function ElectionsPage() {
         onFiltersChange={updateFilters}
         onResetFilters={resetFilters}
         onSelectHouse={(house) => selectAndFocusHouse(house.id)}
+        precincts={precincts}
         resultCount={filteredHouses.length}
         streets={data.streets}
         summary={summary}
@@ -165,9 +293,10 @@ function ElectionsPage() {
 
       <div className={styles.workspace} ref={workspaceRef}>
         <HouseMap
+          campaign={data.campaign}
+          canEditArea={role === 'admin'}
           coverage={data.coverage}
           error={data.error}
-          fillStatusFilter={filters.fillStatus}
           focusRequest={focusRequest}
           hasEmptyResult={isMapEmpty}
           hasMissingCoverage={data.hasMissingCoverage}
@@ -179,13 +308,14 @@ function ElectionsPage() {
           onDismissOsmRefresh={data.dismissOsmRefresh}
           onEnterAreaEditing={enterAreaEditing}
           onExitAreaEditing={areaEdit.exit}
-          onFillStatusChange={(fillStatus) => updateFilters({ fillStatus })}
           onRefreshFromOsm={data.refreshFromOsm}
           onResetFilters={resetFilters}
           onRetry={data.reload}
           onSelectHouse={selectHouse}
+          onStageChange={(stage) => updateFilters({ stage })}
           osmRefresh={data.osmRefresh}
           selectedHouse={selectedHouse}
+          stageFilter={filters.stage}
           status={data.status}
           summary={summary}
         />
@@ -222,6 +352,7 @@ function ElectionsPage() {
             role="tabpanel"
           >
             <HouseDetailsPanel
+              campaignId={data.campaignId}
               hasError={data.hasError}
               house={selectedHouse}
               isEditing={isEditing}
@@ -229,18 +360,48 @@ function ElectionsPage() {
               isSaving={
                 Boolean(selectedHouseId) && data.savingHouseId === selectedHouseId
               }
+              onAddAction={(payload) =>
+                data
+                  .addAction(selectedHouseId, payload)
+                  .then((saved) => afterWrite(saved, 'Дію записано.'))
+              }
+              onAddIssue={(payload) =>
+                data
+                  .addIssue(selectedHouseId, payload)
+                  .then((saved) => afterWrite(saved, 'Звернення створено.'))
+              }
+              onAddPerson={(payload) =>
+                data
+                  .addPerson(selectedHouseId, payload)
+                  .then((saved) => afterWrite(saved, 'Контактну особу додано.'))
+              }
+              onAddPhoto={(file) =>
+                data
+                  .addAttachment(selectedHouseId, file)
+                  .then((saved) => afterWrite(saved, 'Фото завантажено.'))
+              }
+              onAddTask={(payload) =>
+                data
+                  .addTask(selectedHouseId, payload)
+                  .then((saved) => afterWrite(saved, 'Задачу створено.'))
+              }
               onCancelEditing={() => {
                 setIsEditing(false);
                 data.dismissSaveError();
               }}
               onClose={() => selectHouse(null)}
-              onSave={handleSave}
+              onCompleteTask={handleCompleteTask}
+              onResolveIssue={handleResolveIssue}
+              onSaveAttributes={handleSaveAttributes}
+              onSaveState={handleSaveState}
               onStartEditing={() => {
                 setIsEditing(true);
                 setSaveNotice('');
               }}
+              refreshToken={refreshToken}
               saveError={data.saveError}
               saveNotice={saveNotice}
+              viewer={data.viewer}
             />
           </div>
 

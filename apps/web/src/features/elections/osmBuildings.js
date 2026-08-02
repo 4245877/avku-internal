@@ -25,11 +25,18 @@ import {
   ringCentroid,
   ringDimensions,
 } from './geo.js';
-import { createEmptyDetails } from './electionsTypes.js';
 import { abbreviateStreet } from './streetNames.js';
 
-/** The campaign office itself — OSM way for вулиця Зодчих, 58А. */
-export const HEADQUARTERS_OSM_ID = 'way/180170140';
+/**
+ * Fallback campaign office — the OSM way for вулиця Зодчих, 58А.
+ *
+ * The headquarters is a property of a campaign (`campaigns.hq_house_id`), not
+ * of the district, and the map marks it from there. This constant is only the
+ * answer for a dataset with no campaign behind it at all: the offline snapshot
+ * source and the CLI that regenerates it. Nothing in the working UI reads it
+ * when a campaign is loaded.
+ */
+export const DEFAULT_HEADQUARTERS_OSM_ID = 'way/180170140';
 
 /**
  * `building=*` → the house type shown in the card and the filter. Values that
@@ -303,8 +310,35 @@ export function buildOverpassQuery({
 out body geom;`;
 }
 
+/**
+ * Geometry estimate for an already-normalised house record.
+ *
+ * Exported because estimates are **computed, never stored**: the API keeps only
+ * confirmed counts, so the client derives the "оціночно" numbers from the
+ * footprint it already has. That way an estimate cannot age into something
+ * indistinguishable from a measurement.
+ */
+export function computeHouseEstimate(house) {
+  const footprint = house?.footprint ?? [];
+
+  if (footprint.length < 3) {
+    return { entrances: null, apartments: null, residents: null };
+  }
+
+  const areaSqm = Number.isFinite(house.footprintAreaSqm)
+    ? house.footprintAreaSqm
+    : ringAreaSquareMeters(footprint);
+
+  return estimateFromGeometry({
+    areaSqm,
+    dimensions: ringDimensions(footprint),
+    levels: Number.isFinite(house.floors) ? house.floors : null,
+    houseType: house.type,
+  });
+}
+
 /** One Overpass element → a house record, or `null` if it is not a house. */
-function normalizeElement(element, { center, box, requireAddress }) {
+function normalizeElement(element, { center, box, requireAddress, headquartersOsmId }) {
   const tags = element.tags ?? {};
 
   if (!tags.building || IGNORED_BUILDING_VALUES.has(tags.building)) {
@@ -374,8 +408,7 @@ function normalizeElement(element, { center, box, requireAddress }) {
       levels,
       houseType,
     }),
-    isHeadquarters: id === HEADQUARTERS_OSM_ID,
-    details: createEmptyDetails(),
+    isHeadquarters: Boolean(headquartersOsmId) && id === headquartersOsmId,
   };
 }
 
@@ -391,13 +424,24 @@ export function normalizeOsmBuildings(
     center = AREA_CENTER,
     radiusMeters = AREA_RADIUS_METERS,
     requireAddress = true,
+    /**
+     * Which OSM object is the campaign office, when there is no campaign to ask.
+     * The working UI passes nothing and marks the headquarters from
+     * `campaigns.hq_house_id` instead.
+     */
+    headquartersOsmId = DEFAULT_HEADQUARTERS_OSM_ID,
   } = {},
 ) {
   const bounds = resolveAcquisitionBox({ box, center, radiusMeters });
   const housesById = new Map();
 
   for (const element of elements ?? []) {
-    const house = normalizeElement(element, { center, box: bounds, requireAddress });
+    const house = normalizeElement(element, {
+      center,
+      box: bounds,
+      requireAddress,
+      headquartersOsmId,
+    });
 
     if (house && !housesById.has(house.id)) {
       housesById.set(house.id, house);

@@ -33,12 +33,27 @@
   --map-label-strong: #2f4a5f;
   --map-label-halo: rgba(255, 255, 255, 0.9);
 
-  --house-empty-fill: #cfdeeb;
-  --house-empty-line: #93aec3;
-  --house-partial-fill: #f6ddb4;
-  --house-partial-line: #c9862a;
-  --house-complete-fill: #b6e1cf;
-  --house-complete-line: #34926c;
+  /* One colour per work stage — the only thing a building's colour encodes.
+     Urgency, ownership and data freshness are separate signals below. */
+  --stage-not-started-fill: #cfdeeb;
+  --stage-not-started-line: #93aec3;
+  --stage-contact-setup-fill: #c9dcf4;
+  --stage-contact-setup-line: #4a7fb5;
+  --stage-in-progress-fill: #f6ddb4;
+  --stage-in-progress-line: #c9862a;
+  --stage-revisit-needed-fill: #e6d4f2;
+  --stage-revisit-needed-line: #8a5cb8;
+  --stage-done-fill: #b6e1cf;
+  --stage-done-line: #34926c;
+  --stage-blocked-fill: #f2c9cd;
+  --stage-blocked-line: #b5474f;
+  --stage-not-applicable-fill: #e4e4e4;
+  --stage-not-applicable-line: #a8a8a8;
+
+  --house-urgent-line: #c0392b;
+  --house-unassigned-line: #7a6ea8;
+  --house-badge-overdue: #c0392b;
+  --house-badge-issue: #c9862a;
   --house-hover-line: var(--ice-deep);
   --house-selected-line: var(--ice-deep);
   --house-selected-glow: rgba(44, 95, 138, 0.55);
@@ -105,12 +120,25 @@
   --map-label-strong: #cfe3f2;
   --map-label-halo: rgba(9, 17, 27, 0.85);
 
-  --house-empty-fill: #2a3f57;
-  --house-empty-line: #4a6a86;
-  --house-partial-fill: #6a5330;
-  --house-partial-line: #e4a84a;
-  --house-complete-fill: #23543f;
-  --house-complete-line: #62c99a;
+  --stage-not-started-fill: #2a3f57;
+  --stage-not-started-line: #4a6a86;
+  --stage-contact-setup-fill: #24405f;
+  --stage-contact-setup-line: #6ba4dc;
+  --stage-in-progress-fill: #6a5330;
+  --stage-in-progress-line: #e4a84a;
+  --stage-revisit-needed-fill: #45305c;
+  --stage-revisit-needed-line: #b78ce0;
+  --stage-done-fill: #23543f;
+  --stage-done-line: #62c99a;
+  --stage-blocked-fill: #5c2a2f;
+  --stage-blocked-line: #e0757f;
+  --stage-not-applicable-fill: #333a42;
+  --stage-not-applicable-line: #7d868f;
+
+  --house-urgent-line: #e0756a;
+  --house-unassigned-line: #a99ce0;
+  --house-badge-overdue: #e0756a;
+  --house-badge-issue: #e4a84a;
   --house-hover-line: var(--ice-whisper);
   --house-selected-line: var(--ice-whisper);
   --house-selected-glow: rgba(168, 221, 247, 0.5);
@@ -801,19 +829,41 @@
   border-radius: 3px;
 }
 
-.swatchComplete {
-  background: var(--house-complete-fill);
-  border-color: var(--house-complete-line);
+/* Driven by `data-stage`, so the list, the search suggestions and the legend
+   all read the same variables the canvas renderer does. */
+.swatch[data-stage='not_started'] {
+  background: var(--stage-not-started-fill);
+  border-color: var(--stage-not-started-line);
 }
 
-.swatchPartial {
-  background: var(--house-partial-fill);
-  border-color: var(--house-partial-line);
+.swatch[data-stage='contact_setup'] {
+  background: var(--stage-contact-setup-fill);
+  border-color: var(--stage-contact-setup-line);
 }
 
-.swatchEmpty {
-  background: var(--house-empty-fill);
-  border-color: var(--house-empty-line);
+.swatch[data-stage='in_progress'] {
+  background: var(--stage-in-progress-fill);
+  border-color: var(--stage-in-progress-line);
+}
+
+.swatch[data-stage='revisit_needed'] {
+  background: var(--stage-revisit-needed-fill);
+  border-color: var(--stage-revisit-needed-line);
+}
+
+.swatch[data-stage='done'] {
+  background: var(--stage-done-fill);
+  border-color: var(--stage-done-line);
+}
+
+.swatch[data-stage='blocked'] {
+  background: var(--stage-blocked-fill);
+  border-color: var(--stage-blocked-line);
+}
+
+.swatch[data-stage='not_applicable'] {
+  background: var(--stage-not-applicable-fill);
+  border-color: var(--stage-not-applicable-line);
 }
 
 .swatchAnchor {
@@ -2386,64 +2436,13 @@
   gap: var(--space-5);
 }
 
-.completeness {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
 
-  padding: var(--space-4);
 
-  background: var(--panel-inset);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
-}
 
-.completenessTop {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  justify-content: space-between;
-}
 
-.completenessCount {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: var(--color-text-muted);
-}
 
-.completenessTrack {
-  overflow: hidden;
 
-  height: 6px;
 
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-full);
-}
-
-.completenessFill {
-  display: block;
-  height: 100%;
-
-  background: var(--house-empty-line);
-  border-radius: var(--radius-full);
-
-  transition: width var(--duration-slow) var(--ease-out);
-}
-
-.completenessFill[data-status='partial'] {
-  background: linear-gradient(90deg, var(--house-partial-line), #e0a94f);
-}
-
-.completenessFill[data-status='complete'] {
-  background: linear-gradient(90deg, var(--house-complete-line), #52b489);
-}
-
-.completenessMissing {
-  margin: 0;
-
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
 
 .badge {
   display: inline-flex;
@@ -2647,88 +2646,21 @@
   border-radius: var(--radius-md);
 }
 
-.stanceRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
 
-.residentList,
-.contactList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
 
-.residentCard {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
 
-  padding: var(--space-3) var(--space-4);
 
-  background: var(--panel-surface-solid);
-  border: 1px solid var(--color-border-light);
-  border-left: 3px solid var(--color-border-medium);
-  border-radius: var(--radius-md);
-
-  transition: border-color var(--duration-base) var(--ease-out);
-}
-
-.residentCard:hover {
-  border-left-color: var(--ice-deep);
-}
-
-.residentTop {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: baseline;
-  justify-content: space-between;
-}
 
 .residentTop strong {
   font-size: var(--text-sm);
 }
 
-.residentApartment {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: var(--color-text-muted);
-}
 
-.residentMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
 
-  font-size: var(--text-2xs);
-  color: var(--color-text-muted);
-}
 
-.residentStance {
-  font-weight: var(--weight-medium);
-}
 
-.residentStance[data-stance='support'] {
-  color: var(--color-success-strong);
-}
 
-.residentStance[data-stance='against'] {
-  color: var(--color-danger);
-}
 
-.residentStance[data-stance='neutral'] {
-  color: var(--color-text-accent);
-}
-
-.residentNote {
-  margin: 0;
-
-  font-size: var(--text-xs);
-  font-style: italic;
-  color: var(--color-text-secondary);
-}
 
 .contactRow {
   display: flex;
@@ -3223,32 +3155,40 @@ a.contactValue:hover {
   white-space: nowrap;
 }
 
-.houseRowProgress {
-  overflow: hidden;
-
-  height: 3px;
+.houseRowFlags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   margin-top: 3px;
+}
 
+.houseRowFlags em {
+  padding: 0 6px;
+
+  font-size: var(--text-2xs);
+  font-style: normal;
+
+  border-radius: var(--radius-full);
+}
+
+.flagDanger {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.flagWarning {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.flagAccent {
+  color: var(--house-unassigned-line);
+  background: color-mix(in srgb, var(--house-unassigned-line) 14%, transparent);
+}
+
+.flagMuted {
+  color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
-  border-radius: var(--radius-full);
-}
-
-.houseRowProgressFill {
-  display: block;
-  height: 100%;
-
-  background: var(--house-empty-line);
-  border-radius: var(--radius-full);
-
-  transition: width var(--duration-base) var(--ease-out);
-}
-
-.houseRowProgressFill[data-status='partial'] {
-  background: var(--house-partial-line);
-}
-
-.houseRowProgressFill[data-status='complete'] {
-  background: var(--house-complete-line);
 }
 
 .houseRowSide {
@@ -3867,7 +3807,7 @@ a.contactValue:hover {
   .chip:not(:disabled):hover,
   .primaryButton:not(:disabled):hover,
   .ghostButton:not(:disabled):hover,
-  .residentCard:hover {
+  .personCard:hover {
     transform: none;
   }
 
@@ -3906,5 +3846,974 @@ a.contactValue:hover {
   .primaryButton:not(:disabled):hover,
   .ghostButton:not(:disabled):hover {
     transform: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   FIELD-WORK MODULE
+   Styles for the campaign card: quick actions, the seven tabs, the
+   separate map signals, and the import / bulk / legacy panels.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── MAP SIGNALS ───────────────────────────────────────────────
+   Each signal uses a different visual channel from the stage colour,
+   so a house can carry several at once and still be readable. */
+:global(.elections-house-badge) span {
+  position: absolute;
+  top: -14px;
+  left: 4px;
+
+  display: block;
+
+  width: 9px;
+  height: 9px;
+
+  border: 1.5px solid var(--color-bg-primary);
+  border-radius: var(--radius-full);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+}
+
+:global(.elections-house-badge) span[data-tone='overdue'] {
+  background: var(--house-badge-overdue);
+}
+
+:global(.elections-house-badge) span[data-tone='issue'] {
+  background: var(--house-badge-issue);
+}
+
+.mapSignalList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  margin: 0 0 6px;
+  padding: 0;
+
+  list-style: none;
+}
+
+/* The label and its "how it looks" hint sit on two lines: side by side they
+   competed for a narrow overlay and both ended up ellipsised, which is the one
+   thing a legend must not do. */
+.mapSignalList li {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 2px 6px;
+  align-items: start;
+
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+}
+
+.mapSignalList .mapLegendLabel {
+  overflow: visible;
+  white-space: normal;
+}
+
+.mapSignalList small {
+  grid-column: 2;
+
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
+.signalMark {
+  grid-row: 1;
+  flex-shrink: 0;
+
+  margin-top: 1px;
+
+  width: 12px;
+  height: 12px;
+
+  border: 1.5px solid var(--color-text-muted);
+  border-radius: 3px;
+}
+
+.signalMark[data-signal='urgent'] {
+  border: 3px solid var(--house-urgent-line);
+}
+
+.signalMark[data-signal='unassigned'] {
+  border: 1.5px dashed var(--house-unassigned-line);
+}
+
+.signalMark[data-signal='stale'] {
+  background: var(--stage-in-progress-fill);
+  border-color: var(--stage-in-progress-line);
+  opacity: 0.45;
+}
+
+.signalMark[data-signal='overdue'] {
+  background: var(--house-badge-overdue);
+  border-color: var(--house-badge-overdue);
+  border-radius: var(--radius-full);
+}
+
+/* ── MAP PREVIEW SHEET (long press) ────────────────────────────
+   The touch equivalent of the hover tooltip. Anchored to the bottom so
+   it never lands under the finger that summoned it. */
+.mapPreviewSheet {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  z-index: 620;
+
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+
+  padding: 10px 12px;
+
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.mapPreviewBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  text-align: left;
+
+  background: transparent;
+  border: 0;
+}
+
+.mapPreviewBody strong {
+  font-size: var(--text-sm);
+}
+
+.mapPreviewClose {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+
+  width: 30px;
+  height: 30px;
+
+  color: var(--color-text-muted);
+
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-full);
+}
+
+.mapTooltipMeta {
+  color: var(--color-text-muted);
+}
+
+/* ── CAMPAIGN BAR ──────────────────────────────────────────────── */
+.campaignBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+
+  margin: 0 0 10px;
+}
+
+.viewerBadge {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+
+  padding: 3px 9px;
+
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+/* ── PANEL HEADER FACTS ────────────────────────────────────────
+   The eight questions the card must answer before a tab is opened. */
+.panelFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px 12px;
+
+  margin: 10px 0 0;
+}
+
+.panelFacts div {
+  display: flex;
+  flex-direction: column;
+}
+
+.panelFacts dt {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
+.panelFacts dd {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+}
+
+.panelWarnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+
+  margin: 10px 0 0;
+  padding: 0;
+
+  list-style: none;
+}
+
+.panelError {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+
+  margin: 0;
+  padding: 8px 14px;
+
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+
+  background: var(--color-danger-bg);
+}
+
+/* ── QUICK ACTIONS ─────────────────────────────────────────────
+   The field path: one row of large targets, each opening a two-field
+   form. Sized for a thumb from the start, not only under a media query. */
+.quickActions {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.quickActionRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+  gap: 6px;
+}
+
+.quickActionButton {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 52px;
+  padding: 6px 4px;
+
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+
+  background: var(--color-bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+
+  transition: var(--transition-fast);
+}
+
+.quickActionButton:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.quickActionButtonActive {
+  color: var(--ice-deep);
+  background: var(--color-info-bg);
+  border-color: var(--ice-deep);
+}
+
+.quickActionsLocked {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+
+  margin: 0;
+  padding: 10px 14px;
+
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.quickForm {
+  margin-top: 10px;
+  padding: 10px;
+
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.quickFormBody {
+  display: block;
+}
+
+.quickFormHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  margin-bottom: 8px;
+
+  font-size: var(--text-sm);
+}
+
+.quickFormActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+
+  margin-top: 10px;
+}
+
+/* The four doorstep outcomes, one tap each — this is what makes a visit
+   result a three-tap operation rather than a form. */
+.quickResultRow {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+
+  margin-bottom: 10px;
+}
+
+.quickResultButton {
+  min-height: 46px;
+  padding: 8px;
+
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.quickResultButtonActive {
+  color: var(--ice-deep);
+  background: var(--color-info-bg);
+  border-color: var(--ice-deep);
+}
+
+/* ── HOUSE TABS ────────────────────────────────────────────────── */
+.houseTabs {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.houseTabList {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+
+  padding: 8px 14px 0;
+
+  border-bottom: 1px solid var(--color-border-subtle);
+  scrollbar-width: none;
+}
+
+.houseTabList::-webkit-scrollbar {
+  display: none;
+}
+
+.houseTab {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+
+  min-height: 40px;
+  padding: 6px 10px;
+
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+}
+
+.houseTabActive {
+  color: var(--color-text-primary);
+  border-bottom-color: var(--ice-deep);
+}
+
+.houseTabCount {
+  padding: 0 5px;
+
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+.houseTabPanel {
+  min-height: 0;
+  padding: 12px 14px 16px;
+}
+
+.tabBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tabNotice,
+.tabError {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+
+  margin: 0;
+  padding: 8px 10px;
+
+  font-size: var(--text-xs);
+
+  border-radius: var(--radius-md);
+}
+
+.tabNotice {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+}
+
+.tabError {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+/* ── PEOPLE ────────────────────────────────────────────────────
+   Name, working role, how to reach them. Nothing else — there is no
+   position, no age band and no rating to render. */
+.personList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  margin: 0;
+  padding: 0;
+
+  list-style: none;
+}
+
+.personCard {
+  padding: 10px;
+
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.personTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+
+  margin-bottom: 4px;
+}
+
+.personMeta,
+.personNote {
+  margin: 4px 0 0;
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
+/* ── TIMELINE (actions, history) ───────────────────────────────── */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  margin: 0;
+  padding: 0;
+
+  list-style: none;
+}
+
+.timelineRow {
+  display: flex;
+  gap: 8px;
+}
+
+.timelineIcon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+
+  width: 26px;
+  height: 26px;
+
+  color: var(--color-text-muted);
+
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+.timelineBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.timelineTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.timelineMeta {
+  display: block;
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
+.timelineText,
+.timelineNext {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.timelineNext {
+  color: var(--color-warning);
+}
+
+.historyOld {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.historyNew {
+  color: var(--color-text-primary);
+}
+
+/* ── RECORD LISTS (issues, tasks, files) ───────────────────────── */
+.recordList,
+.fileList,
+.qualityList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  margin: 0;
+  padding: 0;
+
+  list-style: none;
+}
+
+.qualityList {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.recordRow {
+  padding: 10px;
+
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.recordRowOverdue {
+  border-left-color: var(--house-badge-overdue);
+}
+
+.recordTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.recordMeta {
+  display: block;
+  margin-top: 3px;
+
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
+.recordText {
+  margin: 6px 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.fileRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  padding: 8px 10px;
+
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.fileRow a {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+
+  font-size: var(--text-xs);
+  color: var(--ice-deep);
+}
+
+.fileRow small {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
+.linkButton {
+  margin-top: 6px;
+  padding: 0;
+
+  font-size: var(--text-2xs);
+  color: var(--ice-deep);
+
+  background: transparent;
+  border: 0;
+}
+
+.dangerButton {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+
+  min-height: 40px;
+  padding: 8px 14px;
+
+  font-size: var(--text-xs);
+  color: #fff;
+
+  background: var(--color-danger);
+  border: 0;
+  border-radius: var(--radius-md);
+}
+
+.badgeAccent {
+  color: var(--house-unassigned-line);
+  background: color-mix(in srgb, var(--house-unassigned-line) 14%, transparent);
+}
+
+.formSectionHint {
+  margin: -4px 0 8px;
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
+.checkboxField {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+
+  margin-top: 10px;
+
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.checkboxField input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+
+/* ── LEGACY DATA RESCUE ────────────────────────────────────────── */
+.legacyNotice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+
+  margin-bottom: var(--space-4);
+  padding: 14px 16px;
+
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-lg);
+}
+
+.legacyNoticeMain {
+  flex: 1 1 320px;
+}
+
+.legacyNoticeMain h2 {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+
+  margin: 0 0 6px;
+
+  font-size: var(--text-sm);
+}
+
+.legacyNoticeMain p {
+  margin: 0 0 6px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.legacyNoticeHint {
+  color: var(--color-text-muted);
+}
+
+.legacyNoticeOk {
+  font-size: var(--text-xs);
+  color: var(--color-success);
+}
+
+.legacyNoticeError {
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+
+.legacyNoticeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── IMPORT AND BULK PANELS ────────────────────────────────────── */
+.importPanel,
+.bulkDialog {
+  margin-bottom: var(--space-4);
+  padding: 16px;
+
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.importHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  margin-bottom: 12px;
+}
+
+.importHeader h2 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+
+  margin: 0;
+
+  font-size: var(--text-base);
+}
+
+.importUpload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+
+  margin-bottom: 12px;
+}
+
+.importSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+
+  margin: 0 0 12px;
+  padding: 10px;
+
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.importSummary dt {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
+.importSummary dd {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.importUnmatched {
+  margin-bottom: 12px;
+  padding: 10px;
+
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-md);
+}
+
+.importUnmatched h3 {
+  margin: 0 0 6px;
+  font-size: var(--text-xs);
+}
+
+.importUnmatched ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--text-2xs);
+}
+
+.importActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+
+  margin-bottom: 12px;
+}
+
+.importRows {
+  overflow-x: auto;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.importRows table {
+  width: 100%;
+  font-size: var(--text-2xs);
+  border-collapse: collapse;
+}
+
+.importRows th,
+.importRows td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.importRows td strong {
+  display: block;
+  font-size: var(--text-xs);
+}
+
+.importRows td small {
+  color: var(--color-text-muted);
+}
+
+.importRowReview {
+  background: var(--color-warning-bg);
+}
+
+.importNotes {
+  margin: 0;
+  padding-left: 14px;
+  color: var(--color-text-muted);
+}
+
+.bulkSummary {
+  margin: 0 0 12px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.bulkPreview {
+  max-height: 220px;
+  margin-bottom: 12px;
+  overflow-y: auto;
+
+  padding: 10px;
+
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.bulkPreview h3 {
+  margin: 0 0 6px;
+  font-size: var(--text-xs);
+}
+
+.bulkPreview ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--text-2xs);
+}
+
+/* ── FIELD USE ON A PHONE ──────────────────────────────────────
+   The target is a visit result in ~30 seconds without a keyboard, so the
+   quick actions get bigger rather than smaller on a narrow screen, and
+   the preview sheet keeps clear of the on-screen keyboard. */
+@media (max-width: 760px) {
+  .quickActionRow {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .quickActionButton {
+    min-height: 60px;
+    font-size: var(--text-2xs);
+  }
+
+  .quickResultRow {
+    grid-template-columns: 1fr;
+  }
+
+  .quickResultButton {
+    min-height: 52px;
+    font-size: var(--text-sm);
+  }
+
+  .houseTabList {
+    padding: 6px 10px 0;
+  }
+
+  .houseTab {
+    min-height: 44px;
+    padding: 6px 8px;
+  }
+
+  .panelFacts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .legacyNotice,
+  .importPanel,
+  .bulkDialog {
+    padding: 12px;
+  }
+
+  .importRows {
+    max-height: 320px;
+  }
+}
+
+@media (pointer: coarse) {
+  /* Anything tappable clears the 44 px guideline, including the small
+     controls inside record rows. */
+  .quickActionButton,
+  .quickResultButton,
+  .houseTab,
+  .mapPreviewClose,
+  .linkButton,
+  .dangerButton {
+    min-height: 44px;
+  }
+
+  .linkButton {
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+/* The sheet sits above the on-screen keyboard rather than under it. */
+@supports (bottom: env(safe-area-inset-bottom)) {
+  .mapPreviewSheet {
+    bottom: calc(12px + env(safe-area-inset-bottom));
   }
 }

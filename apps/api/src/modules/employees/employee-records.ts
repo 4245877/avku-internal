@@ -23,6 +23,12 @@ export interface Employee {
   email: string;
   name: string | null;
   firstSeen: string;
+  /**
+   * Role in the "Вибори" module: `agitator` | `coordinator` | `manager` |
+   * `admin`, or `null` for an employee nobody has granted anything to yet.
+   * `null` means read-only — it is deliberately not a synonym for "trusted".
+   */
+  role: string | null;
 }
 
 function normalizeEmail(value: string): string {
@@ -89,7 +95,7 @@ export class EmployeeRepository {
   async list(): Promise<Employee[]> {
     const database = await this.getDatabase();
     const rows = database.prepare(`
-      SELECT email, name, first_seen
+      SELECT email, name, first_seen, role
       FROM employees
       ORDER BY last_seen DESC
     `).all() as Record<string, unknown>[];
@@ -97,12 +103,44 @@ export class EmployeeRepository {
     return rows.map(rowToEmployee);
   }
 
+  /**
+   * Grants or clears an employee's elections role.
+   *
+   * The caller is responsible for checking that whoever is asking is an admin;
+   * this only writes. Passing `null` revokes, which is how somebody who leaves
+   * the field team stops being able to write without losing their history.
+   */
+  async setRole(
+    email: string,
+    role: string | null,
+  ): Promise<Employee> {
+    const database = await this.getDatabase();
+    const normalizedEmail = normalizeEmail(email);
+    const result = database.prepare(`
+      UPDATE employees SET role = ? WHERE email = ?
+    `).run(
+      role,
+      normalizedEmail,
+    );
+
+    if (Number(result.changes ?? 0) === 0) {
+      // Roles are granted to people the Access allowlist has already admitted,
+      // so an unknown address is a typo rather than a new hire.
+      throw new Error("Співробітника не знайдено.");
+    }
+
+    return this.findByEmail(
+      database,
+      normalizedEmail,
+    );
+  }
+
   private findByEmail(
     database: DatabaseSync,
     email: string,
   ): Employee {
     const row = database.prepare(`
-      SELECT email, name, first_seen
+      SELECT email, name, first_seen, role
       FROM employees
       WHERE email = ?
     `).get(email) as Record<string, unknown> | undefined;
@@ -142,9 +180,20 @@ export class EmployeeRepository {
 
       CREATE INDEX IF NOT EXISTS idx_employees_last_seen
         ON employees(last_seen DESC);
-
-      PRAGMA user_version = 1;
     `);
+
+    // v2: the elections module needs roles, and this table was always the
+    // intended home for them. Added rather than recreated so existing rows and
+    // their `first_seen` history survive; the guard makes the step idempotent.
+    const columns = database.prepare(
+      "PRAGMA table_info(employees)",
+    ).all() as Record<string, unknown>[];
+
+    if (!columns.some((column) => String(column.name) === "role")) {
+      database.exec("ALTER TABLE employees ADD COLUMN role TEXT");
+    }
+
+    database.exec("PRAGMA user_version = 2;");
   }
 }
 
@@ -153,5 +202,6 @@ function rowToEmployee(row: Record<string, unknown>): Employee {
     email: String(row.email),
     name: row.name == null ? null : String(row.name),
     firstSeen: String(row.first_seen),
+    role: row.role == null ? null : String(row.role),
   };
 }

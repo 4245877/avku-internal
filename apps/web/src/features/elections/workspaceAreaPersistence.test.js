@@ -332,6 +332,16 @@ describe('the acquisition box follows the boundary', () => {
   });
 
   it('moves with the boundary instead of staying centred on the office', async () => {
+    /*
+     * Measured against a small district of our own rather than against the
+     * shipped boundary. The shipped polygon is several kilometres wide, so
+     * "4 km east of the office" is still inside it — comparing against it would
+     * make this test a statement about the size of a data file rather than
+     * about the acquisition box, and it would change meaning every time the
+     * territory was re-traced.
+     */
+    await saveWorkspaceArea(toWorkspaceFeature(district({ half: 300 })));
+
     const before = workspaceBoundingBox();
 
     await saveWorkspaceArea(toWorkspaceFeature(district({ east: 4000, half: 300 })));
@@ -343,9 +353,8 @@ describe('the acquisition box follows the boundary', () => {
     expect(after.minLon).toBeGreaterThan(before.maxLon - 0.001);
     expect(after.minLon).toBeGreaterThan(AREA_CENTER.lon);
 
-    const widthDegrees = after.maxLon - after.minLon;
-
-    expect(widthDegrees).toBeLessThan(before.maxLon - before.minLon);
+    // …and it moves rather than growing: same district, same width.
+    expect(after.maxLon - after.minLon).toBeCloseTo(before.maxLon - before.minLon, 4);
   });
 
   it('shrinks when the boundary shrinks', async () => {
@@ -367,6 +376,11 @@ describe('re-cutting the dataset after a boundary change', () => {
       { id: 'near-office', footprint: footprintAt({ x: 0, y: 0 }) },
       { id: 'east', footprint: footprintAt({ x: 3800, y: 0 }) },
     ];
+
+    // A small district around the office, so which houses fall inside is a
+    // property of the polygon under test and not of the shipped territory —
+    // which is wide enough to contain both of these buildings.
+    await saveWorkspaceArea(toWorkspaceFeature(district({ half: 300 })));
 
     expect(filterHousesToWorkspace(houses).map((house) => house.id)).toEqual([
       'near-office',

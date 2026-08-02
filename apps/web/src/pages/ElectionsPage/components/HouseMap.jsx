@@ -30,14 +30,9 @@ import { useHouseLayer } from '../../../features/elections/useHouseLayer.js';
 import { useLeafletMap } from '../../../features/elections/useLeafletMap.js';
 import { useWorkspaceArea } from '../../../features/elections/useWorkspaceArea.js';
 import { useWorkspaceEditor } from '../../../features/elections/useWorkspaceEditor.js';
-import {
-  formatApartments,
-  getFillStatus,
-  resolveApartments,
-} from '../../../features/elections/houseUtils.js';
-import { fillStatusesById } from '../../../features/elections/electionsTypes.js';
 import { AREA_CENTER } from '../../../features/elections/geo.js';
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
+import HouseTooltip from './HouseTooltip.jsx';
 import MapBasemapSwitcher from './MapBasemapSwitcher.jsx';
 import MapControls from './MapControls.jsx';
 import MapLegend from './MapLegend.jsx';
@@ -93,8 +88,8 @@ function HouseMap({
   status,
   error,
   onRetry,
-  fillStatusFilter,
-  onFillStatusChange,
+  stageFilter,
+  onStageChange,
   onResetFilters,
   hasEmptyResult,
   coverage,
@@ -107,12 +102,16 @@ function HouseMap({
   isAreaEditing,
   onEnterAreaEditing,
   onExitAreaEditing,
+  campaign,
+  canEditArea,
 }) {
   /* Read once, before the first paint: the map must open on the mode the user
    * left it in, not switch under them a frame later. */
   const [mapModeId, setMapModeId] = useState(() => readStoredMapMode() ?? DEFAULT_MAP_MODE_ID);
   const [hoveredHouseId, setHoveredHouseId] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState(null);
+  /** The house a long press asked about — the touch equivalent of hovering. */
+  const [previewHouseId, setPreviewHouseId] = useState(null);
   const [areaNotice, setAreaNotice] = useState(null);
   /* Whether the map has ever finished a load — the full-surface skeleton is
    * only honest before there is any cartography underneath it. */
@@ -216,6 +215,7 @@ function HouseMap({
     isSelectionEnabled: !isAreaEditing,
     onSelectHouse: handleSelectHouse,
     onHoverHouse: handleHoverHouse,
+    onLongPressHouse: setPreviewHouseId,
   });
 
   /* While a building is hovered the tooltip follows the cursor across it; its
@@ -261,6 +261,7 @@ function HouseMap({
   );
 
   const hoveredHouse = hoveredHouseId ? (housesById.get(hoveredHouseId) ?? null) : null;
+  const previewHouse = previewHouseId ? (housesById.get(previewHouseId) ?? null) : null;
 
   const isTooltipBelow =
     tooltipPosition !== null && tooltipPosition.y < TOOLTIP_FLIP_THRESHOLD_PIXELS;
@@ -296,11 +297,35 @@ function HouseMap({
               .join(' ')}
             style={{ left: `${tooltipPosition.x}px`, top: `${tooltipPosition.y}px` }}
           >
-            <strong>{hoveredHouse.address}</strong>
-            <span>{formatApartments(resolveApartments(hoveredHouse).value)}</span>
-            <span className={styles.mapTooltipStatus}>
-              {fillStatusesById[getFillStatus(hoveredHouse)].label}
-            </span>
+            <HouseTooltip house={hoveredHouse} />
+          </div>
+        )}
+
+        {/* Touch devices never fire `mouseover`, so before this a phone had no
+            preview at all — a tap went straight to the full card. A long press
+            shows the same five lines as a sheet, and a tap on it opens the card,
+            so the gesture adds a step rather than replacing one. */}
+        {previewHouse && (
+          <div className={styles.mapPreviewSheet} role="dialog" aria-label="Довідка про будинок">
+            <button
+              className={styles.mapPreviewBody}
+              onClick={() => {
+                onSelectHouse(previewHouse.id);
+                setPreviewHouseId(null);
+              }}
+              type="button"
+            >
+              <HouseTooltip house={previewHouse} />
+            </button>
+
+            <button
+              aria-label="Закрити довідку"
+              className={styles.mapPreviewClose}
+              onClick={() => setPreviewHouseId(null)}
+              type="button"
+            >
+              <ElectionsIcon name="close" size={16} />
+            </button>
           </div>
         )}
 
@@ -354,8 +379,9 @@ function HouseMap({
             is being traced, and the editor needs the corner it sits in. */}
         {!isAreaEditing && (
           <MapLegend
-            activeStatus={fillStatusFilter}
-            onStatusChange={onFillStatusChange}
+            activeStage={stageFilter}
+            headquartersLabel={campaign?.hqAddress || AREA_CENTER.address}
+            onStageChange={onStageChange}
             summary={summary}
           />
         )}
@@ -391,7 +417,7 @@ function HouseMap({
           )}
 
         {status === 'ready' && tileStatus !== 'error' && !isAreaEditing && isAreaEmpty && (
-          <MapEmptyAreaState onEditArea={onEnterAreaEditing} />
+          <MapEmptyAreaState onEditArea={canEditArea ? onEnterAreaEditing : undefined} />
         )}
 
         {/* One banner owns the top-left corner at a time, and a missing dataset

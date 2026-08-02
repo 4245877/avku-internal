@@ -9,9 +9,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
-import { fillStatusesById } from '../../../features/elections/electionsTypes.js';
 import { formatDistance } from '../../../features/elections/geo.js';
-import { getFillStatus, searchHouses } from '../../../features/elections/houseUtils.js';
+import { getStage, searchHouses } from '../../../features/elections/houseUtils.js';
 import styles from '../ElectionsPage.module.css';
 
 const SUGGESTION_LIMIT = 7;
@@ -22,15 +21,9 @@ const SUGGESTION_LIMIT = 7;
  * the browser cuts it mid-word, so a narrow screen gets the short form instead
  * of a truncated long one.
  */
-const PLACEHOLDER = 'Пошук за адресою — наприклад, Коласа 6';
-const PLACEHOLDER_NARROW = 'Пошук за адресою';
+const PLACEHOLDER = 'Адреса, телефон, контакт або відповідальний';
+const PLACEHOLDER_NARROW = 'Адреса, телефон, контакт';
 const NARROW_QUERY = '(max-width: 560px)';
-
-const statusDotClassNames = {
-  complete: styles.swatchComplete,
-  partial: styles.swatchPartial,
-  empty: styles.swatchEmpty,
-};
 
 /** Tracks a media query, including changes from rotating the device. */
 function useMediaQuery(query) {
@@ -183,7 +176,7 @@ function HouseSearchField({ houses, query, onQueryChange, onSelectHouse, disable
       {showSuggestions && (
         <ul className={styles.suggestionList} id={listboxId} role="listbox">
           {suggestions.map((house, index) => {
-            const status = getFillStatus(house);
+            const stage = getStage(house);
 
             return (
               <li
@@ -200,16 +193,12 @@ function HouseSearchField({ houses, query, onQueryChange, onSelectHouse, disable
                 onPointerEnter={() => setActiveIndex(index)}
                 role="option"
               >
-                <span
-                  aria-hidden="true"
-                  className={`${styles.swatch} ${statusDotClassNames[status]}`}
-                />
+                <span aria-hidden="true" className={styles.swatch} data-stage={stage.id} />
 
                 <span className={styles.suggestionText}>
                   <strong>{house.address}</strong>
                   <small>
-                    {fillStatusesById[status].shortLabel} ·{' '}
-                    {formatDistance(house.distanceMeters)} від штабу
+                    {stage.short} · {formatDistance(house.distanceMeters)} від штабу
                   </small>
                 </span>
 
@@ -222,7 +211,8 @@ function HouseSearchField({ houses, query, onQueryChange, onSelectHouse, disable
 
       {isOpen && query.trim() && suggestions.length === 0 && (
         <p className={styles.suggestionEmpty} role="status">
-          Адресу не знайдено. Спробуйте лише назву вулиці — наприклад, <em>Зодчих</em>.
+          Нічого не знайдено. Спробуйте назву вулиці, номер телефону або пошту
+          відповідального. Будинки, до яких у вас немає доступу, у пошук не потрапляють.
         </p>
       )}
     </div>

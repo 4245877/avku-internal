@@ -1,24 +1,34 @@
+/**
+ * The pure helpers behind the map, the list and the card.
+ *
+ * The cases below are the ones the rebuild turns on: the map colour must depend
+ * on the work stage and nothing else, urgency and data quality must be separate
+ * signals, search must find a house by a phone number the viewer is allowed to
+ * see and must not reveal one they are not, and the filters the field actually
+ * asks for ("no owner", "overdue", "today") must work.
+ */
+
 import { describe, expect, it } from 'vitest';
 
 import {
-  createEmptyContact,
-  createEmptyDetails,
-  createEmptyResident,
-} from './electionsTypes.js';
-import {
   DEFAULT_HOUSE_FILTERS,
+  campaignStateOf,
   filterHouses,
   formatApartments,
+  formatAssignee,
+  formatEntrances,
   formatFloors,
-  getCompletedFields,
-  getCompletionRatio,
-  getFillStatus,
-  getMissingFieldLabels,
-  getStanceBreakdown,
+  formatHouses,
+  formatNumber,
+  formatPrecincts,
+  getHouseFlags,
+  getQualityFindings,
+  getSearchText,
+  getStage,
   hasActiveFilters,
   matchesQuery,
+  normalizePhoneDigits,
   normalizeText,
-  pluralize,
   resolveApartments,
   resolveEntrances,
   resolveResidents,
@@ -27,132 +37,79 @@ import {
   summarizeHouses,
   tokenizeQuery,
 } from './houseUtils.js';
+import { createEmptyCampaignState } from './electionsTypes.js';
+
+const HOUR = 3_600_000;
 
 function createHouse(overrides = {}) {
+  const { campaign, ...rest } = overrides;
+
   return {
     id: 'house-1',
+    osmType: 'way',
+    osmId: 1001,
     street: 'вулиця Якуба Коласа',
     streetShort: 'вул. Якуба Коласа',
     number: '6',
     address: 'вул. Якуба Коласа, 6',
-    fullAddress: 'вул. Якуба Коласа, 6, Київ, 03146',
+    fullAddress: 'вулиця Якуба Коласа, 6, Київ',
     type: 'apartments',
     floors: 9,
-    builtYear: 1976,
-    location: { lat: 50.4569, lon: 30.3618 },
+    footprintAreaSqm: 1200,
+    location: { lat: 50.43, lon: 30.36 },
     footprint: [],
     distanceMeters: 40,
-    estimate: { entrances: 4, apartments: 144, residents: 274 },
-    details: createEmptyDetails(),
     isHeadquarters: false,
-    ...overrides,
+    entrances: null,
+    apartments: null,
+    residentsCount: null,
+    estimate: { entrances: 4, apartments: 144, residents: 274 },
+    source: 'osm',
+    verifiedAt: null,
+    precincts: [],
+    people: [],
+    contactsCount: 0,
+    quality: [],
+    ...rest,
+    campaign: { ...createEmptyCampaignState(), ...(campaign ?? {}) },
   };
 }
 
-function createCompleteDetails(overrides = {}) {
-  return {
-    ...createEmptyDetails(),
-    entrances: 4,
-    apartments: 144,
-    residents: [{ ...createEmptyResident(), name: 'Коваленко Олена', stance: 'support' }],
-    contacts: [{ ...createEmptyContact(), value: '+380 67 123 45 67' }],
-    notes: 'Активний ОСББ.',
-    ...overrides,
-  };
-}
-
-describe('getFillStatus', () => {
-  it('reports an untouched house as empty', () => {
-    expect(getFillStatus(createHouse())).toBe('empty');
-    expect(getCompletedFields(createHouse().details)).toEqual([]);
+describe('normalizeText and tokenizeQuery', () => {
+  it('folds the apostrophe variants Ukrainian input mixes', () => {
+    expect(normalizeText('підʼїзд')).toBe(normalizeText("під'їзд"));
+    expect(normalizeText('  Вулиця   Зодчих ')).toBe('вулиця зодчих');
   });
 
-  it('reports a fully surveyed house as complete', () => {
-    const house = createHouse({ details: createCompleteDetails() });
-
-    expect(getFillStatus(house)).toBe('complete');
-    expect(getCompletionRatio(house)).toBe(1);
-    expect(getMissingFieldLabels(house)).toEqual([]);
-  });
-
-  it('reports a house as partial when any block is missing', () => {
-    const house = createHouse({
-      details: createCompleteDetails({ notes: '', contacts: [] }),
-    });
-
-    expect(getFillStatus(house)).toBe('partial');
-    expect(getCompletionRatio(house)).toBeCloseTo(0.6);
-    expect(getMissingFieldLabels(house)).toEqual(['Контактні дані', 'Нотатки']);
-  });
-
-  it('ignores contacts that only exist as empty rows', () => {
-    const house = createHouse({
-      details: createCompleteDetails({ contacts: [createEmptyContact()] }),
-    });
-
-    expect(getCompletedFields(house.details)).not.toContain('contacts');
-  });
-
-  it('counts an aggregate resident number as resident data', () => {
-    const house = createHouse({
-      details: { ...createEmptyDetails(), residentsCount: 240 },
-    });
-
-    expect(getCompletedFields(house.details)).toEqual(['residents']);
+  it('splits a query on spaces and punctuation', () => {
+    expect(tokenizeQuery('вул. Коласа, 6')).toEqual(['вул', 'коласа', '6']);
   });
 });
 
-describe('estimate fallbacks', () => {
-  it('falls back to the geometry estimate and flags it', () => {
-    const house = createHouse();
-
-    expect(resolveEntrances(house)).toEqual({ value: 4, isEstimate: true, isKnown: true });
-    expect(resolveApartments(house)).toEqual({
-      value: 144,
-      isEstimate: true,
-      isKnown: true,
-    });
-    expect(resolveResidents(house)).toEqual({
-      value: 274,
-      isEstimate: true,
-      isKnown: true,
-    });
+describe('normalizePhoneDigits', () => {
+  it('brings the ways a Ukrainian number is written to one form', () => {
+    expect(normalizePhoneDigits('0671234567')).toBe('380671234567');
+    expect(normalizePhoneDigits('+380 67 123 45 67')).toBe('380671234567');
+    expect(normalizePhoneDigits('380671234567')).toBe('380671234567');
   });
+});
 
-  it('prefers surveyed values over the estimate', () => {
-    const house = createHouse({
-      details: { ...createEmptyDetails(), entrances: 6, apartments: 210, residentsCount: 400 },
-    });
-
-    expect(resolveEntrances(house)).toEqual({ value: 6, isEstimate: false, isKnown: true });
-    expect(resolveApartments(house)).toEqual({
-      value: 210,
+describe('measured values and estimates', () => {
+  it('prefers a confirmed count and marks a fallback as an estimate', () => {
+    expect(resolveEntrances(createHouse({ entrances: 6 }))).toEqual({
+      value: 6,
       isEstimate: false,
       isKnown: true,
     });
-    expect(resolveResidents(house)).toEqual({
-      value: 400,
-      isEstimate: false,
+    expect(resolveEntrances(createHouse())).toEqual({
+      value: 4,
+      isEstimate: true,
       isKnown: true,
     });
   });
 
-  it('treats a surveyed zero as a real answer, not a missing one', () => {
+  it('says "unknown" rather than zero when neither source has an answer', () => {
     const house = createHouse({
-      details: { ...createEmptyDetails(), residentsCount: 0 },
-    });
-
-    expect(resolveResidents(house)).toEqual({ value: 0, isEstimate: false, isKnown: true });
-  });
-
-  /*
-   * OpenStreetMap knows the outline of every house but the storey count of only
-   * about half of them, so "no answer from either source" is a normal state the
-   * UI has to be able to render.
-   */
-  it('reports nothing known when OSM supports no estimate either', () => {
-    const house = createHouse({
-      floors: null,
       estimate: { entrances: null, apartments: null, residents: null },
     });
 
@@ -161,236 +118,335 @@ describe('estimate fallbacks', () => {
       isEstimate: false,
       isKnown: false,
     });
-    expect(formatApartments(resolveApartments(house).value)).toBe(
-      'кількість квартир невідома',
-    );
-    expect(formatFloors(house.floors)).toBe('поверхи невідомі');
+    expect(resolveResidents(house).isKnown).toBe(false);
   });
 
-  it('keeps totals finite when part of the district has no estimate', () => {
+  it('treats a confirmed zero as data, not as missing', () => {
+    expect(resolveResidents(createHouse({ residentsCount: 0 }))).toEqual({
+      value: 0,
+      isEstimate: false,
+      isKnown: true,
+    });
+  });
+});
+
+describe('stage, priority and the separate signals', () => {
+  it('reads the stage from the campaign state, defaulting to not started', () => {
+    expect(getStage(createHouse()).id).toBe('not_started');
+    expect(getStage(createHouse({ campaign: { stage: 'done' } })).id).toBe('done');
+  });
+
+  it('falls back to a known stage when the server sends something unexpected', () => {
+    expect(getStage(createHouse({ campaign: { stage: 'вигадка' } })).id).toBe('not_started');
+  });
+
+  /*
+   * The heart of the change: urgency, ownership, freshness and open work are
+   * four independent facts. A finished house can still be unowned and still
+   * carry an overdue task, and each has to be visible on its own.
+   */
+  it('reports urgency, ownership and freshness independently of the stage', () => {
+    const house = createHouse({
+      quality: ['staleVerification', 'noAssignee', 'overdueTasks'],
+      campaign: {
+        stage: 'done',
+        priority: 'high',
+        overdueTasksCount: 2,
+        openIssuesCount: 1,
+        assignees: [],
+      },
+    });
+
+    expect(getStage(house).id).toBe('done');
+    expect(getHouseFlags(house)).toMatchObject({
+      isUrgent: true,
+      hasOverdueTasks: true,
+      hasOpenIssues: true,
+      hasNoAssignee: true,
+      isStale: true,
+    });
+  });
+
+  it('does not call a house urgent just because it is unfinished', () => {
+    const flags = getHouseFlags(createHouse({ campaign: { stage: 'in_progress' } }));
+
+    expect(flags.isUrgent).toBe(false);
+    expect(flags.hasOverdueTasks).toBe(false);
+  });
+
+  it('surfaces data-quality findings as labels without changing anything', () => {
+    const findings = getQualityFindings(
+      createHouse({ quality: ['duplicateAddress', 'missingCoordinates'] }),
+    );
+
+    expect(findings.map((finding) => finding.id)).toEqual([
+      'missingCoordinates',
+      'duplicateAddress',
+    ]);
+  });
+});
+
+describe('search', () => {
+  it('ranks an exact house number above a street-only match', () => {
+    const exact = createHouse({ id: 'exact', number: '6' });
+    const other = createHouse({ id: 'other', number: '61' });
+
+    expect(scoreHouseMatch(exact, tokenizeQuery('коласа 6'))).toBeGreaterThan(
+      scoreHouseMatch(other, tokenizeQuery('коласа 6')),
+    );
+  });
+
+  it('requires every token to be present', () => {
+    expect(matchesQuery(createHouse(), tokenizeQuery('коласа 6'))).toBe(true);
+    expect(matchesQuery(createHouse(), tokenizeQuery('коласа 6 зодчих'))).toBe(false);
+  });
+
+  it('finds a house by the phone number of a contact the viewer can see', () => {
+    const house = createHouse({
+      people: [
+        {
+          id: 'p1',
+          fullName: 'Коваленко Олена',
+          contacts: [
+            { id: 'c1', type: 'phone', value: '+380 67 123 45 67', isMasked: false },
+          ],
+        },
+      ],
+    });
+
+    expect(matchesQuery(house, tokenizeQuery('0671234567'))).toBe(true);
+    expect(searchHouses([house], '0671234567')).toHaveLength(1);
+  });
+
+  it('finds a house by its responsible person', () => {
+    const house = createHouse({
+      campaign: {
+        assignees: [{ id: 'a1', email: 'kovalenko@avku.org', role: 'agitator' }],
+      },
+    });
+
+    expect(matchesQuery(house, tokenizeQuery('kovalenko'))).toBe(true);
+  });
+
+  /*
+   * The server withholds contact values the viewer may not see and marks them
+   * masked. A masked value must not enter the haystack, or a phone search would
+   * confirm which building a number belongs to without ever showing it.
+   */
+  it('never matches a contact the server masked', () => {
+    const house = createHouse({
+      id: 'masked',
+      people: [
+        {
+          id: 'p1',
+          fullName: 'Коваленко О.',
+          contacts: [{ id: 'c1', type: 'phone', value: '+380•••••67', isMasked: true }],
+        },
+      ],
+    });
+
+    expect(getSearchText(house)).not.toContain('380671234567');
+    expect(matchesQuery(house, tokenizeQuery('0671234567'))).toBe(false);
+  });
+
+  it('finds a house by its precinct number', () => {
+    const house = createHouse({
+      precincts: [
+        { id: 'pr1', precinctId: 'pr1', precinctNumber: '123', district: 'Округ 5' },
+      ],
+    });
+
+    expect(matchesQuery(house, tokenizeQuery('дільниця 123'))).toBe(true);
+  });
+});
+
+describe('filterHouses', () => {
+  const overdue = createHouse({
+    id: 'overdue',
+    number: '10',
+    contactsCount: 1,
+    quality: ['overdueTasks'],
+    campaign: {
+      stage: 'in_progress',
+      priority: 'high',
+      overdueTasksCount: 1,
+      openTasksCount: 1,
+      assignees: [{ id: 'a1', email: 'ivan@avku.org', role: 'agitator' }],
+    },
+  });
+
+  const unowned = createHouse({
+    id: 'unowned',
+    number: '12',
+    quality: ['noAssignee', 'staleVerification'],
+    campaign: { stage: 'not_started', assignees: [] },
+  });
+
+  const done = createHouse({
+    id: 'done',
+    number: '14',
+    source: 'import:batch-1',
+    precincts: [{ id: 'l1', precinctId: 'pr1', precinctNumber: '123', district: 'Округ 5' }],
+    campaign: {
+      stage: 'done',
+      openIssuesCount: 2,
+      todayTasksCount: 1,
+      openTasksCount: 1,
+      lastActionAt: new Date(Date.now() - 2 * HOUR).toISOString(),
+      assignees: [{ id: 'a2', email: 'olena@avku.org', role: 'coordinator' }],
+    },
+  });
+
+  const houses = [overdue, unowned, done];
+
+  const ids = (filters) =>
+    filterHouses(houses, { ...DEFAULT_HOUSE_FILTERS, ...filters }).map((house) => house.id);
+
+  it('returns everything by default', () => {
+    expect(ids({})).toHaveLength(3);
+  });
+
+  it('filters by stage', () => {
+    expect(ids({ stage: 'done' })).toEqual(['done']);
+    expect(ids({ stage: 'not_started' })).toEqual(['unowned']);
+  });
+
+  it('filters by priority', () => {
+    expect(ids({ priority: 'high' })).toEqual(['overdue']);
+  });
+
+  it('finds the houses nobody is responsible for', () => {
+    expect(ids({ assignment: 'none' })).toEqual(['unowned']);
+    expect(ids({ assignment: 'any' }).sort()).toEqual(['done', 'overdue']);
+  });
+
+  it('filters by responsible person', () => {
+    expect(ids({ assignee: 'olena@avku.org' })).toEqual(['done']);
+  });
+
+  it('filters overdue, today and open work separately', () => {
+    expect(ids({ tasks: 'overdue' })).toEqual(['overdue']);
+    expect(ids({ tasks: 'today' })).toEqual(['done']);
+    expect(ids({ issues: 'open' })).toEqual(['done']);
+  });
+
+  it('filters by precinct and by district', () => {
+    expect(ids({ precinct: 'pr1' })).toEqual(['done']);
+    expect(ids({ district: 'Округ 5' })).toEqual(['done']);
+  });
+
+  it('filters by contact presence, source and data quality', () => {
+    expect(ids({ contacts: 'with' })).toEqual(['overdue']);
+    expect(ids({ source: 'import:' })).toEqual(['done']);
+    expect(ids({ quality: 'noAssignee' })).toEqual(['unowned']);
+    expect(ids({ verification: 'stale' })).toEqual(['unowned']);
+  });
+
+  it('filters by how recently something was done', () => {
+    expect(ids({ lastActionWithin: '7' })).toEqual(['done']);
+  });
+
+  it('combines filters rather than replacing them', () => {
+    expect(ids({ stage: 'in_progress', priority: 'high' })).toEqual(['overdue']);
+    expect(ids({ stage: 'done', priority: 'high' })).toEqual([]);
+  });
+
+  it('sorts least-advanced first when asked', () => {
+    expect(ids({ sortBy: 'stage' })).toEqual(['unowned', 'overdue', 'done']);
+  });
+
+  it('sorts by priority when asked', () => {
+    expect(ids({ sortBy: 'priority' })[0]).toBe('overdue');
+  });
+
+  it('reports whether any filter is actually narrowing the set', () => {
+    expect(hasActiveFilters(DEFAULT_HOUSE_FILTERS)).toBe(false);
+    expect(hasActiveFilters({ ...DEFAULT_HOUSE_FILTERS, sortBy: 'address' })).toBe(false);
+    expect(hasActiveFilters({ ...DEFAULT_HOUSE_FILTERS, assignment: 'none' })).toBe(true);
+    expect(hasActiveFilters({ ...DEFAULT_HOUSE_FILTERS, query: ' зодчих ' })).toBe(true);
+  });
+});
+
+describe('summarizeHouses', () => {
+  it('counts by stage and totals the separate signals', () => {
     const summary = summarizeHouses([
-      createHouse(),
       createHouse({
-        id: 'house-2',
+        id: 'a',
+        contactsCount: 2,
+        campaign: {
+          stage: 'done',
+          overdueTasksCount: 1,
+          openIssuesCount: 2,
+          assignees: [{ id: 'x', email: 'a@b.c', role: 'agitator' }],
+        },
+      }),
+      createHouse({
+        id: 'b',
+        quality: ['neverVerified'],
         estimate: { entrances: null, apartments: null, residents: null },
+        campaign: { stage: 'not_started', assignees: [] },
       }),
     ]);
+
+    expect(summary.total).toBe(2);
+    expect(summary.byStage).toEqual({ done: 1, not_started: 1 });
+    expect(summary.withoutAssignee).toBe(1);
+    expect(summary.overdueTasks).toBe(1);
+    expect(summary.openIssues).toBe(2);
+    expect(summary.stale).toBe(1);
+    // One house has contacts, not two contact rows — the number the header
+    // shows is "houses we can reach".
+    expect(summary.knownContacts).toBe(1);
+  });
+
+  it('sums apartments from estimates without pretending they are measured', () => {
+    const summary = summarizeHouses([createHouse()]);
 
     expect(summary.apartments).toBe(144);
     expect(summary.residents).toBe(274);
   });
 });
 
-describe('search', () => {
-  it('normalises case and apostrophe variants', () => {
-    expect(normalizeText('  Підʼїзд   Один ')).toBe('підїзд один');
-    expect(normalizeText("Прикордон'ників")).toBe('прикордонників');
-    expect(tokenizeQuery('Коласа, 6')).toEqual(['коласа', '6']);
-  });
-
-  it('requires every token to match', () => {
-    const house = createHouse();
-
-    expect(matchesQuery(house, tokenizeQuery('коласа 6'))).toBe(true);
-    expect(matchesQuery(house, tokenizeQuery('коласа 6 зодчих'))).toBe(false);
-    expect(scoreHouseMatch(house, tokenizeQuery('зодчих'))).toBe(-1);
-  });
-
-  it('matches everything when the query is empty', () => {
-    expect(matchesQuery(createHouse(), tokenizeQuery('   '))).toBe(true);
-  });
-
-  it('ranks an exact house number above a partial one', () => {
-    const exact = createHouse({ id: 'exact', number: '6', address: 'вул. Якуба Коласа, 6' });
-    const partial = createHouse({ id: 'partial', number: '16', address: 'вул. Якуба Коласа, 16' });
-
-    const tokens = tokenizeQuery('коласа 6');
-
-    expect(scoreHouseMatch(exact, tokens)).toBeGreaterThan(scoreHouseMatch(partial, tokens));
-  });
-
-  it('returns the closest house first among equally scored matches', () => {
-    const near = createHouse({ id: 'near', distanceMeters: 40 });
-    const far = createHouse({ id: 'far', distanceMeters: 900 });
-
-    expect(searchHouses([far, near], 'коласа 6').map((house) => house.id)).toEqual([
-      'near',
-      'far',
-    ]);
-  });
-
-  it('returns nothing for a blank query', () => {
-    expect(searchHouses([createHouse()], '  ')).toEqual([]);
-  });
-
-  it('respects the suggestion limit', () => {
-    const houses = Array.from({ length: 12 }, (_, index) =>
-      createHouse({ id: `house-${index}`, number: String(index + 1) }),
-    );
-
-    expect(searchHouses(houses, 'коласа', 5)).toHaveLength(5);
+describe('campaignStateOf', () => {
+  it('answers with an empty state rather than throwing on a bare house', () => {
+    expect(campaignStateOf({ id: 'x' })).toMatchObject({
+      stage: 'not_started',
+      assignees: [],
+    });
   });
 });
 
-describe('filterHouses', () => {
-  const houses = [
-    createHouse({
-      id: 'complete-far',
-      number: '10',
-      address: 'вул. Якуба Коласа, 10',
-      distanceMeters: 800,
-      details: createCompleteDetails(),
-    }),
-    createHouse({
-      id: 'empty-near',
-      number: '12',
-      address: 'вул. Якуба Коласа, 12',
-      distanceMeters: 100,
-    }),
-    createHouse({
-      id: 'private-other-street',
-      street: 'вулиця Зодчих',
-      streetShort: 'вул. Зодчих',
-      number: '3',
-      address: 'вул. Зодчих, 3',
-      type: 'private',
-      distanceMeters: 450,
-    }),
-  ];
-
-  it('returns everything and sorts by distance by default', () => {
-    expect(filterHouses(houses, DEFAULT_HOUSE_FILTERS).map((house) => house.id)).toEqual([
-      'empty-near',
-      'private-other-street',
-      'complete-far',
-    ]);
-  });
-
-  it('filters by completeness', () => {
-    const filtered = filterHouses(houses, {
-      ...DEFAULT_HOUSE_FILTERS,
-      fillStatus: 'complete',
-    });
-
-    expect(filtered.map((house) => house.id)).toEqual(['complete-far']);
-  });
-
-  it('filters by street and building type', () => {
-    expect(
-      filterHouses(houses, { ...DEFAULT_HOUSE_FILTERS, street: 'вулиця Зодчих' }),
-    ).toHaveLength(1);
-
-    expect(
-      filterHouses(houses, { ...DEFAULT_HOUSE_FILTERS, houseType: 'private' }),
-    ).toHaveLength(1);
-  });
-
-  it('combines the query with the other filters', () => {
-    const filtered = filterHouses(houses, {
-      ...DEFAULT_HOUSE_FILTERS,
-      query: 'коласа',
-      fillStatus: 'empty',
-    });
-
-    expect(filtered.map((house) => house.id)).toEqual(['empty-near']);
-  });
-
-  it('sorts unfilled houses first for the completion order', () => {
-    const filtered = filterHouses(houses, {
-      ...DEFAULT_HOUSE_FILTERS,
-      sortBy: 'completion',
-    });
-
-    expect(filtered[filtered.length - 1].id).toBe('complete-far');
-  });
-
-  it('sorts by address alphabetically and numerically', () => {
-    const filtered = filterHouses(houses, { ...DEFAULT_HOUSE_FILTERS, sortBy: 'address' });
-
-    expect(filtered.map((house) => house.address)).toEqual([
-      'вул. Зодчих, 3',
-      'вул. Якуба Коласа, 10',
-      'вул. Якуба Коласа, 12',
-    ]);
-  });
-
-  it('does not mutate the source array', () => {
-    const order = houses.map((house) => house.id);
-
-    filterHouses(houses, { ...DEFAULT_HOUSE_FILTERS, sortBy: 'address' });
-
-    expect(houses.map((house) => house.id)).toEqual(order);
-  });
-
-  it('detects active filters', () => {
-    expect(hasActiveFilters(DEFAULT_HOUSE_FILTERS)).toBe(false);
-    expect(hasActiveFilters({ ...DEFAULT_HOUSE_FILTERS, query: ' ' })).toBe(false);
-    expect(hasActiveFilters({ ...DEFAULT_HOUSE_FILTERS, query: 'коласа' })).toBe(true);
-    expect(hasActiveFilters({ ...DEFAULT_HOUSE_FILTERS, fillStatus: 'empty' })).toBe(true);
-    // Sorting is not a filter — it must not light up the reset button.
-    expect(hasActiveFilters({ ...DEFAULT_HOUSE_FILTERS, sortBy: 'address' })).toBe(false);
-  });
-});
-
-describe('summarizeHouses', () => {
-  it('aggregates completeness and estimated volumes', () => {
-    const summary = summarizeHouses([
-      createHouse({ id: 'a', details: createCompleteDetails() }),
-      createHouse({ id: 'b', details: createCompleteDetails({ notes: '' }) }),
-      createHouse({ id: 'c' }),
-    ]);
-
-    expect(summary).toMatchObject({
-      total: 3,
-      complete: 1,
-      partial: 1,
-      empty: 1,
-      knownContacts: 2,
-    });
-    // Two surveyed houses report 144 apartments, the untouched one is estimated.
-    expect(summary.apartments).toBe(144 * 3);
-  });
-
-  it('handles an empty dataset', () => {
-    expect(summarizeHouses([])).toMatchObject({ total: 0, complete: 0, apartments: 0 });
-  });
-});
-
-describe('getStanceBreakdown', () => {
-  it('counts residents per stance in display order', () => {
-    const house = createHouse({
-      details: createCompleteDetails({
-        residents: [
-          { ...createEmptyResident(), name: 'A', stance: 'support' },
-          { ...createEmptyResident(), name: 'B', stance: 'support' },
-          { ...createEmptyResident(), name: 'C', stance: 'against' },
-          { ...createEmptyResident(), name: 'D', stance: 'нісенітниця' },
-        ],
-      }),
-    });
-
-    const breakdown = getStanceBreakdown(house);
-
-    expect(breakdown.map((stance) => stance.id)).toEqual([
-      'support',
-      'neutral',
-      'against',
-      'unknown',
-    ]);
-    expect(breakdown.map((stance) => stance.count)).toEqual([2, 0, 1, 1]);
-  });
-});
-
-describe('pluralize', () => {
+describe('formatting', () => {
   it('applies Ukrainian plural rules', () => {
-    const forms = ['поверх', 'поверхи', 'поверхів'];
-
-    expect(pluralize(1, forms)).toBe('поверх');
-    expect(pluralize(2, forms)).toBe('поверхи');
-    expect(pluralize(5, forms)).toBe('поверхів');
-    expect(pluralize(11, forms)).toBe('поверхів');
-    expect(pluralize(21, forms)).toBe('поверх');
-    expect(pluralize(0, forms)).toBe('поверхів');
+    expect(formatEntrances(1)).toBe('1 підʼїзд');
+    expect(formatEntrances(3)).toBe('3 підʼїзди');
+    expect(formatEntrances(11)).toBe('11 підʼїздів');
     expect(formatFloors(9)).toBe('9 поверхів');
+    expect(formatHouses(2)).toContain('будинки');
+  });
+
+  it('says so instead of showing a dash-shaped lie', () => {
+    expect(formatNumber(Number.NaN)).toBe('—');
+    expect(formatFloors(null)).toBe('поверхи невідомі');
+    expect(formatApartments(null)).toBe('кількість квартир невідома');
+  });
+
+  it('shortens an assignee to something recognisable', () => {
+    expect(formatAssignee('kovalenko@avku.org')).toBe('kovalenko');
+    expect(formatAssignee(null)).toBe('—');
+  });
+
+  it('describes precincts, including a house split between two', () => {
+    expect(formatPrecincts(createHouse())).toBe('дільниця не визначена');
+    expect(
+      formatPrecincts(
+        createHouse({
+          precincts: [
+            { id: 'l1', precinctId: 'p1', precinctNumber: '123', district: '' },
+            { id: 'l2', precinctId: 'p2', precinctNumber: '124', district: '' },
+          ],
+        }),
+      ),
+    ).toBe('дільниці №123, №124');
   });
 });

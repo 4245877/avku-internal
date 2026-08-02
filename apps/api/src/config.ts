@@ -9,6 +9,7 @@ import { WarehouseRepository } from "./modules/warehouse/warehouse-records";
 import { LogisticsRepository } from "./modules/logistics/logistics-records";
 import { EmployeeRepository } from "./modules/employees/employee-records";
 import { WorkspaceAreaRepository } from "./modules/elections/workspace-area-records";
+import { ElectionsRepository } from "./modules/elections/elections-records";
 import {
   type AccessAuthenticator,
   createAccessAuthenticator,
@@ -169,17 +170,32 @@ export function createEmployeeRepository(): EmployeeRepository {
   });
 }
 
-export function createWorkspaceAreaRepository(): WorkspaceAreaRepository {
+function getElectionsStorageRoot(): string {
   const dataRoot = getDataRoot(getRepositoryRoot());
-  const storageRoot =
+
+  return (
     readEnv("ELECTIONS_STORAGE_ROOT") ??
     path.join(
       dataRoot,
       "elections",
-    );
+    )
+  );
+}
 
+export function createWorkspaceAreaRepository(): WorkspaceAreaRepository {
   return new WorkspaceAreaRepository({
-    storageRoot,
+    storageRoot: getElectionsStorageRoot(),
+  });
+}
+
+/**
+ * The "Вибори" domain database. Shares the elections storage root with the
+ * boundary file, so a deployment that already sets `ELECTIONS_STORAGE_ROOT`
+ * needs no new configuration.
+ */
+export function createElectionsRepository(): ElectionsRepository {
+  return new ElectionsRepository({
+    storageRoot: getElectionsStorageRoot(),
   });
 }
 

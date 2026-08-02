@@ -1,21 +1,37 @@
 /**
- * Container for the selected-house card. Owns nothing but the presentation of
- * the panel's five states: loading, load error, nothing selected, viewing and
- * editing.
+ * Container for the selected-house card.
+ *
+ * The header answers the questions a coordinator asks before doing anything —
+ * where, which precinct, what stage, how urgent, who owns it, when we were last
+ * here, what is next, what is wrong — without opening a tab. Under it sit the
+ * quick actions, and under those the seven tabs.
  */
 
-import { fillStatusesById } from '../../../features/elections/electionsTypes.js';
-import { formatDistance } from '../../../features/elections/geo.js';
-import { getFillStatus, getHouseTypeLabel } from '../../../features/elections/houseUtils.js';
+import {
+  campaignStateOf,
+  formatAssignee,
+  formatDate,
+  formatShortDate,
+  formatPrecincts,
+  getHouseFlags,
+  getPriority,
+  getStage,
+} from '../../../features/elections/houseUtils.js';
+import { actionTypesById } from '../../../features/elections/electionsTypes.js';
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
 import HouseEditForm from './HouseEditForm.jsx';
-import HouseSummary from './HouseSummary.jsx';
+import HouseTabs from './HouseTabs.jsx';
+import QuickActions from './QuickActions.jsx';
 import styles from '../ElectionsPage.module.css';
 
-const statusPillClassNames = {
-  complete: styles.pillComplete,
-  partial: styles.pillPartial,
-  empty: styles.pillEmpty,
+const toneClassNames = {
+  success: styles.badgeSuccess,
+  warning: styles.badgeWarning,
+  danger: styles.badgeDanger,
+  info: styles.badgeInfo,
+  accent: styles.badgeAccent,
+  neutral: styles.badgeNeutral,
+  muted: styles.badgeNeutral,
 };
 
 function PanelShell({ children, className }) {
@@ -26,17 +42,69 @@ function PanelShell({ children, className }) {
   );
 }
 
+/**
+ * The warnings worth a line in the header. Each is a separate statement — an
+ * overdue task and stale data are different problems with different fixes, and
+ * collapsing them into one badge would hide whichever came second.
+ */
+function headerWarnings(house) {
+  const state = campaignStateOf(house);
+  const flags = getHouseFlags(house);
+  const warnings = [];
+
+  if (flags.hasOverdueTasks) {
+    warnings.push({
+      id: 'overdue',
+      tone: 'danger',
+      text: `Прострочених задач: ${state.overdueTasksCount}`,
+    });
+  }
+
+  if (flags.hasOpenIssues) {
+    warnings.push({
+      id: 'issues',
+      tone: 'warning',
+      text: `Відкритих звернень: ${state.openIssuesCount}`,
+    });
+  }
+
+  if (flags.hasNoAssignee) {
+    warnings.push({ id: 'assignee', tone: 'accent', text: 'Немає відповідального' });
+  }
+
+  if (flags.isStale) {
+    warnings.push({ id: 'stale', tone: 'warning', text: 'Дані давно не перевірялися' });
+  }
+
+  if (flags.hasDataProblem) {
+    warnings.push({ id: 'quality', tone: 'info', text: 'Є питання до якості даних' });
+  }
+
+  return warnings;
+}
+
 function HouseDetailsPanel({
   house,
+  campaignId,
   isLoading,
   hasError,
   isEditing,
   isSaving,
   saveError,
   saveNotice,
+  refreshToken,
+  viewer,
   onStartEditing,
   onCancelEditing,
-  onSave,
+  onSaveAttributes,
+  onSaveState,
+  onAddAction,
+  onAddIssue,
+  onAddTask,
+  onAddPerson,
+  onAddPhoto,
+  onCompleteTask,
+  onResolveIssue,
   onClose,
 }) {
   if (isLoading) {
@@ -87,21 +155,21 @@ function HouseDetailsPanel({
           <h2>Будинок не вибрано</h2>
           <p>
             Натисніть на будинок на карті або виберіть його зі списку, щоб
-            побачити підʼїзди, квартири, мешканців і контакти.
+            побачити етап роботи, відповідальних, контактних осіб і журнал дій.
           </p>
 
           <ul className={styles.panelHints}>
             <li>
               <ElectionsIcon name="search" size={15} />
-              Знайдіть адресу через пошук — наприклад, «Коласа 6»
+              Знайдіть адресу, телефон або відповідального через пошук
             </li>
             <li>
               <ElectionsIcon name="layers" size={15} />
-              Легенда карти фільтрує будинки за заповненістю даних
+              Колір будинку показує етап роботи, значки — терміновість і якість даних
             </li>
             <li>
               <ElectionsIcon name="target" size={15} />
-              Колесо мишки або жест двома пальцями змінює масштаб
+              Довге натискання на будинок показує коротку довідку
             </li>
           </ul>
         </div>
@@ -109,15 +177,27 @@ function HouseDetailsPanel({
     );
   }
 
-  const status = getFillStatus(house);
+  const state = campaignStateOf(house);
+  const stage = getStage(house);
+  const priority = getPriority(house);
+  const warnings = headerWarnings(house);
+  const role = viewer?.role ?? null;
+  const canWrite = Boolean(role);
+  const canEdit = role === 'coordinator' || role === 'manager' || role === 'admin';
 
   return (
     <PanelShell className={styles.detailsPanelFilled}>
       <header className={styles.panelHeader}>
         <div className={styles.panelHeaderTop}>
-          <span className={`${styles.statusPill} ${statusPillClassNames[status]}`}>
-            {fillStatusesById[status].shortLabel}
+          <span className={`${styles.statusPill} ${toneClassNames[stage.tone]}`}>
+            {stage.label}
           </span>
+
+          {priority.id === 'high' && (
+            <span className={`${styles.statusPill} ${styles.badgeDanger}`}>
+              Високий пріоритет
+            </span>
+          )}
 
           {house.isHeadquarters && <span className={styles.hqPill}>Штаб кампанії</span>}
 
@@ -133,9 +213,58 @@ function HouseDetailsPanel({
 
         <h2 className={styles.panelTitle}>{house.address}</h2>
 
-        <p className={styles.panelSubtitle}>
-          {getHouseTypeLabel(house)} · {formatDistance(house.distanceMeters)} від штабу
-        </p>
+        <p className={styles.panelSubtitle}>{formatPrecincts(house)}</p>
+
+        <dl className={styles.panelFacts}>
+          <div>
+            <dt>Відповідальні</dt>
+            <dd>
+              {state.assignees.length === 0
+                ? '—'
+                : state.assignees.map((assignee) => formatAssignee(assignee.email)).join(', ')}
+            </dd>
+          </div>
+
+          <div>
+            <dt>Остання дія</dt>
+            <dd>
+              {state.lastActionAt
+                ? `${actionTypesById[state.lastActionType]?.label ?? 'Дія'} ${
+                    formatShortDate(state.lastActionAt)
+                  }`
+                : '—'}
+            </dd>
+          </div>
+
+          <div>
+            <dt>Наступна</dt>
+            <dd>{state.nextActionAt ? formatShortDate(state.nextActionAt) : '—'}</dd>
+          </div>
+
+          <div>
+            <dt>Перевірено</dt>
+            <dd>
+              {house.verifiedAt
+                ? `${formatDate(house.verifiedAt)}${
+                    house.verifiedBy ? `, ${formatAssignee(house.verifiedBy)}` : ''
+                  }`
+                : '—'}
+            </dd>
+          </div>
+        </dl>
+
+        {warnings.length > 0 && (
+          <ul className={styles.panelWarnings}>
+            {warnings.map((warning) => (
+              <li
+                className={`${styles.badge} ${toneClassNames[warning.tone]}`}
+                key={warning.id}
+              >
+                {warning.text}
+              </li>
+            ))}
+          </ul>
+        )}
 
         {isEditing && (
           <p className={styles.panelEditingHint}>
@@ -152,6 +281,13 @@ function HouseDetailsPanel({
         </p>
       )}
 
+      {saveError && (
+        <p className={styles.panelError} role="alert">
+          <ElectionsIcon name="warning" size={16} />
+          {saveError}
+        </p>
+      )}
+
       <div className={styles.panelBody}>
         {isEditing ? (
           <HouseEditForm
@@ -159,11 +295,34 @@ function HouseDetailsPanel({
             isSaving={isSaving}
             key={house.id}
             onCancel={onCancelEditing}
-            onSubmit={onSave}
+            onSubmitAttributes={onSaveAttributes}
+            onSubmitState={onSaveState}
             saveError={saveError}
           />
         ) : (
-          <HouseSummary house={house} onStartEditing={onStartEditing} />
+          <>
+            <QuickActions
+              canWrite={canWrite}
+              house={house}
+              isSaving={isSaving}
+              onAction={onAddAction}
+              onIssue={onAddIssue}
+              onPerson={onAddPerson}
+              onPhoto={onAddPhoto}
+              onTask={onAddTask}
+            />
+
+            <HouseTabs
+              campaignId={campaignId}
+              canEdit={canEdit}
+              canWrite={canWrite}
+              house={house}
+              onCompleteTask={onCompleteTask}
+              onResolveIssue={onResolveIssue}
+              onStartEditing={onStartEditing}
+              refreshToken={refreshToken}
+            />
+          </>
         )}
       </div>
     </PanelShell>

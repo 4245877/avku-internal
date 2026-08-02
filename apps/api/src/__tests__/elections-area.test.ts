@@ -45,18 +45,33 @@ function feature(coordinates: number[][][], name = "Тестова терито�
   };
 }
 
+/**
+ * The boundary decides which houses exist for everybody, so writing it now
+ * requires the `admin` role (it used to be open to anyone on the LAN). These
+ * tests are about polygon validation, not about authorization, so every request
+ * carries an admin identity; the refusals themselves are covered in
+ * `elections-domain.test.ts`.
+ */
+const ADMIN = "area-admin@avku.test";
+
 async function api(
   method: string,
   pathname: string,
   body?: unknown,
 ): Promise<{ status: number; json: any }> {
+  const headers: Record<string, string> = {
+    "x-test-user": ADMIN,
+  };
+
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const response = await fetch(
     `${baseUrl}${pathname}`,
     {
       method,
-      headers: body === undefined
-        ? undefined
-        : { "Content-Type": "application/json" },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     },
   );
@@ -74,8 +89,25 @@ before(async () => {
     "avku-elections-",
   ));
   process.env.DATA_ROOT = dataRoot;
+  process.env.ELECTIONS_ADMIN_EMAILS = ADMIN;
 
-  server = createCertificateApiServer();
+  server = createCertificateApiServer(
+    undefined,
+    {
+      authenticator: {
+        enabled: true,
+        authenticate: async (request) => {
+          const email = request.headers["x-test-user"];
+
+          return typeof email === "string" && email
+            ? {
+              email,
+            }
+            : null;
+        },
+      },
+    },
+  );
 
   await new Promise<void>((resolve) => server.listen(
     0,
@@ -97,6 +129,7 @@ after(async () => {
       force: true,
     },
   );
+  delete process.env.ELECTIONS_ADMIN_EMAILS;
 });
 
 test("answers 404 while no boundary is saved", async () => {

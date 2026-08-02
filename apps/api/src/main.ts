@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   PORT,
   createCertificateRepository,
+  createElectionsRepository,
   createEmployeeRepository,
   createLogisticsRepository,
   createWarehouseRepository,
@@ -15,6 +16,7 @@ async function main(): Promise<void> {
   const warehouseRepository = createWarehouseRepository();
   const logisticsRepository = createLogisticsRepository();
   const employeeRepository = createEmployeeRepository();
+  const electionsRepository = createElectionsRepository();
 
   // Validate storage and templates before accepting traffic. The default
   // certificate template is mandatory, so a missing/broken default fails fast
@@ -24,10 +26,13 @@ async function main(): Promise<void> {
   await warehouseRepository.check();
   await logisticsRepository.check();
   await employeeRepository.check();
+  // Opening the elections database also runs its migration, so a schema that
+  // cannot be brought up to date fails here rather than on the first request.
+  await electionsRepository.check();
 
   if (process.argv.includes("--check")) {
     console.log(
-      "Certificates, warehouse and logistics API storage check passed.",
+      "Certificates, warehouse, logistics and elections API storage check passed.",
     );
     return;
   }
@@ -37,6 +42,7 @@ async function main(): Promise<void> {
     warehouseRepository,
     logisticsRepository,
     employeeRepository,
+    electionsRepository,
   });
 
   server.listen(

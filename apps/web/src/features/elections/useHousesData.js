@@ -2,17 +2,32 @@
  * Loading, saving and error state for the house dataset.
  *
  * The hook owns nothing but state transitions — every request goes through
- * `electionsApi`, so pointing the module at a real backend is a one-file change.
+ * `electionsApi`. What changed with the backend is *what a save means*: a
+ * mutation now returns the server's own copy of the house, including the
+ * counters it derives (last action, open issues, overdue tasks), and that copy
+ * replaces the local one. The client never computes those numbers itself, so it
+ * cannot drift out of step with what a colleague sees.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  ELECTIONS_SOURCE,
+  IS_BACKEND_SOURCE,
+  createAction as apiCreateAction,
+  createHousePerson as apiCreatePerson,
+  createIssue as apiCreateIssue,
+  createTask as apiCreateTask,
+  fetchHouse,
   fetchHouses,
   fetchHousesFromOsm,
+  fetchViewer,
   getAreaMeta,
-  resetHouseDetails,
-  saveHouseDetails,
+  readActiveCampaignId,
+  saveHouseAttributes,
+  saveHouseState,
+  uploadAttachment as apiUploadAttachment,
+  writeActiveCampaignId,
 } from './electionsApi.js';
 import { hydrateWorkspaceArea, subscribeToWorkspaceArea } from './workspaceArea.js';
 
@@ -28,6 +43,9 @@ function createInitialState() {
     streets: [],
     area: getAreaMeta(),
     coverage: null,
+    campaign: null,
+    campaigns: [],
+    viewer: null,
     error: null,
   };
 }
@@ -49,6 +67,7 @@ const IDLE_REFRESH = { status: 'idle', error: null, houseCount: 0, progress: nul
 export function useHousesData() {
   const [state, setState] = useState(createInitialState);
   const [reloadToken, setReloadToken] = useState(0);
+  const [campaignId, setCampaignId] = useState(() => readActiveCampaignId());
   const [savingHouseId, setSavingHouseId] = useState(null);
   const [saveError, setSaveError] = useState(null);
   /**
@@ -76,6 +95,27 @@ export function useHousesData() {
     return () => controller.abort();
   }, []);
 
+  /*
+   * Who the server thinks we are. Loaded separately from the dataset so that a
+   * role can be shown (and write buttons hidden) even while the houses are
+   * still coming in — and so a dev-auth session says so on screen.
+   */
+  useEffect(() => {
+    if (!IS_BACKEND_SOURCE) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+
+    fetchViewer({ signal: controller.signal })
+      .then((viewer) => setState((current) => ({ ...current, viewer })))
+      .catch(() => {
+        // An identity the API will not confirm is treated as no role at all.
+      });
+
+    return () => controller.abort();
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     let isActive = true;
@@ -92,20 +132,30 @@ export function useHousesData() {
 
     setState((current) => ({ ...current, status: 'loading', error: null }));
 
-    fetchHouses({ signal: controller.signal })
+    fetchHouses({ signal: controller.signal, campaignId })
       .then((payload) => {
         if (!isActive) {
           return;
         }
 
-        setState({
+        setState((current) => ({
+          ...current,
           status: 'ready',
           houses: payload.houses,
           streets: payload.streets,
           area: payload.area,
           coverage: payload.coverage,
+          campaign: payload.campaign ?? null,
+          campaigns: payload.campaigns ?? [],
+          viewer: payload.viewer ?? current.viewer,
           error: null,
-        });
+        }));
+
+        // The server decides which campaign a request without one lands in;
+        // remembering its answer keeps the next reload on the same campaign.
+        if (payload.campaign?.id && payload.campaign.id !== campaignId) {
+          writeActiveCampaignId(payload.campaign.id);
+        }
       })
       .catch((error) => {
         if (!isActive || error?.name === 'AbortError') {
@@ -123,10 +173,16 @@ export function useHousesData() {
       isActive = false;
       controller.abort();
     };
-  }, [reloadToken]);
+  }, [campaignId, reloadToken]);
 
   const reload = useCallback(() => {
     setReloadToken((current) => current + 1);
+  }, []);
+
+  /** Switches the campaign in view. Nothing about the houses themselves moves. */
+  const selectCampaign = useCallback((nextCampaignId) => {
+    writeActiveCampaignId(nextCampaignId);
+    setCampaignId(nextCampaignId);
   }, []);
 
   /*
@@ -180,14 +236,15 @@ export function useHousesData() {
         return false;
       }
 
-      setState({
+      setState((current) => ({
+        ...current,
         status: 'ready',
         houses: payload.houses,
         streets: payload.streets,
         area: payload.area,
         coverage: payload.coverage,
         error: null,
-      });
+      }));
 
       setOsmRefresh({
         ...IDLE_REFRESH,
@@ -222,38 +279,175 @@ export function useHousesData() {
   );
 
   /**
-   * Saves one house's survey data. The house object is replaced but its
-   * `footprint` array is reused, which keeps the map's projection cache warm.
+   * Puts the server's copy of a house back into the list.
+   *
+   * The `footprint` array is reused when it is unchanged, which keeps Leaflet's
+   * projection cache warm — a save re-styles one polygon instead of rebuilding
+   * the district.
    */
-  const saveDetails = useCallback(async (houseId, details) => {
-    setSavingHouseId(houseId);
-    setSaveError(null);
+  const replaceHouse = useCallback((house) => {
+    setState((current) => ({
+      ...current,
+      houses: current.houses.map((existing) =>
+        existing.id === house.id
+          ? { ...house, footprint: existing.footprint ?? house.footprint }
+          : existing,
+      ),
+    }));
+  }, []);
 
-    try {
-      const result = await saveHouseDetails(houseId, details);
+  /** Re-reads one house after a write that changed its derived counters. */
+  const refreshHouse = useCallback(
+    async (houseId) => {
+      if (!IS_BACKEND_SOURCE) {
+        return null;
+      }
 
-      setState((current) => ({
-        ...current,
-        houses: current.houses.map((house) =>
-          house.id === houseId ? { ...house, details: result.details } : house,
+      try {
+        const house = await fetchHouse(houseId, { campaignId });
+
+        replaceHouse(house);
+
+        return house;
+      } catch {
+        // The write itself succeeded; a failed refresh only means the counters
+        // are one reload stale, which is not worth an error banner.
+        return null;
+      }
+    },
+    [campaignId, replaceHouse],
+  );
+
+  /**
+   * Runs one mutation with the shared saving/error state around it.
+   *
+   * Every write in the card goes through here, so "which house is saving" and
+   * "what did the server refuse" have exactly one source — including the 403s,
+   * which have to reach the user as a sentence about permissions.
+   */
+  const runMutation = useCallback(
+    async (houseId, operation) => {
+      setSavingHouseId(houseId);
+      setSaveError(null);
+
+      try {
+        const result = await operation();
+
+        return { ok: true, result };
+      } catch (error) {
+        setSaveError(error?.message ?? 'Не вдалося зберегти зміни.');
+
+        return { ok: false, error };
+      } finally {
+        setSavingHouseId(null);
+      }
+    },
+    [],
+  );
+
+  const saveAttributes = useCallback(
+    async (houseId, patch) => {
+      const outcome = await runMutation(houseId, () =>
+        saveHouseAttributes(houseId, patch, { campaignId }),
+      );
+
+      if (outcome.ok) {
+        replaceHouse(outcome.result);
+      }
+
+      return outcome.ok;
+    },
+    [campaignId, replaceHouse, runMutation],
+  );
+
+  const saveState = useCallback(
+    async (houseId, patch) => {
+      const outcome = await runMutation(houseId, () =>
+        saveHouseState(houseId, patch, { campaignId }),
+      );
+
+      if (outcome.ok) {
+        replaceHouse(outcome.result);
+      }
+
+      return outcome.ok;
+    },
+    [campaignId, replaceHouse, runMutation],
+  );
+
+  const addAction = useCallback(
+    async (houseId, payload) => {
+      const outcome = await runMutation(houseId, () =>
+        apiCreateAction({ ...payload, houseId }, { campaignId }),
+      );
+
+      if (outcome.ok) {
+        await refreshHouse(houseId);
+      }
+
+      return outcome.ok;
+    },
+    [campaignId, refreshHouse, runMutation],
+  );
+
+  const addIssue = useCallback(
+    async (houseId, payload) => {
+      const outcome = await runMutation(houseId, () =>
+        apiCreateIssue({ ...payload, houseId }, { campaignId }),
+      );
+
+      if (outcome.ok) {
+        await refreshHouse(houseId);
+      }
+
+      return outcome.ok;
+    },
+    [campaignId, refreshHouse, runMutation],
+  );
+
+  const addTask = useCallback(
+    async (houseId, payload) => {
+      const outcome = await runMutation(houseId, () =>
+        apiCreateTask({ ...payload, houseId }, { campaignId }),
+      );
+
+      if (outcome.ok) {
+        await refreshHouse(houseId);
+      }
+
+      return outcome.ok;
+    },
+    [campaignId, refreshHouse, runMutation],
+  );
+
+  const addPerson = useCallback(
+    async (houseId, payload) => {
+      const outcome = await runMutation(houseId, () =>
+        apiCreatePerson(houseId, payload, { campaignId }),
+      );
+
+      if (outcome.ok) {
+        await refreshHouse(houseId);
+      }
+
+      return outcome.ok;
+    },
+    [campaignId, refreshHouse, runMutation],
+  );
+
+  const addAttachment = useCallback(
+    async (houseId, file, { kind = 'photo', note = '' } = {}) => {
+      const outcome = await runMutation(houseId, () =>
+        apiUploadAttachment(
+          { file, ownerType: 'house', ownerId: houseId, houseId, kind, note },
+          { campaignId },
         ),
-      }));
+      );
 
-      return true;
-    } catch (error) {
-      setSaveError(error?.message ?? 'Не вдалося зберегти зміни.');
-
-      return false;
-    } finally {
-      setSavingHouseId(null);
-    }
-  }, []);
-
-  const resetDemoData = useCallback(async () => {
-    await resetHouseDetails();
-    setSaveError(null);
-    setReloadToken((current) => current + 1);
-  }, []);
+      return outcome.ok;
+    },
+    [campaignId, runMutation],
+  );
 
   const dismissSaveError = useCallback(() => setSaveError(null), []);
 
@@ -264,7 +458,12 @@ export function useHousesData() {
       streets: state.streets,
       area: state.area,
       coverage: state.coverage,
+      campaign: state.campaign,
+      campaigns: state.campaigns,
+      viewer: state.viewer,
       error: state.error,
+      source: ELECTIONS_SOURCE,
+      isBackend: IS_BACKEND_SOURCE,
       isLoading: state.status === 'loading',
       isReady: state.status === 'ready',
       hasError: state.status === 'error',
@@ -280,25 +479,41 @@ export function useHousesData() {
       isRefreshingFromOsm: osmRefresh.status === 'loading',
       savingHouseId,
       saveError,
+      campaignId: state.campaign?.id ?? campaignId,
       reload,
+      selectCampaign,
       refreshFromOsm,
       cancelRefreshFromOsm,
       dismissOsmRefresh,
-      saveDetails,
-      resetDemoData,
+      refreshHouse,
+      saveAttributes,
+      saveState,
+      addAction,
+      addIssue,
+      addTask,
+      addPerson,
+      addAttachment,
       dismissSaveError,
     }),
     [
+      addAction,
+      addAttachment,
+      addIssue,
+      addPerson,
+      addTask,
+      campaignId,
       cancelRefreshFromOsm,
       dismissOsmRefresh,
       dismissSaveError,
       osmRefresh,
       refreshFromOsm,
+      refreshHouse,
       reload,
-      resetDemoData,
-      saveDetails,
+      saveAttributes,
       saveError,
+      saveState,
       savingHouseId,
+      selectCampaign,
       state,
     ],
   );

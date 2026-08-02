@@ -7,6 +7,8 @@
 # then verified with PRAGMA integrity_check. Restore is therefore just:
 #
 #   cp <backup>/certificates/certificates.sqlite <DATA_ROOT>/certificates/
+#   cp <backup>/elections/elections.sqlite         <DATA_ROOT>/elections/
+#   tar -xzf <backup>/elections/attachments.tar.gz -C <DATA_ROOT>/elections/
 #   tar -xzf <backup>/certificates/photos.tar.gz    -C <DATA_ROOT>/certificates/
 #   tar -xzf <backup>/certificates/generated.tar.gz -C <DATA_ROOT>/certificates/
 #
@@ -22,6 +24,8 @@ DESTINATION="$BACKUP_ROOT/$TIMESTAMP"
 CERTIFICATES_STORAGE_ROOT=${CERTIFICATES_STORAGE_ROOT:-"$DATA_ROOT/certificates"}
 WAREHOUSE_STORAGE_ROOT=${WAREHOUSE_STORAGE_ROOT:-"$DATA_ROOT/warehouse"}
 LOGISTICS_STORAGE_ROOT=${LOGISTICS_STORAGE_ROOT:-"$DATA_ROOT/logistics"}
+ELECTIONS_STORAGE_ROOT=${ELECTIONS_STORAGE_ROOT:-"$DATA_ROOT/elections"}
+EMPLOYEES_STORAGE_ROOT=${EMPLOYEES_STORAGE_ROOT:-"$DATA_ROOT/employees"}
 
 BACKED_UP=0
 
@@ -208,6 +212,45 @@ backup_certificates_directory() {
   echo "Backed up $source_path"
 }
 
+# The elections module keeps the traced boundary as a plain file beside its
+# database, and field photographs in a directory. Both are runtime data with no
+# copy anywhere else, so a backup that took only the SQLite file would restore a
+# campaign with no territory and no evidence.
+backup_elections_file() {
+  file_name=$1
+  source_path="$ELECTIONS_STORAGE_ROOT/$file_name"
+  target_directory="$DESTINATION/elections"
+
+  if [ ! -f "$source_path" ]; then
+    return 0
+  fi
+
+  mkdir -p "$target_directory" ||
+    fail "failed to create backup directory: $target_directory"
+  copy_file "$source_path" "$target_directory/$file_name"
+  echo "Backed up $source_path"
+}
+
+backup_elections_directory() {
+  directory=$1
+  source_path="$ELECTIONS_STORAGE_ROOT/$directory"
+  target_directory="$DESTINATION/elections"
+
+  if [ ! -d "$source_path" ]; then
+    return 0
+  fi
+
+  command -v tar >/dev/null 2>&1 ||
+    fail "tar is required to back up $source_path"
+
+  mkdir -p "$target_directory" ||
+    fail "failed to create backup directory: $target_directory"
+  tar -czf "$target_directory/$directory.tar.gz" -C "$ELECTIONS_STORAGE_ROOT" "$directory" ||
+    fail "failed to archive $source_path"
+  BACKED_UP=1
+  echo "Backed up $source_path"
+}
+
 require_absolute_path DATA_ROOT "$DATA_ROOT"
 require_absolute_path BACKUP_ROOT "$BACKUP_ROOT"
 ensure_directory "$DATA_ROOT" DATA_ROOT
@@ -220,12 +263,22 @@ mkdir -p "$DESTINATION" ||
 backup_database "$CERTIFICATES_STORAGE_ROOT" "certificates.sqlite" "certificates"
 backup_database "$WAREHOUSE_STORAGE_ROOT" "warehouse.sqlite" "warehouse"
 backup_database "$LOGISTICS_STORAGE_ROOT" "logistics.sqlite" "logistics"
+backup_database "$ELECTIONS_STORAGE_ROOT" "elections.sqlite" "elections"
+# Holds who may do what in the elections module. Restoring a campaign without it
+# would come back with nobody able to write to it.
+backup_database "$EMPLOYEES_STORAGE_ROOT" "employees.sqlite" "employees"
 
 if [ -d "$CERTIFICATES_STORAGE_ROOT" ]; then
   ensure_readable_directory "$CERTIFICATES_STORAGE_ROOT" "certificates storage directory"
   backup_certificates_file "registry.json"
   backup_certificates_directory "photos"
   backup_certificates_directory "generated"
+fi
+
+if [ -d "$ELECTIONS_STORAGE_ROOT" ]; then
+  ensure_readable_directory "$ELECTIONS_STORAGE_ROOT" "elections storage directory"
+  backup_elections_file "workspace-area.geo.json"
+  backup_elections_directory "attachments"
 fi
 
 if [ "$BACKED_UP" -eq 0 ]; then

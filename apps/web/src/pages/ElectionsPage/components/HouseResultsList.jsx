@@ -8,26 +8,21 @@
 
 import { useEffect, useState } from 'react';
 
-import { fillStatusesById } from '../../../features/elections/electionsTypes.js';
-import { formatDistance } from '../../../features/elections/geo.js';
 import {
+  campaignStateOf,
   formatApartments,
+  formatAssignee,
   formatFloors,
-  getCompletionRatio,
-  getFillStatus,
+  formatShortDate,
+  getHouseFlags,
   getHouseTypeLabel,
+  getStage,
   resolveApartments,
 } from '../../../features/elections/houseUtils.js';
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
 import styles from '../ElectionsPage.module.css';
 
 const PAGE_SIZE = 40;
-
-const statusDotClassNames = {
-  complete: styles.swatchComplete,
-  partial: styles.swatchPartial,
-  empty: styles.swatchEmpty,
-};
 
 function HouseResultsList({
   houses,
@@ -85,9 +80,10 @@ function HouseResultsList({
     <div className={styles.listScroll}>
       <ul className={styles.houseList}>
         {visibleHouses.map((house) => {
-          const status = getFillStatus(house);
+          const stage = getStage(house);
+          const state = campaignStateOf(house);
+          const flags = getHouseFlags(house);
           const isSelected = house.id === selectedHouseId;
-          const completion = Math.round(getCompletionRatio(house) * 100);
           const apartments = resolveApartments(house);
 
           return (
@@ -100,10 +96,9 @@ function HouseResultsList({
                 onClick={() => onSelectHouse(house.id)}
                 type="button"
               >
-                <span
-                  aria-hidden="true"
-                  className={`${styles.swatch} ${statusDotClassNames[status]}`}
-                />
+                {/* The dot is the stage and only the stage — the same rule the
+                    map follows, so a colour means one thing everywhere. */}
+                <span aria-hidden="true" className={styles.swatch} data-stage={stage.id} />
 
                 <span className={styles.houseRowBody}>
                   <span className={styles.houseRowTitle}>
@@ -125,18 +120,36 @@ function HouseResultsList({
                       .join(' · ')}
                   </small>
 
-                  <span className={styles.houseRowProgress}>
-                    <span
-                      className={styles.houseRowProgressFill}
-                      data-status={status}
-                      style={{ width: `${completion}%` }}
-                    />
+                  {/* Separate signals, listed rather than merged: an overdue
+                      task and an unowned house are different problems. */}
+                  <span className={styles.houseRowFlags}>
+                    {flags.hasOverdueTasks && (
+                      <em className={styles.flagDanger}>
+                        прострочено {state.overdueTasksCount}
+                      </em>
+                    )}
+                    {flags.hasOpenIssues && (
+                      <em className={styles.flagWarning}>
+                        звернень {state.openIssuesCount}
+                      </em>
+                    )}
+                    {flags.hasNoAssignee && (
+                      <em className={styles.flagAccent}>без відповідального</em>
+                    )}
+                    {flags.isStale && <em className={styles.flagMuted}>дані застаріли</em>}
                   </span>
                 </span>
 
                 <span className={styles.houseRowSide}>
-                  <small>{formatDistance(house.distanceMeters)}</small>
-                  <em>{fillStatusesById[status].shortLabel}</em>
+                  <small>
+                    {state.assignees.length > 0
+                      ? formatAssignee(state.assignees[0].email)
+                      : '—'}
+                  </small>
+                  <em>{stage.short}</em>
+                  <small>
+                    {state.lastActionAt ? formatShortDate(state.lastActionAt) : 'без дій'}
+                  </small>
                 </span>
               </button>
             </li>

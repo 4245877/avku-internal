@@ -209,7 +209,14 @@ test("GET /api/me reports local access when no JWT is presented", async () => {
   const me = await getMe();
 
   assert.equal(me.status, 200);
-  assert.deepEqual(me.json, { email: null, local: true });
+  // Local access is still anonymous, and anonymous carries no elections role:
+  // being on the LAN must never imply permission to write.
+  assert.deepEqual(me.json, {
+    email: null,
+    local: true,
+    electionsRole: null,
+    isDevAuth: false,
+  });
 });
 
 test("GET /api/me rejects an invalid JWT with 401", async () => {
