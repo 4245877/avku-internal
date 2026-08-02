@@ -18,6 +18,7 @@ import {
   WORK_STAGES,
   badRequest,
   isForbiddenField,
+  findMultipleHouseNumbers,
   normalizeAddress,
   normalizePhone,
   normalizeText,
@@ -96,6 +97,8 @@ export interface NormalizedRow {
   freeText: string;
   osmType: string | null;
   osmId: number | null;
+  /** Set when one cell listed several buildings; forces manual review. */
+  multipleHouseNumbers?: string[];
 }
 
 export interface ImportRow {
@@ -374,7 +377,17 @@ export function matchPersonRole(label: unknown): string {
   return "other";
 }
 
-/** `вул. Зодчих, 58-А` → `{ street, number }`. */
+/**
+ * `вул. Зодчих, 58-А` → `{ street, number }`.
+ *
+ * Three things the first version got wrong, all of them present in the archive:
+ *
+ *  • a leading settlement (`м. Київ, вул. Зодчих, 58`) made the *street* the
+ *    last-but-one comma field, so the city ended up inside the street name;
+ *  • `\w` does not match Cyrillic without the `u` flag, so `Зодчих 58а` parsed
+ *    as a street called "Зодчих 58а" with no number at all;
+ *  • `буд. 58` kept the `буд.` in the number.
+ */
 export function splitAddress(text: string): { street: string; number: string } {
   const trimmed = text.trim();
 
@@ -385,33 +398,72 @@ export function splitAddress(text: string): { street: string; number: string } {
     };
   }
 
-  const commaSplit = trimmed.lastIndexOf(",");
+  const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
+  // Work from the right: the last field that looks like a house number is the
+  // number, and everything before it that is not a settlement is the street.
+  const numberIndex = parts.findLastIndex((part) => HOUSE_NUMBER_RE.test(part));
 
-  if (commaSplit > 0) {
-    return {
-      street: trimmed.slice(
+  if (numberIndex > 0) {
+    const street = parts
+      .slice(
         0,
-        commaSplit,
-      ).trim(),
-      number: trimmed.slice(commaSplit + 1).trim(),
+        numberIndex,
+      )
+      .filter((part) => !SETTLEMENT_RE.test(part))
+      .join(", ")
+      .trim();
+
+    return {
+      street: street || parts.slice(
+        0,
+        numberIndex,
+      ).join(", ").trim(),
+      number: stripNumberPrefix(parts[numberIndex]),
     };
   }
 
-  // No comma: the trailing token that starts with a digit is the house number.
-  const match = /^(.*?)\s+(\d[\w\-/ʼ'’]*)$/.exec(trimmed);
+  const single = parts.length > 1
+    ? parts.filter((part) => !SETTLEMENT_RE.test(part)).join(", ").trim() ||
+      trimmed
+    : trimmed;
 
-  if (match) {
+  // No usable comma split: the trailing token that starts with a digit is the
+  // house number. `u` makes the letter suffix match Cyrillic too.
+  const match = /^(.*?)[\s,]+((?:буд|б|д|№)\s*\.?\s*)?(\d[\p{L}\d\-/ʼ'’ ]*)$/u
+    .exec(single);
+
+  if (match && match[3]) {
     return {
-      street: match[1].trim(),
-      number: match[2].trim(),
+      street: match[1].trim().replace(
+        /[,\s]+$/u,
+        "",
+      ),
+      number: stripNumberPrefix(match[3]),
     };
   }
 
   return {
-    street: trimmed,
+    street: single,
     number: "",
   };
 }
+
+/** `буд. 58-А` / `№58` → `58-А`. */
+function stripNumberPrefix(value: string): string {
+  return value
+    .replace(
+      /^\s*(?:будинок|буд|дом|д|house|№|n)\s*\.?\s*/iu,
+      "",
+    )
+    .trim();
+}
+
+/** A field that is a house number rather than a street or a settlement. */
+const HOUSE_NUMBER_RE =
+  /^\s*(?:будинок|буд|дом|д|house|№|n)?\s*\.?\s*\d[\p{L}\d\-/ʼ'’ .]*$/u;
+
+const SETTLEMENT_RE =
+  /^\s*(?:м|міс(?:то)?|г|гор(?:од)?|с|сел(?:о|ище)?|смт|обл(?:асть)?|район|р-н)\s*\.?\s+/iu;
 
 function readNumber(value: string): number | null {
   const parsed = Number(value.replace(
@@ -494,6 +546,25 @@ export function normalizeImportRow(
 
   const street = explicitStreet || parsedAddress.street;
   const number = explicitNumber || parsedAddress.number;
+
+  // One cell listing a run of buildings — `Зодчих 58, 60, 62`, `58 і 60` — is
+  // routine in the archive. Picking one of them would attach the row's contact
+  // and its work history to an arbitrary building, so the row is stopped here
+  // and a person splits it.
+  const listedNumbers = findMultipleHouseNumbers(
+    explicitNumber || addressText.replace(
+      parsedAddress.street,
+      "",
+    ),
+  );
+  const hasMultipleHouses = listedNumbers.length > 1;
+
+  if (hasMultipleHouses) {
+    notes.push(
+      `У клітинці перелічено кілька будинків (${listedNumbers.join(", ")}) — ` +
+        "рядок треба розділити вручну, по одному будинку на запис.",
+    );
+  }
 
   if (!street) {
     notes.push("Не розпізнано вулицю.");
@@ -597,6 +668,7 @@ export function normalizeImportRow(
       freeText,
       osmType: null,
       osmId: null,
+      multipleHouseNumbers: listedNumbers,
     },
     cleanedCount,
     notes,
@@ -853,6 +925,15 @@ export function createBatch(
       }
     }
 
+    // Overrides any match found above: a cell naming several buildings must not
+    // be merged into whichever one the address parser happened to land on.
+    if ((normalized.multipleHouseNumbers?.length ?? 0) > 1) {
+      status = "needs_review";
+      decision = "review";
+      matchHouseId = null;
+      confidence = "multipleHouses";
+    }
+
     database.prepare(`
       INSERT INTO import_rows (
         id, batch_id, row_number, raw, normalized, status, decision,
@@ -1006,6 +1087,13 @@ function describeRow(row: ImportRow): string {
   return `рядок ${row.rowNumber}`;
 }
 
+/**
+ * Records what the batch did to one record.
+ *
+ * `previous` is the pre-import image, `applied` is what the import left in
+ * place. Rollback needs both: the first to know what to restore, the second to
+ * know whether restoring is still the right thing to do.
+ */
 function recordEffect(
   database: DatabaseSync,
   batchId: string,
@@ -1013,16 +1101,19 @@ function recordEffect(
   entityId: string,
   operation: "insert" | "update",
   previous?: unknown,
+  applied?: unknown,
 ): void {
   database.prepare(`
-    INSERT INTO import_effects (batch_id, entity, entity_id, operation, previous)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO import_effects (
+      batch_id, entity, entity_id, operation, previous, applied
+    ) VALUES (?, ?, ?, ?, ?, ?)
   `).run(
     batchId,
     entity,
     entityId,
     operation,
     previous === undefined ? null : JSON.stringify(previous),
+    applied === undefined ? null : JSON.stringify(applied),
   );
 }
 
@@ -1148,6 +1239,11 @@ export function applyBatch(
         apartments: houseRow.apartments,
         access_note: houseRow.access_note,
       },
+      {
+        entrances: nextEntrances,
+        apartments: nextApartments,
+        access_note: nextAccessNote,
+      },
     );
 
     database.prepare(`
@@ -1173,6 +1269,11 @@ export function applyBatch(
         houseId,
       ) as Record<string, unknown> | undefined;
 
+      const appliedStage = normalized.stage ??
+        String(existingState?.stage ?? "not_started");
+      const appliedPriority = normalized.priority ??
+        String(existingState?.priority ?? "medium");
+
       recordEffect(
         database,
         batchId,
@@ -1180,6 +1281,10 @@ export function applyBatch(
         `${campaignId}:${houseId}`,
         existingState ? "update" : "insert",
         existingState ?? undefined,
+        {
+          stage: appliedStage,
+          priority: appliedPriority,
+        },
       );
 
       database.prepare(`
@@ -1310,7 +1415,7 @@ export function rollbackBatch(
   database: DatabaseSync,
   batchId: string,
   context: ChangeContext,
-): { reverted: number } {
+): { reverted: number; keptUserEdits: string[] } {
   const batch = getBatch(
     database,
     batchId,
@@ -1324,7 +1429,7 @@ export function rollbackBatch(
   }
 
   const effects = database.prepare(`
-    SELECT entity, entity_id, operation, previous
+    SELECT entity, entity_id, operation, previous, applied
     FROM import_effects WHERE batch_id = ? ORDER BY id DESC
   `).all(batchId) as Record<string, unknown>[];
 
@@ -1337,6 +1442,9 @@ export function rollbackBatch(
     task: "tasks",
   };
   let reverted = 0;
+  // Fields left as the user set them because they no longer hold the value the
+  // import wrote. Reported back so the rollback is not silently partial.
+  const keptUserEdits: string[] = [];
 
   for (const effect of effects) {
     const entity = String(effect.entity);
@@ -1379,28 +1487,113 @@ export function rollbackBatch(
       continue;
     }
 
+    const applied = parseJson<Record<string, unknown> | null>(
+      effect.applied,
+      null,
+    );
+
     if (entity === "house") {
+      const current = database.prepare(`
+        SELECT entrances, apartments, access_note FROM houses WHERE id = ?
+      `).get(entityId) as Record<string, unknown> | undefined;
+
+      if (!current) {
+        continue;
+      }
+
+      // Restore a field only where it still holds what the import put there.
+      // Anything a user has corrected since is theirs and survives the
+      // rollback — undoing an import must not undo a week of field work.
+      const restore = <T>(
+        field: string,
+        currentValue: unknown,
+        previousValue: T,
+      ): { value: T | unknown; kept: boolean } => {
+        if (!applied) {
+          return {
+            value: previousValue,
+            kept: false,
+          };
+        }
+
+        const wasApplied = String(applied[field] ?? "") ===
+          String(currentValue ?? "");
+
+        if (!wasApplied) {
+          keptUserEdits.push(`house.${field}`);
+        }
+
+        return {
+          value: wasApplied ? previousValue : currentValue,
+          kept: !wasApplied,
+        };
+      };
+
+      const entrances = restore(
+        "entrances",
+        current.entrances,
+        toNullableInteger(previous.entrances),
+      );
+      const apartments = restore(
+        "apartments",
+        current.apartments,
+        toNullableInteger(previous.apartments),
+      );
+      const accessNote = restore(
+        "access_note",
+        current.access_note,
+        String(previous.access_note ?? ""),
+      );
+
       database.prepare(`
         UPDATE houses SET
           entrances = ?, apartments = ?, access_note = ?, updated_at = ?
         WHERE id = ?
       `).run(
-        toNullableInteger(previous.entrances),
-        toNullableInteger(previous.apartments),
-        String(previous.access_note ?? ""),
+        entrances.value as number | null,
+        apartments.value as number | null,
+        String(accessNote.value ?? ""),
         now,
         entityId,
       );
       reverted += 1;
     } else if (entity === "houseCampaignState") {
       const [campaignId, houseId] = entityId.split(":");
+      const current = database.prepare(`
+        SELECT stage, priority FROM house_campaign_state
+        WHERE campaign_id = ? AND house_id = ?
+      `).get(
+        campaignId,
+        houseId,
+      ) as Record<string, unknown> | undefined;
+
+      if (!current) {
+        continue;
+      }
+
+      const stageUntouched = !applied ||
+        String(applied.stage ?? "") === String(current.stage ?? "");
+      const priorityUntouched = !applied ||
+        String(applied.priority ?? "") === String(current.priority ?? "");
+
+      if (!stageUntouched) {
+        keptUserEdits.push("houseCampaignState.stage");
+      }
+
+      if (!priorityUntouched) {
+        keptUserEdits.push("houseCampaignState.priority");
+      }
 
       database.prepare(`
         UPDATE house_campaign_state SET stage = ?, priority = ?, updated_at = ?
         WHERE campaign_id = ? AND house_id = ?
       `).run(
-        String(previous.stage ?? "not_started"),
-        String(previous.priority ?? "medium"),
+        stageUntouched
+          ? String(previous.stage ?? "not_started")
+          : String(current.stage),
+        priorityUntouched
+          ? String(previous.priority ?? "medium")
+          : String(current.priority),
         now,
         campaignId,
         houseId,
@@ -1436,11 +1629,13 @@ export function rollbackBatch(
     "rollback",
     {
       reverted,
+      keptUserEdits: keptUserEdits.length,
     },
   );
 
   return {
     reverted,
+    keptUserEdits,
   };
 }
 

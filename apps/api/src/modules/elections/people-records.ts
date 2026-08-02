@@ -26,6 +26,7 @@ import {
 import {
   type ElectionsViewer,
   hasAtLeast,
+  houseVisibilitySql,
   maskContactValue,
   maskPersonName,
 } from "./elections-access";
@@ -951,11 +952,61 @@ function assertScopeExists(
   }
 }
 
+/**
+ * A coordinator may hand out only territory they already hold.
+ *
+ * Otherwise the territorial limit is decorative: a coordinator restricted to
+ * two streets could simply assign *themselves* to every other house, one row at
+ * a time, and read the whole campaign. Managers and admins are unrestricted —
+ * granting territory is their job.
+ */
+function assertMayAssignScope(
+  database: DatabaseSync,
+  campaignId: string,
+  viewer: ElectionsViewer | undefined,
+  scope: string,
+  scopeId: string,
+): void {
+  if (!viewer || hasAtLeast(
+    viewer,
+    "manager",
+  )) {
+    return;
+  }
+
+  const visibility = houseVisibilitySql(
+    viewer,
+    campaignId,
+    "h",
+  );
+  const sql = scope === "house"
+    ? `SELECT 1 AS ok FROM houses h
+       WHERE h.id = :scopeId AND h.deleted_at IS NULL AND ${visibility.sql}`
+    : `SELECT 1 AS ok FROM houses h
+       JOIN house_polling_stations hps ON hps.house_id = h.id
+       WHERE hps.precinct_id = :scopeId AND h.deleted_at IS NULL
+         AND ${visibility.sql}
+       LIMIT 1`;
+
+  const row = database.prepare(sql).get({
+    ...visibility.parameters,
+    scopeId,
+  } as never);
+
+  if (!row) {
+    throw new HttpError(
+      403,
+      "Призначати можна лише в межах власної закріпленої території.",
+    );
+  }
+}
+
 export function createAssignment(
   database: DatabaseSync,
   campaignId: string,
   input: AssignmentInput,
   context: ChangeContext,
+  viewer?: ElectionsViewer,
 ): string {
   const scope = requireOneOf(
     input.scope,
@@ -970,6 +1021,13 @@ export function createAssignment(
 
   assertScopeExists(
     database,
+    scope,
+    scopeId,
+  );
+  assertMayAssignScope(
+    database,
+    campaignId,
+    viewer,
     scope,
     scopeId,
   );
@@ -1047,6 +1105,7 @@ export function endAssignment(
   database: DatabaseSync,
   assignmentId: string,
   context: ChangeContext,
+  viewer?: ElectionsViewer,
 ): void {
   const row = database.prepare(`
     SELECT id, campaign_id, scope, scope_id, employee_email, status
@@ -1059,6 +1118,21 @@ export function endAssignment(
       "Призначення не знайдено.",
     );
   }
+
+  if (context.campaignId && String(row.campaign_id) !== context.campaignId) {
+    throw new HttpError(
+      404,
+      "Призначення не знайдено.",
+    );
+  }
+
+  assertMayAssignScope(
+    database,
+    String(row.campaign_id),
+    viewer,
+    String(row.scope),
+    String(row.scope_id),
+  );
 
   const now = new Date().toISOString();
 

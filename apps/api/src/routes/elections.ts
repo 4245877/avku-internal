@@ -61,6 +61,7 @@ import {
   createIssue,
   createMaterialIssue,
   createShift,
+  canReadAttachment,
   createTask,
   deleteAction,
   deleteAttachment,
@@ -172,6 +173,39 @@ async function resolveCampaignId(
   }
 
   return findDefaultCampaign(database)?.id ?? null;
+}
+
+/**
+ * Refuses a write aimed at an archived campaign.
+ *
+ * Archiving is meant to close a campaign and keep it readable, but nothing
+ * enforced that: `?campaignId=<archived>` accepted new actions, tasks and
+ * issues exactly like a live one, so a finished campaign silently kept growing
+ * and its numbers stopped being a record of what happened. Reads are
+ * deliberately left alone — the whole point of an archive is that it can still
+ * be consulted.
+ */
+async function assertCampaignWritable(
+  repository: ElectionsRepository,
+  campaignId: string | null,
+): Promise<void> {
+  if (!campaignId) {
+    return;
+  }
+
+  const database = await repository.getDatabase();
+  const campaign = findCampaign(
+    database,
+    campaignId,
+  );
+
+  if (campaign?.status === "archived") {
+    throw new HttpError(
+      409,
+      "Кампанію заархівовано: дані доступні лише для читання. " +
+        "Щоб продовжити роботу, поверніть кампанію в активний стан.",
+    );
+  }
 }
 
 function requireCampaign(campaignId: string | null): string {
@@ -289,6 +323,13 @@ async function handleHouses(
     campaignId: requireCampaign(campaignId),
     viewer,
   };
+
+  if (request.method !== "GET") {
+    await assertCampaignWritable(
+      repository,
+      listOptions.campaignId,
+    );
+  }
 
   if (!action && request.method === "GET") {
     sendJson(
@@ -430,6 +471,7 @@ async function handleHouses(
       listActions(
         database,
         listOptions.campaignId,
+        viewer,
         {
           houseId,
           limit: readLimit(
@@ -475,6 +517,7 @@ async function handleHouses(
       listTasks(
         database,
         listOptions.campaignId,
+        viewer,
         {
           houseId,
         },
@@ -570,6 +613,14 @@ async function handleActivity(
   const repository = dependencies.elections;
   const database = await repository.getDatabase();
   const [collection, recordId] = segments;
+  // Reading the work log is not public. These three collections used to answer
+  // anybody — including a request with no identity at all — with the whole
+  // campaign's actions, tasks and issue descriptions.
+  requireRole(
+    viewer,
+    "agitator",
+  );
+
   const campaignId = requireCampaign(await resolveCampaignId(
     repository,
     url,
@@ -579,6 +630,13 @@ async function handleActivity(
     campaignId,
   };
 
+  if (request.method !== "GET") {
+    await assertCampaignWritable(
+      repository,
+      campaignId,
+    );
+  }
+
   if (collection === "actions") {
     if (request.method === "GET" && !recordId) {
       sendJson(
@@ -587,6 +645,7 @@ async function handleActivity(
         listActions(
           database,
           campaignId,
+          viewer,
           {
             houseId: url.searchParams.get("houseId") ?? undefined,
             limit: readLimit(
@@ -647,6 +706,7 @@ async function handleActivity(
           db,
           recordId,
           context,
+          viewer,
         ));
       sendJson(
         response,
@@ -732,6 +792,7 @@ async function handleActivity(
           recordId,
           body,
           context,
+          viewer,
         ));
       sendJson(
         response,
@@ -753,6 +814,7 @@ async function handleActivity(
           db,
           recordId,
           context,
+          viewer,
         ));
       sendJson(
         response,
@@ -775,6 +837,7 @@ async function handleActivity(
         listTasks(
           database,
           campaignId,
+          viewer,
           {
             houseId: url.searchParams.get("houseId") ?? undefined,
             assigneeEmail: url.searchParams.get("assignee") ?? undefined,
@@ -844,6 +907,7 @@ async function handleActivity(
           recordId,
           body,
           context,
+          viewer,
         ));
       sendJson(
         response,
@@ -865,6 +929,7 @@ async function handleActivity(
           db,
           recordId,
           context,
+          viewer,
         ));
       sendJson(
         response,
@@ -1140,6 +1205,11 @@ async function handleAttachments(
       url,
     );
 
+    await assertCampaignWritable(
+      repository,
+      campaignId,
+    );
+
     if (meta.houseId) {
       getHouse(
         database,
@@ -1199,46 +1269,37 @@ async function handleAttachments(
       return true;
     }
 
-    if (
-      attachment.accessLevel === "restricted" &&
-      !hasAtLeast(
-        viewer,
-        "coordinator",
-      )
-    ) {
-      throw new HttpError(
-        403,
-        "Це вкладення доступне лише координаторам і вище.",
-      );
-    }
-
-    if (attachment.houseId) {
-      const campaignId = await resolveCampaignId(
+    if (!canReadAttachment(
+      database,
+      attachment,
+      await resolveCampaignId(
         repository,
         url,
-      );
-
-      getHouse(
-        database,
-        attachment.houseId,
-        {
-          campaignId: requireCampaign(campaignId),
-          viewer,
-        },
-      );
+      ),
+      viewer,
+    )) {
+      // Same answer as a missing id: whether a given attachment exists is
+      // itself information about somebody else's territory.
+      notFound(response);
+      return true;
     }
 
     const filePath = repository.resolveAttachmentPath(attachment.storedName);
     const stats = await stat(filePath);
+    // Only real images are rendered in place. Anything else downloads, and
+    // nothing is ever sniffed into a type the allowlist did not grant it.
+    const isImage = attachment.contentType.startsWith("image/");
 
     response.writeHead(
       200,
       {
         "Content-Type": attachment.contentType,
         "Content-Length": stats.size,
-        "Content-Disposition": `inline; filename="${
+        "Content-Disposition": `${isImage ? "inline" : "attachment"}; filename*=UTF-8''${
           encodeURIComponent(attachment.fileName)
-        }"`,
+        }`,
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
         "Cache-Control": "private, max-age=300",
       },
     );
@@ -1400,6 +1461,11 @@ export async function handleElectionsRequest(
   /* ---------------- Campaigns ---------------- */
 
   if (segments[0] === "campaigns") {
+    requireRole(
+      viewer,
+      "agitator",
+    );
+
     const [, campaignId, action] = segments;
 
     if (!campaignId && request.method === "GET") {
@@ -1514,6 +1580,11 @@ export async function handleElectionsRequest(
   /* ---------------- Precincts ---------------- */
 
   if (segments[0] === "precincts") {
+    requireRole(
+      viewer,
+      "agitator",
+    );
+
     const [, precinctId] = segments;
 
     if (!precinctId && request.method === "GET") {
@@ -1765,10 +1836,25 @@ export async function handleElectionsRequest(
   /* ---------------- Assignments ---------------- */
 
   if (segments[0] === "assignments") {
+    // The assignment table maps every employee to the territory they work, so
+    // it is a staffing map, not reference data. It used to answer anybody.
+    requireRole(
+      viewer,
+      "agitator",
+    );
+
     const campaignId = requireCampaign(await resolveCampaignId(
       repository,
       url,
     ));
+
+    if (request.method !== "GET") {
+      await assertCampaignWritable(
+        repository,
+        campaignId,
+      );
+    }
+
     const [, assignmentId] = segments;
 
     if (!assignmentId && request.method === "GET") {
@@ -1803,6 +1889,7 @@ export async function handleElectionsRequest(
             actor: viewer.email,
             campaignId,
           },
+          viewer,
         ));
 
       sendJson(
@@ -1828,6 +1915,7 @@ export async function handleElectionsRequest(
             actor: viewer.email,
             campaignId,
           },
+          viewer,
         ));
       sendJson(
         response,
@@ -2012,10 +2100,22 @@ export async function handleElectionsRequest(
   /* ---------------- Events, shifts, materials ---------------- */
 
   if (segments[0] === "events") {
+    requireRole(
+      viewer,
+      "agitator",
+    );
+
     const campaignId = requireCampaign(await resolveCampaignId(
       repository,
       url,
     ));
+
+    if (request.method !== "GET") {
+      await assertCampaignWritable(
+        repository,
+        campaignId,
+      );
+    }
 
     if (!segments[1] && request.method === "GET") {
       sendJson(
@@ -2092,6 +2192,12 @@ export async function handleElectionsRequest(
       repository,
       url,
     ));
+
+    await assertCampaignWritable(
+      repository,
+      campaignId,
+    );
+
     const body = await readJsonBody(request);
     const id = await repository.withTransaction((db) =>
       createShift(
@@ -2115,10 +2221,22 @@ export async function handleElectionsRequest(
   }
 
   if (segments[0] === "materials") {
+    requireRole(
+      viewer,
+      "coordinator",
+    );
+
     const campaignId = requireCampaign(await resolveCampaignId(
       repository,
       url,
     ));
+
+    if (request.method !== "GET") {
+      await assertCampaignWritable(
+        repository,
+        campaignId,
+      );
+    }
 
     if (request.method === "GET") {
       sendJson(

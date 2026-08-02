@@ -497,9 +497,194 @@ export function normalizeText(value: unknown): string {
     .trim();
 }
 
-/** `вулиця Зодчих` + `58-А` → `вулиця зодчих|58-а`, the duplicate-check key. */
+/**
+ * Street-type words, in the spellings the archive actually uses.
+ *
+ * The old data mixes Ukrainian and Russian, full words and abbreviations, and
+ * writes the same street as `вул. Зодчих`, `вулиця Зодчих` and `ул. Зодчих`.
+ * The key has to survive all three or duplicate detection never fires — which
+ * it did not: the OSM snapshot stores the long form, so every spreadsheet using
+ * the short one looked like a brand-new building.
+ */
+const STREET_TYPE_WORDS = [
+  "вулиця",
+  "вулиця",
+  "вулица",
+  "вул",
+  "улица",
+  "ул",
+  "street",
+  "st",
+  "проспект",
+  "просп",
+  "прт",
+  "пр",
+  "avenue",
+  "ave",
+  "провулок",
+  "пров",
+  "переулок",
+  "пер",
+  "площа",
+  "площадь",
+  "пл",
+  "майдан",
+  "бульвар",
+  "бульв",
+  "бр",
+  "шосе",
+  "шоссе",
+  "ш",
+  "набережна",
+  "набережная",
+  "наб",
+  "проїзд",
+  "проезд",
+  "тупик",
+];
+
+/** `буд. 58`, `д.58`, `№ 58` — the number's own decorations. */
+const HOUSE_NUMBER_PREFIXES = [
+  "будинок",
+  "буд",
+  "дом",
+  "д",
+  "house",
+  "№",
+  "n",
+];
+
+/** `корп. 2`, `к.2`, `літера А` — the part after the number proper. */
+const BUILDING_PART_WORDS = [
+  "корпус",
+  "корп",
+  "кор",
+  "к",
+  "літера",
+  "литера",
+  "лит",
+  "буква",
+  "секція",
+  "секция",
+];
+
+/**
+ * Latin characters that look like Cyrillic ones and get typed instead of them.
+ * `58A` (Latin A) and `58А` (Cyrillic А) are the same house to a human and two
+ * different houses to a database.
+ */
+const LOOKALIKE_LATIN: Record<string, string> = {
+  a: "а",
+  b: "в",
+  c: "с",
+  e: "е",
+  h: "н",
+  i: "і",
+  k: "к",
+  m: "м",
+  o: "о",
+  p: "р",
+  t: "т",
+  x: "х",
+  y: "у",
+};
+
+function stripLeadingPlace(value: string): string {
+  // `м. Київ, вул. Зодчих` → `вул. Зодчих`. Only a leading settlement or region
+  // component is dropped, never a trailing one.
+  return value.replace(
+    /^\s*(?:м|міс(?:то)?|г|гор(?:од)?|с|сел(?:о|ище)?|смт|обл(?:асть)?|район|р-н)\s*\.?\s*[^,]*,\s*/giu,
+    "",
+  );
+}
+
+/**
+ * A street name reduced to the part that identifies it.
+ *
+ * Drops the settlement prefix, every street-type word wherever it sits, and all
+ * punctuation, so `м. Київ, вул. Зодчих`, `вулиця Зодчих` and `Зодчих вул.` all
+ * become `зодчих`.
+ */
+export function normalizeStreet(value: unknown): string {
+  const base = normalizeText(stripLeadingPlace(String(value ?? "")));
+  const words = base
+    .replace(/[.,;]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((word) => !STREET_TYPE_WORDS.includes(word));
+
+  return words.join(" ").trim();
+}
+
+/**
+ * A house number reduced to a comparable token.
+ *
+ * `58-А`, `58 А`, `58/А`, `буд. 58а` and `58A` (Latin) all become `58а`;
+ * `12 корп. 2` and `12к2` both become `12к2`.
+ */
+export function normalizeHouseNumber(value: unknown): string {
+  let text = normalizeText(value).replace(/[.,;]/g, " ");
+
+  for (const prefix of HOUSE_NUMBER_PREFIXES) {
+    text = text.replace(
+      new RegExp(`(^|\\s)${prefix}\\s*`, "gu"),
+      "$1",
+    );
+  }
+
+  for (const word of BUILDING_PART_WORDS) {
+    text = text.replace(
+      new RegExp(`(^|[\\s\\-/])${word}\\s*(?=\\d)`, "gu"),
+      "$1к",
+    );
+  }
+
+  return text
+    .replace(/[\s\-/\\]+/g, "")
+    .replace(
+      /[a-z]/g,
+      (character) => LOOKALIKE_LATIN[character] ?? character,
+    )
+    .trim();
+}
+
+/**
+ * `вулиця Зодчих` + `58-А` → `зодчих|58а`, the duplicate-check key.
+ *
+ * Both halves are canonicalised rather than merely lowercased. The previous
+ * version only lowercased, which meant the key carried whichever street-type
+ * word and whichever hyphen the source happened to use, and two spellings of
+ * one address never met.
+ */
 export function normalizeAddress(street: unknown, number: unknown): string {
-  return `${normalizeText(street)}|${normalizeText(number)}`;
+  return `${normalizeStreet(street)}|${normalizeHouseNumber(number)}`;
+}
+
+/**
+ * The house numbers listed in one cell, when there is more than one.
+ *
+ * The archive routinely puts a whole run of buildings in a single field —
+ * `Зодчих 58, 60, 62` or `58 і 60`. Guessing which one the row is about is
+ * exactly the kind of silent damage the import must not do, so this only
+ * reports the ambiguity and the row goes to a human.
+ */
+export function findMultipleHouseNumbers(value: unknown): string[] {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return [];
+  }
+
+  // `\b` is ASCII-only even under `u`, so the conjunctions are matched by the
+  // whitespace around them rather than by a word boundary.
+  const separated = text.split(
+    /\s*(?:,|;|\+|\/{2,})\s*|\s+(?:і|й|та|и|and)\s+/giu,
+  );
+  const numbers = separated
+    .map((part) => part.trim())
+    .filter((part) => /^\d+\s*[-/]?\s*[a-zа-яіїєґ]?$/iu.test(part));
+
+  return numbers.length > 1 ? numbers : [];
 }
 
 /**

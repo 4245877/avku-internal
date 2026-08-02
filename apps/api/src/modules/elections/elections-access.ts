@@ -278,12 +278,19 @@ export interface VisibilityClause {
  * with.
  *
  *   admin / manager — the whole campaign.
- *   coordinator     — the precincts they are assigned to; a coordinator with no
- *                     precinct assignment at all sees the whole campaign, which
- *                     is the common small-campaign setup and avoids a brand-new
- *                     coordinator seeing an empty map.
+ *   coordinator     — the houses and precincts they are assigned to, and nothing
+ *                     else. An unassigned coordinator sees an empty map: that is
+ *                     the correct answer, not a reason to hand over the campaign.
  *   agitator        — houses assigned to them, directly or through a precinct.
  *   no role         — nothing.
+ *
+ * There used to be a fallback here that gave a coordinator with no assignment
+ * the whole campaign, so that a newly created coordinator would not face an
+ * empty map. It meant territory access was granted by *forgetting* to assign
+ * somebody — the widest possible permission produced by the least deliberate
+ * act — and it silently extended to contacts, because `canSeeContacts` trusts
+ * the query to have been narrowed already. Territory is now only ever granted
+ * explicitly.
  *
  * Written as SQL rather than a post-filter on purpose: a house the viewer may
  * not see is never read, so its contact rows are never in memory to leak.
@@ -340,26 +347,73 @@ export function houseVisibilitySql(
     visEmail: viewer.email,
   };
 
-  if (viewer.role === "coordinator") {
-    return {
-      sql: `(
-        ${assignedHouses}
-        OR ${assignedPrecincts}
-        OR NOT EXISTS (
-          SELECT 1 FROM assignments a
-          WHERE a.campaign_id = :visCampaignId
-            AND a.deleted_at IS NULL
-            AND a.status = 'active'
-            AND a.employee_email = :visEmail
-        )
-      )`,
-      parameters,
-    };
-  }
-
   return {
     sql: `(${assignedHouses} OR ${assignedPrecincts})`,
     parameters,
+  };
+}
+
+/**
+ * The `WHERE` fragment that limits an activity row — an action, a task, an
+ * issue — to what the viewer may read.
+ *
+ * The house lists were already filtered; these tables were not, so
+ * `GET /api/elections/actions` handed any caller the entire campaign's work log
+ * including the comment field, and `GET /api/elections/tasks` handed over every
+ * task with its house address. Filtering here rather than after the fact means
+ * a row for a building the viewer has no access to is never read into memory.
+ *
+ * A row with no house is campaign-wide rather than territorial: below manager
+ * it is shown only to the person named on it (`personColumns`), because
+ * otherwise "no house" would be a way to bypass the house filter entirely.
+ */
+export function activityVisibilitySql(
+  viewer: ElectionsViewer,
+  campaignId: string,
+  houseColumn: string,
+  personColumns: string[] = [],
+): VisibilityClause {
+  if (!viewer.role || !viewer.email) {
+    return {
+      sql: "0 = 1",
+      parameters: {},
+    };
+  }
+
+  if (hasAtLeast(
+    viewer,
+    "manager",
+  )) {
+    return {
+      sql: "1 = 1",
+      parameters: {},
+    };
+  }
+
+  const houseClause = houseVisibilitySql(
+    viewer,
+    campaignId,
+    "vish",
+  );
+  const ownRow = personColumns
+    .map((column) => `LOWER(${column}) = :visEmail`)
+    .join(" OR ");
+
+  return {
+    sql: `(
+      EXISTS (
+        SELECT 1 FROM houses vish
+        WHERE vish.id = ${houseColumn}
+          AND vish.deleted_at IS NULL
+          AND ${houseClause.sql}
+      )
+      OR (${houseColumn} IS NULL${ownRow ? ` AND (${ownRow})` : " AND 0 = 1"})
+    )`,
+    parameters: {
+      ...houseClause.parameters,
+      visCampaignId: campaignId,
+      visEmail: viewer.email.toLowerCase(),
+    },
   };
 }
 

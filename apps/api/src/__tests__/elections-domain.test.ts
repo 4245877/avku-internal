@@ -761,6 +761,24 @@ describe("field work", () => {
     );
 
     houseId = listed.json.houses[0].id;
+
+    // A coordinator holds the territory that was granted to them and nothing
+    // else, so the grant has to be explicit before they can work this house.
+    // There used to be an implicit fallback that handed an unassigned
+    // coordinator the entire campaign; it is gone.
+    await api(
+      "POST",
+      "/api/elections/assignments",
+      {
+        as: MANAGER,
+        body: {
+          scope: "house",
+          scopeId: houseId,
+          employeeEmail: COORDINATOR,
+          role: "coordinator",
+        },
+      },
+    );
   });
 
   test("an action is attributed to the caller, not to a field they sent", async () => {

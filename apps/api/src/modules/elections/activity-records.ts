@@ -31,7 +31,12 @@ import {
   requireText,
   requireTimestamp,
 } from "./elections.types";
-import { type ElectionsViewer, hasAtLeast } from "./elections-access";
+import {
+  activityVisibilitySql,
+  type ElectionsViewer,
+  hasAtLeast,
+  houseVisibilitySql,
+} from "./elections-access";
 import { assertHouseExists } from "./house-records";
 
 /**
@@ -43,6 +48,92 @@ import { assertHouseExists } from "./house-records";
  * answer the same question at different granularities. Keeping them uniform is
  * what lets the house card show a single merged timeline.
  */
+
+/* ------------------------------------------------------------------ *
+ * Access guards shared by every mutation below
+ * ------------------------------------------------------------------ */
+
+/**
+ * Refuses a record that belongs to a different campaign than the request is
+ * working in.
+ *
+ * Without this, an id was enough: `PATCH /tasks/<id>?campaignId=<other>`
+ * happily edited — and `DELETE` happily removed — a task belonging to a
+ * campaign the caller was not looking at, including an archived one. The role
+ * check passed because roles are global; nothing then re-checked the row.
+ *
+ * The answer is 404 rather than 403, for the same reason `getHouse` gives 404:
+ * a 403 would confirm that a record with that id exists somewhere.
+ */
+export function assertRowInCampaign(
+  row: Record<string, unknown>,
+  campaignId: string | null | undefined,
+  message: string,
+): void {
+  if (!campaignId) {
+    return;
+  }
+
+  if (String(row.campaign_id ?? "") !== campaignId) {
+    throw new HttpError(
+      404,
+      message,
+    );
+  }
+}
+
+/**
+ * Refuses a record whose house the viewer may not work with.
+ *
+ * The role checks on the routes are coarse ("an agitator may edit tasks"). This
+ * is the territorial half: an agitator may edit *their* tasks, not every task
+ * in the campaign.
+ */
+export function assertActivityVisible(
+  database: DatabaseSync,
+  row: Record<string, unknown>,
+  campaignId: string,
+  viewer: ElectionsViewer,
+  message: string,
+  personColumns: string[] = [],
+): void {
+  if (hasAtLeast(
+    viewer,
+    "manager",
+  )) {
+    return;
+  }
+
+  const visibility = activityVisibilitySql(
+    viewer,
+    campaignId,
+    ":guardHouseId",
+    personColumns.map((_, index) => `:guardPerson${index}`),
+  );
+  const parameters: Record<string, unknown> = {
+    ...visibility.parameters,
+    guardHouseId: row.house_id == null ? null : String(row.house_id),
+  };
+
+  personColumns.forEach((column, index) => {
+    const value = row[column];
+
+    parameters[`guardPerson${index}`] = value == null
+      ? null
+      : String(value).toLowerCase();
+  });
+
+  const allowed = database.prepare(
+    `SELECT ${visibility.sql} AS ok`,
+  ).get(parameters as never) as Record<string, unknown> | undefined;
+
+  if (!allowed || Number(allowed.ok) !== 1) {
+    throw new HttpError(
+      404,
+      message,
+    );
+  }
+}
 
 /* ------------------------------------------------------------------ *
  * Actions
@@ -88,20 +179,38 @@ function rowToAction(row: Record<string, unknown>): ActionRecord {
   };
 }
 
+/**
+ * The work log, limited to the houses the viewer may see.
+ *
+ * `viewer` is required rather than optional on purpose: this list used to be
+ * campaign-wide for anybody who asked, so an agitator assigned to one building
+ * could read every visit comment in the district.
+ */
 export function listActions(
   database: DatabaseSync,
   campaignId: string,
+  viewer: ElectionsViewer,
   filters: { houseId?: string; limit?: number } = {},
 ): ActionRecord[] {
+  const visibility = activityVisibilitySql(
+    viewer,
+    campaignId,
+    "a.house_id",
+    ["a.author_email"],
+  );
   const conditions = [
-    "a.campaign_id = ?",
+    "a.campaign_id = :campaignId",
     "a.deleted_at IS NULL",
+    visibility.sql,
   ];
-  const parameters: unknown[] = [campaignId];
+  const parameters: Record<string, unknown> = {
+    ...visibility.parameters,
+    campaignId,
+  };
 
   if (filters.houseId) {
-    conditions.push("a.house_id = ?");
-    parameters.push(filters.houseId);
+    conditions.push("a.house_id = :filterHouseId");
+    parameters.filterHouseId = filters.houseId;
   }
 
   const limit = Math.min(
@@ -114,7 +223,7 @@ export function listActions(
     WHERE ${conditions.join(" AND ")}
     ORDER BY a.happened_at DESC, a.created_at DESC
     LIMIT ${limit}
-  `).all(...parameters as never[]) as Record<string, unknown>[];
+  `).all(parameters as never) as Record<string, unknown>[];
 
   const actions = rows.map(rowToAction);
 
@@ -244,6 +353,7 @@ export function deleteAction(
   database: DatabaseSync,
   actionId: string,
   context: ChangeContext,
+  viewer?: ElectionsViewer,
 ): void {
   softDelete(
     database,
@@ -251,6 +361,8 @@ export function deleteAction(
     "action",
     actionId,
     context,
+    viewer,
+    ["author_email"],
   );
 }
 
@@ -319,15 +431,28 @@ export function listIssues(
   viewer: ElectionsViewer,
   filters: { houseId?: string; status?: string; limit?: number } = {},
 ): IssueRecord[] {
+  const visibility = activityVisibilitySql(
+    viewer,
+    campaignId,
+    "i.house_id",
+    [
+      "i.assignee_email",
+      "i.created_by",
+    ],
+  );
   const conditions = [
-    "i.campaign_id = ?",
+    "i.campaign_id = :campaignId",
     "i.deleted_at IS NULL",
+    visibility.sql,
   ];
-  const parameters: unknown[] = [campaignId];
+  const parameters: Record<string, unknown> = {
+    ...visibility.parameters,
+    campaignId,
+  };
 
   if (filters.houseId) {
-    conditions.push("i.house_id = ?");
-    parameters.push(filters.houseId);
+    conditions.push("i.house_id = :filterHouseId");
+    parameters.filterHouseId = filters.houseId;
   }
 
   if (filters.status === "open") {
@@ -335,8 +460,8 @@ export function listIssues(
       `i.status IN (${OPEN_ISSUE_STATUSES.map((s) => `'${s}'`).join(", ")})`,
     );
   } else if (filters.status) {
-    conditions.push("i.status = ?");
-    parameters.push(filters.status);
+    conditions.push("i.status = :filterStatus");
+    parameters.filterStatus = filters.status;
   }
 
   const limit = Math.min(
@@ -352,7 +477,7 @@ export function listIssues(
                     WHEN 'waiting' THEN 2 ELSE 3 END,
       COALESCE(i.due_at, i.opened_at)
     LIMIT ${limit}
-  `).all(...parameters as never[]) as Record<string, unknown>[];
+  `).all(parameters as never) as Record<string, unknown>[];
 
   // A `restricted` issue keeps its title and status for everybody — the house
   // card still has to show that something is open — but its description is only
@@ -522,6 +647,7 @@ export function updateIssue(
   issueId: string,
   input: IssueInput,
   context: ChangeContext,
+  viewer?: ElectionsViewer,
 ): void {
   const row = database.prepare(`
     SELECT * FROM issues WHERE id = ? AND deleted_at IS NULL
@@ -531,6 +657,26 @@ export function updateIssue(
     throw new HttpError(
       404,
       "Звернення не знайдено.",
+    );
+  }
+
+  assertRowInCampaign(
+    row,
+    context.campaignId,
+    "Звернення не знайдено.",
+  );
+
+  if (viewer && context.campaignId) {
+    assertActivityVisible(
+      database,
+      row,
+      context.campaignId,
+      viewer,
+      "Звернення не знайдено.",
+      [
+        "assignee_email",
+        "created_by",
+      ],
     );
   }
 
@@ -657,6 +803,7 @@ export function deleteIssue(
   database: DatabaseSync,
   issueId: string,
   context: ChangeContext,
+  viewer?: ElectionsViewer,
 ): void {
   softDelete(
     database,
@@ -664,6 +811,11 @@ export function deleteIssue(
     "issue",
     issueId,
     context,
+    viewer,
+    [
+      "assignee_email",
+      "created_by",
+    ],
   );
 }
 
@@ -731,6 +883,7 @@ function rowToTask(row: Record<string, unknown>): TaskRecord {
 export function listTasks(
   database: DatabaseSync,
   campaignId: string,
+  viewer: ElectionsViewer,
   filters: {
     houseId?: string;
     assigneeEmail?: string;
@@ -739,41 +892,54 @@ export function listTasks(
     limit?: number;
   } = {},
 ): TaskRecord[] {
+  const visibility = activityVisibilitySql(
+    viewer,
+    campaignId,
+    "t.house_id",
+    [
+      "t.assignee_email",
+      "t.created_by",
+    ],
+  );
   const conditions = [
-    "t.campaign_id = ?",
+    "t.campaign_id = :campaignId",
     "t.deleted_at IS NULL",
+    visibility.sql,
   ];
-  const parameters: unknown[] = [campaignId];
+  const parameters: Record<string, unknown> = {
+    ...visibility.parameters,
+    campaignId,
+  };
   const openList = OPEN_TASK_STATUSES.map((s) => `'${s}'`).join(", ");
 
   if (filters.houseId) {
-    conditions.push("t.house_id = ?");
-    parameters.push(filters.houseId);
+    conditions.push("t.house_id = :filterHouseId");
+    parameters.filterHouseId = filters.houseId;
   }
 
   if (filters.assigneeEmail) {
-    conditions.push("t.assignee_email = ?");
-    parameters.push(filters.assigneeEmail.toLowerCase());
+    conditions.push("t.assignee_email = :filterAssignee");
+    parameters.filterAssignee = filters.assigneeEmail.toLowerCase();
   }
 
   if (filters.status) {
-    conditions.push("t.status = ?");
-    parameters.push(filters.status);
+    conditions.push("t.status = :filterStatus");
+    parameters.filterStatus = filters.status;
   }
 
   if (filters.scope === "overdue") {
     conditions.push(
-      `t.status IN (${openList}) AND t.due_at IS NOT NULL AND t.due_at < ?`,
+      `t.status IN (${openList}) AND t.due_at IS NOT NULL AND t.due_at < :nowStamp`,
     );
-    parameters.push(new Date().toISOString());
+    parameters.nowStamp = new Date().toISOString();
   } else if (filters.scope === "today") {
     conditions.push(
-      `t.status IN (${openList}) AND substr(t.due_at, 1, 10) = ?`,
+      `t.status IN (${openList}) AND substr(t.due_at, 1, 10) = :todayStamp`,
     );
-    parameters.push(new Date().toISOString().slice(
+    parameters.todayStamp = new Date().toISOString().slice(
       0,
       10,
-    ));
+    );
   } else if (filters.scope === "unassigned") {
     conditions.push(
       `t.status IN (${openList}) AND (t.assignee_email IS NULL OR t.assignee_email = '')`,
@@ -797,7 +963,7 @@ export function listTasks(
       t.due_at IS NULL,
       t.due_at
     LIMIT ${limit}
-  `).all(...parameters as never[]) as Record<string, unknown>[];
+  `).all(parameters as never) as Record<string, unknown>[];
 
   return rows.map(rowToTask);
 }
@@ -937,6 +1103,7 @@ export function updateTask(
   taskId: string,
   input: TaskInput,
   context: ChangeContext,
+  viewer?: ElectionsViewer,
 ): void {
   const row = database.prepare(`
     SELECT t.*, '' AS house_address FROM tasks t
@@ -947,6 +1114,26 @@ export function updateTask(
     throw new HttpError(
       404,
       "Задачу не знайдено.",
+    );
+  }
+
+  assertRowInCampaign(
+    row,
+    context.campaignId,
+    "Задачу не знайдено.",
+  );
+
+  if (viewer && context.campaignId) {
+    assertActivityVisible(
+      database,
+      row,
+      context.campaignId,
+      viewer,
+      "Задачу не знайдено.",
+      [
+        "assignee_email",
+        "created_by",
+      ],
     );
   }
 
@@ -1035,6 +1222,7 @@ export function deleteTask(
   database: DatabaseSync,
   taskId: string,
   context: ChangeContext,
+  viewer?: ElectionsViewer,
 ): void {
   softDelete(
     database,
@@ -1042,6 +1230,11 @@ export function deleteTask(
     "task",
     taskId,
     context,
+    viewer,
+    [
+      "assignee_email",
+      "created_by",
+    ],
   );
 }
 
@@ -1249,6 +1442,64 @@ export function deleteEvent(
     eventId,
     context,
   );
+}
+
+/**
+ * Whether the viewer may read an attachment.
+ *
+ * An attachment hanging off a house is governed by that house. One hanging off
+ * an action or an event has no house to govern it, and used to be readable by
+ * anybody holding the agitator role — so a photo attached to a district-wide
+ * action was effectively public to the whole field team. Below coordinator,
+ * such an attachment is now visible only to whoever uploaded it.
+ */
+export function canReadAttachment(
+  database: DatabaseSync,
+  attachment: { houseId: string | null; uploadedBy: string; accessLevel: string },
+  campaignId: string | null,
+  viewer: ElectionsViewer,
+): boolean {
+  if (
+    attachment.accessLevel === "restricted" &&
+    !hasAtLeast(
+      viewer,
+      "coordinator",
+    )
+  ) {
+    return false;
+  }
+
+  if (hasAtLeast(
+    viewer,
+    "manager",
+  )) {
+    return true;
+  }
+
+  if (!attachment.houseId) {
+    return attachment.uploadedBy.toLowerCase() ===
+      (viewer.email ?? "").toLowerCase();
+  }
+
+  if (!campaignId) {
+    return false;
+  }
+
+  const visibility = houseVisibilitySql(
+    viewer,
+    campaignId,
+    "h",
+  );
+  const row = database.prepare(`
+    SELECT 1 AS ok FROM houses h
+    WHERE h.id = :attachmentHouseId AND h.deleted_at IS NULL
+      AND ${visibility.sql}
+  `).get({
+    ...visibility.parameters,
+    attachmentHouseId: attachment.houseId,
+  } as never);
+
+  return Boolean(row);
 }
 
 export function listShifts(
@@ -1805,19 +2056,44 @@ function softDelete(
   entity: string,
   id: string,
   context: ChangeContext,
+  viewer?: ElectionsViewer,
+  personColumns: string[] = [],
 ): void {
   if (!SOFT_DELETABLE.has(table)) {
     throw new Error(`Table ${table} is not soft-deletable.`);
   }
 
+  const selected = [
+    "id",
+    "campaign_id",
+    ...(table === "attachments" || table === "shifts" ? [] : ["house_id"]),
+    ...personColumns,
+  ].join(", ");
   const row = database.prepare(`
-    SELECT id, campaign_id FROM ${table} WHERE id = ? AND deleted_at IS NULL
+    SELECT ${selected} FROM ${table} WHERE id = ? AND deleted_at IS NULL
   `).get(id) as Record<string, unknown> | undefined;
 
   if (!row) {
     throw new HttpError(
       404,
       "Запис не знайдено.",
+    );
+  }
+
+  assertRowInCampaign(
+    row,
+    context.campaignId,
+    "Запис не знайдено.",
+  );
+
+  if (viewer && context.campaignId && "house_id" in row) {
+    assertActivityVisible(
+      database,
+      row,
+      context.campaignId,
+      viewer,
+      "Запис не знайдено.",
+      personColumns,
     );
   }
 

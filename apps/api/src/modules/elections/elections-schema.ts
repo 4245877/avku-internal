@@ -25,6 +25,7 @@ import {
   PRIORITIES,
   TASK_STATUSES,
   WORK_STAGES,
+  normalizeAddress,
 } from "./elections.types";
 
 /**
@@ -47,7 +48,7 @@ import {
  * everything ever recorded against it.
  */
 
-export const ELECTIONS_SCHEMA_VERSION = 1;
+export const ELECTIONS_SCHEMA_VERSION = 2;
 
 /** `'a','b','c'` — a CHECK list built from the shared vocabulary. */
 function sqlList(values: readonly string[]): string {
@@ -689,11 +690,59 @@ const CREATE_IMPORT = `
     ON import_effects(batch_id, id DESC);
 `;
 
+/* ------------------------------------------------------------------ *
+ * Step 2 — canonical address keys, and rollback that can tell whether a
+ * value has been touched since the import wrote it.
+ * ------------------------------------------------------------------ */
+
+function migrateToVersion2(database: DatabaseSync): void {
+  // What the import last wrote. Rollback compares this against the row's
+  // current value and leaves anything a user has since changed alone; before
+  // the column existed it restored the pre-import value unconditionally and
+  // wiped later corrections.
+  addColumnIfMissing(
+    database,
+    "import_effects",
+    "applied",
+    "TEXT",
+  );
+
+  // `address_normalized` is now canonical — street-type words and the house
+  // number's decorations are stripped — so keys written by the old rule have to
+  // be recomputed or a newly normalised address would never match one of them.
+  //
+  // Recomputed by calling `normalizeAddress` row by row rather than in SQL.
+  // SQLite's `LOWER()` is ASCII-only without ICU, so a SQL rewrite leaves every
+  // Cyrillic street name capitalised and produces 5 896 keys that match
+  // nothing — which is precisely what the first version of this step did. One
+  // implementation of the rule, in one language, is the only way the two ends
+  // stay in agreement.
+  const rows = database.prepare(`
+    SELECT id, street, number FROM houses WHERE deleted_at IS NULL
+  `).all() as Record<string, unknown>[];
+
+  const update = database.prepare(`
+    UPDATE houses SET address_normalized = ? WHERE id = ?
+  `);
+
+  for (const row of rows) {
+    update.run(
+      normalizeAddress(
+        row.street,
+        row.number,
+      ),
+      String(row.id),
+    );
+  }
+}
+
 /**
  * Brings a connection up to {@link ELECTIONS_SCHEMA_VERSION}.
  *
  * Safe on a fresh file, safe on an existing one, and safe to call twice in a
- * row — which is exactly what happens every time the API restarts.
+ * row — which is exactly what happens every time the API restarts. Each step
+ * runs only when the stored `user_version` is below it, and every statement
+ * inside a step is itself idempotent.
  */
 export function migrateElectionsDatabase(database: DatabaseSync): void {
   const version = readUserVersion(database);
@@ -711,17 +760,24 @@ export function migrateElectionsDatabase(database: DatabaseSync): void {
     database.exec("BEGIN IMMEDIATE");
 
     try {
-      database.exec(CREATE_HOUSES);
-      database.exec(CREATE_CAMPAIGNS);
-      database.exec(CREATE_PRECINCTS);
-      database.exec(CREATE_HOUSE_CAMPAIGN_STATE);
-      database.exec(CREATE_HOUSE_POLLING_STATIONS);
-      database.exec(CREATE_PEOPLE);
-      database.exec(CREATE_ASSIGNMENTS);
-      database.exec(CREATE_ACTIVITY);
-      database.exec(CREATE_ATTACHMENTS);
-      database.exec(CREATE_JOURNALS);
-      database.exec(CREATE_IMPORT);
+      if (version < 1) {
+        database.exec(CREATE_HOUSES);
+        database.exec(CREATE_CAMPAIGNS);
+        database.exec(CREATE_PRECINCTS);
+        database.exec(CREATE_HOUSE_CAMPAIGN_STATE);
+        database.exec(CREATE_HOUSE_POLLING_STATIONS);
+        database.exec(CREATE_PEOPLE);
+        database.exec(CREATE_ASSIGNMENTS);
+        database.exec(CREATE_ACTIVITY);
+        database.exec(CREATE_ATTACHMENTS);
+        database.exec(CREATE_JOURNALS);
+        database.exec(CREATE_IMPORT);
+      }
+
+      if (version < 2) {
+        migrateToVersion2(database);
+      }
+
       database.exec(`PRAGMA user_version = ${ELECTIONS_SCHEMA_VERSION}`);
       database.exec("COMMIT");
     } catch (error) {
