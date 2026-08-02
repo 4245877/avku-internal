@@ -120,6 +120,15 @@ function ElectionsHeader({
               Увімкнено режим розробки — права видані локально
             </span>
           )}
+
+          {/* Same reasoning for the LAN stand-in: the rights are real, but they
+              come from the deployment's configuration rather than from a login,
+              so the screen has to say so. */}
+          {viewer?.isLocalAuth && !viewer?.isDevAuth && (
+            <span className={`${styles.badge} ${styles.badgeNeutral}`}>
+              Локальний доступ у мережі — права з ELECTIONS_LOCAL_EMAIL
+            </span>
+          )}
         </div>
 
         <p className={styles.heroAddress}>

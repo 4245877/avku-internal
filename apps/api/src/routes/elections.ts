@@ -272,6 +272,7 @@ async function handleHouses(
           email: viewer.email,
           role: viewer.role,
           isDevAuth: viewer.isDevAuth,
+          isLocalAuth: viewer.isLocalAuth,
         },
       },
     );
@@ -1324,6 +1325,7 @@ export async function handleElectionsRequest(
         email: viewer.email,
         role: viewer.role,
         isDevAuth: viewer.isDevAuth,
+        isLocalAuth: viewer.isLocalAuth,
       },
     );
     return;

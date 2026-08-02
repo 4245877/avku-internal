@@ -210,12 +210,15 @@ test("GET /api/me reports local access when no JWT is presented", async () => {
 
   assert.equal(me.status, 200);
   // Local access is still anonymous, and anonymous carries no elections role:
-  // being on the LAN must never imply permission to write.
+  // being on the LAN must never imply permission to write. `isLocalAuth: false`
+  // pins the other half — the `ELECTIONS_LOCAL_EMAIL` stand-in is opt-in, so an
+  // unconfigured deployment gets no identity from merely being on the network.
   assert.deepEqual(me.json, {
     email: null,
     local: true,
     electionsRole: null,
     isDevAuth: false,
+    isLocalAuth: false,
   });
 });
 

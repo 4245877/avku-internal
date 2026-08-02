@@ -32,12 +32,14 @@ export function handleMeRequest(
           firstSeen: employee.firstSeen,
           electionsRole: viewer.role,
           isDevAuth: viewer.isDevAuth,
+          isLocalAuth: viewer.isLocalAuth,
         }
       : {
           email: viewer.email,
           local: true,
           electionsRole: viewer.role,
           isDevAuth: viewer.isDevAuth,
+          isLocalAuth: viewer.isLocalAuth,
         },
   );
 }

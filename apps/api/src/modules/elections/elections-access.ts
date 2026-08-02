@@ -41,12 +41,18 @@ export interface ElectionsViewer {
   role: ElectionsRole | null;
   /** True when the role came from the dev override rather than an identity. */
   isDevAuth: boolean;
+  /**
+   * True when the identity came from `ELECTIONS_LOCAL_EMAIL` rather than from a
+   * verified Access assertion — a LAN deployment standing in for a login.
+   */
+  isLocalAuth: boolean;
 }
 
 export const ANONYMOUS_VIEWER: ElectionsViewer = {
   email: null,
   role: null,
   isDevAuth: false,
+  isLocalAuth: false,
 };
 
 export function hasAtLeast(
@@ -160,6 +166,40 @@ export function resolveDevRole(): ElectionsRole | null {
   return role;
 }
 
+let hasWarnedAboutLocalAuth = false;
+
+/**
+ * The identity to assume for a request that carries no Access assertion.
+ *
+ * The LAN entry point is deliberately anonymous: `infra/nginx/app.conf` strips
+ * `Cf-Access-*` from every host except the tunnel's, so a request from the
+ * office network has no email and therefore no role — and `houseVisibilitySql`
+ * shows a roleless viewer nothing at all. That is the correct default for a
+ * public origin, but it leaves a LAN-bound internal deployment with an empty
+ * map and no way to sign in.
+ *
+ * `ELECTIONS_LOCAL_EMAIL` is the deliberate way out: the operator names the
+ * person the LAN is trusted to be, and that email still has to earn its role
+ * through `ELECTIONS_ADMIN_EMAILS` or a stored one. Unlike the dev override it
+ * stays available in production — a LAN appliance is a production deployment —
+ * so it is reported back to the UI and warned about once at startup rather than
+ * being allowed to pass for a real login.
+ */
+function resolveLocalEmail(): string | null {
+  const email = readEnv("ELECTIONS_LOCAL_EMAIL")?.toLowerCase() ?? null;
+
+  if (email && !hasWarnedAboutLocalAuth) {
+    hasWarnedAboutLocalAuth = true;
+    console.warn(
+      `[elections] LOCAL AUTH ACTIVE — requests without a Cloudflare Access ` +
+        `assertion are treated as "${email}". Only enable this where the ` +
+        "origin is reachable from a trusted network.",
+    );
+  }
+
+  return email;
+}
+
 export interface RoleSources {
   /** Role stored against the employee, if any. */
   storedRole?: string | null;
@@ -175,7 +215,12 @@ export interface RoleSources {
  * it cannot be locked out by a bad edit.
  */
 export function resolveViewer(sources: RoleSources): ElectionsViewer {
-  const email = sources.email?.trim().toLowerCase() || null;
+  const identifiedEmail = sources.email?.trim().toLowerCase() || null;
+  // Only ever a fallback: a real Access identity is never overridden by the
+  // LAN stand-in, so enabling it cannot silently re-label a signed-in user.
+  const localEmail = identifiedEmail ? null : resolveLocalEmail();
+  const email = identifiedEmail ?? localEmail;
+  const isLocalAuth = email !== null && email === localEmail;
 
   if (email) {
     if (parseEmailList(readEnv("ELECTIONS_ADMIN_EMAILS")).has(email)) {
@@ -183,6 +228,7 @@ export function resolveViewer(sources: RoleSources): ElectionsViewer {
         email,
         role: "admin",
         isDevAuth: false,
+        isLocalAuth,
       };
     }
 
@@ -191,6 +237,7 @@ export function resolveViewer(sources: RoleSources): ElectionsViewer {
         email,
         role: sources.storedRole as ElectionsRole,
         isDevAuth: false,
+        isLocalAuth,
       };
     }
   }
@@ -202,6 +249,7 @@ export function resolveViewer(sources: RoleSources): ElectionsViewer {
       email: email ?? "dev@localhost",
       role: devRole,
       isDevAuth: true,
+      isLocalAuth: false,
     };
   }
 
@@ -211,6 +259,7 @@ export function resolveViewer(sources: RoleSources): ElectionsViewer {
     email,
     role: null,
     isDevAuth: false,
+    isLocalAuth,
   };
 }
 
