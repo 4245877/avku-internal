@@ -48,22 +48,30 @@ function district({ east = 0, north = 0, half = 400 }) {
   ].map((point) => unprojectFromMeters(point));
 }
 
+/**
+ * One house as the map endpoint sends it, and its outline as
+ * `/houses/geometry` sends that: the street by index into the payload's
+ * dictionary, the coordinates flat, the ring flat and separate.
+ */
 function houseAt({ x, y }, id, size = 15) {
+  const ring = [
+    { x: x - size, y: y - size },
+    { x: x + size, y: y - size },
+    { x: x + size, y: y + size },
+    { x: x - size, y: y + size },
+  ].map((point) => unprojectFromMeters(point));
+  const location = unprojectFromMeters({ x, y });
+
   return {
-    id: `way/${id}`,
-    street: 'вулиця Якуба Коласа',
-    streetShort: 'вул. Якуба Коласа',
-    number: String(id),
-    address: `вул. Якуба Коласа, ${id}`,
-    type: 'apartments',
-    location: unprojectFromMeters({ x, y }),
-    footprint: [
-      { x: x - size, y: y - size },
-      { x: x + size, y: y - size },
-      { x: x + size, y: y + size },
-      { x: x - size, y: y + size },
-    ].map((point) => unprojectFromMeters(point)),
-    isHeadquarters: false,
+    house: {
+      id: `way/${id}`,
+      street: 0,
+      number: String(id),
+      lat: location.lat,
+      lon: location.lon,
+      type: 'apartments',
+    },
+    footprint: ring.flatMap((point) => [point.lat, point.lon]),
   };
 }
 
@@ -96,11 +104,28 @@ function createServer({ savedArea = null } = {}) {
         : new Response('{}', { status: 404 });
     }
 
+    if (href.includes('/houses/geometry')) {
+      return new Response(
+        JSON.stringify({
+          version: 'test',
+          footprints: Object.fromEntries(
+            HOUSES.map((entry) => [entry.house.id, entry.footprint]),
+          ),
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
     return new Response(
       JSON.stringify({
         version: 2,
         coverage: { box: state.coverageBox },
-        houses: HOUSES,
+        // These tests are about the client's own boundary handling, so the
+        // server is one that has no stored boundary to apply.
+        areaApplied: false,
+        geometryVersion: 'test',
+        streets: ['вулиця Якуба Коласа'],
+        houses: HOUSES.map((entry) => entry.house),
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
@@ -125,6 +150,68 @@ afterEach(() => {
 });
 
 describe('useHousesData', () => {
+  it('puts the outlines on the houses', async () => {
+    const { result } = renderHook(() => useHousesData());
+
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+    await waitFor(() =>
+      expect(result.current.houses.every((house) => house.footprint?.length === 4)).toBe(true),
+    );
+
+    expect(result.current.houses[0].footprint[0]).toEqual({
+      lat: expect.any(Number),
+      lon: expect.any(Number),
+    });
+  });
+
+  /**
+   * The outlines are fetched by version so the browser can answer from its own
+   * cache — which means on every visit after the first they arrive *before* the
+   * houses they belong to. Merging them into whatever was on screen at that
+   * moment wrote them onto the previous dataset, and the houses response then
+   * replaced it wholesale: a map with a full list beside it and not one
+   * building drawn.
+   */
+  it('keeps outlines that arrive before the houses', async () => {
+    let releaseHouses;
+    const housesArrived = new Promise((resolve) => {
+      releaseHouses = resolve;
+    });
+
+    const base = server.handler;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url, options) => {
+        const response = await base(url, options);
+
+        // Hold the houses back until the geometry has certainly landed.
+        if (!String(url).includes('/geometry') && String(url).includes('/houses')) {
+          await housesArrived;
+        }
+
+        return response;
+      }),
+    );
+
+    window.localStorage.setItem('avku-elections-geometry-v1', 'test');
+
+    const { result } = renderHook(() => useHousesData());
+
+    // Let the geometry response resolve on its own first.
+    await act(async () => {
+      await Promise.resolve();
+      releaseHouses();
+    });
+
+    await waitFor(() => expect(result.current.isReady).toBe(true));
+    await waitFor(() => expect(result.current.houses).toHaveLength(3));
+
+    expect(
+      result.current.houses.every((house) => house.footprint?.length === 4),
+    ).toBe(true);
+  });
+
   it('loads the district the shipped boundary covers', async () => {
     const { result } = renderHook(() => useHousesData());
 
@@ -239,7 +326,9 @@ describe('useHousesData', () => {
           JSON.stringify({
             version: 2,
             coverage: { box: server.state.coverageBox },
-            houses: HOUSES,
+            areaApplied: false,
+            streets: ['вулиця Якуба Коласа'],
+            houses: HOUSES.map((entry) => entry.house),
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );

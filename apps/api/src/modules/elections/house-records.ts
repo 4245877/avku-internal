@@ -310,6 +310,31 @@ function buildHouseSelect(
   return sql;
 }
 
+/**
+ * Most parameters one statement may bind, less a little headroom for the
+ * fixed ones around the list.
+ *
+ * SQLite's own ceiling is 32 766. Nothing enforced it here, so a read that
+ * bound one parameter per house — twice per house, in the assignment query
+ * below — stopped working entirely somewhere above sixteen thousand visible
+ * buildings, and did it as a 400 rather than as a slow page. Batching keeps the
+ * statement inside the limit whatever the campaign grows to.
+ */
+const MAX_BOUND_IDS = 8_000;
+
+function chunkIds(houseIds: string[], perStatement: number): string[][] {
+  const chunks: string[][] = [];
+
+  for (let index = 0; index < houseIds.length; index += perStatement) {
+    chunks.push(houseIds.slice(
+      index,
+      index + perStatement,
+    ));
+  }
+
+  return chunks;
+}
+
 function readAssignees(
   database: DatabaseSync,
   campaignId: string,
@@ -321,29 +346,39 @@ function readAssignees(
     return grouped;
   }
 
-  // House-scoped assignments, plus precinct-scoped ones reaching the house
-  // through `house_polling_stations`: somebody responsible for a precinct is
-  // responsible for its houses, and "house without an assignee" has to know
-  // that or it reports every house in a covered precinct.
-  const placeholders = houseIds.map(() => "?").join(", ");
-  const rows = database.prepare(`
-    SELECT a.id, a.employee_email, a.role, a.scope, a.valid_from, a.valid_to,
-           a.scope_id AS scope_id, hp.house_id AS via_house_id
-    FROM assignments a
-    LEFT JOIN house_polling_stations hp
-      ON a.scope = 'precinct' AND hp.precinct_id = a.scope_id
-    WHERE a.campaign_id = ?
-      AND a.deleted_at IS NULL
-      AND a.status = 'active'
-      AND (
-        (a.scope = 'house' AND a.scope_id IN (${placeholders}))
-        OR (a.scope = 'precinct' AND hp.house_id IN (${placeholders}))
-      )
-  `).all(
-    campaignId,
-    ...houseIds,
-    ...houseIds,
-  ) as Record<string, unknown>[];
+  const rows: Record<string, unknown>[] = [];
+
+  // The id list appears twice in the statement, so a batch may only be half
+  // the ceiling wide.
+  for (const chunk of chunkIds(
+    houseIds,
+    Math.floor(MAX_BOUND_IDS / 2),
+  )) {
+    // House-scoped assignments, plus precinct-scoped ones reaching the house
+    // through `house_polling_stations`: somebody responsible for a precinct is
+    // responsible for its houses, and "house without an assignee" has to know
+    // that or it reports every house in a covered precinct.
+    const placeholders = chunk.map(() => "?").join(", ");
+
+    rows.push(...database.prepare(`
+      SELECT a.id, a.employee_email, a.role, a.scope, a.valid_from, a.valid_to,
+             a.scope_id AS scope_id, hp.house_id AS via_house_id
+      FROM assignments a
+      LEFT JOIN house_polling_stations hp
+        ON a.scope = 'precinct' AND hp.precinct_id = a.scope_id
+      WHERE a.campaign_id = ?
+        AND a.deleted_at IS NULL
+        AND a.status = 'active'
+        AND (
+          (a.scope = 'house' AND a.scope_id IN (${placeholders}))
+          OR (a.scope = 'precinct' AND hp.house_id IN (${placeholders}))
+        )
+    `).all(
+      campaignId,
+      ...chunk,
+      ...chunk,
+    ) as Record<string, unknown>[]);
+  }
 
   for (const row of rows) {
     const houseId = String(row.scope) === "house"
@@ -383,16 +418,24 @@ function readPrecinctLinks(
     return grouped;
   }
 
-  const placeholders = houseIds.map(() => "?").join(", ");
-  const rows = database.prepare(`
-    SELECT hps.id, hps.house_id, hps.precinct_id, hps.entrance,
-           hps.apartment_from, hps.apartment_to,
-           p.number AS precinct_number, p.district
-    FROM house_polling_stations hps
-    JOIN precincts p ON p.id = hps.precinct_id AND p.deleted_at IS NULL
-    WHERE hps.house_id IN (${placeholders})
-    ORDER BY p.number, hps.entrance
-  `).all(...houseIds) as Record<string, unknown>[];
+  const rows: Record<string, unknown>[] = [];
+
+  for (const chunk of chunkIds(
+    houseIds,
+    MAX_BOUND_IDS,
+  )) {
+    const placeholders = chunk.map(() => "?").join(", ");
+
+    rows.push(...database.prepare(`
+      SELECT hps.id, hps.house_id, hps.precinct_id, hps.entrance,
+             hps.apartment_from, hps.apartment_to,
+             p.number AS precinct_number, p.district
+      FROM house_polling_stations hps
+      JOIN precincts p ON p.id = hps.precinct_id AND p.deleted_at IS NULL
+      WHERE hps.house_id IN (${placeholders})
+      ORDER BY p.number, hps.entrance
+    `).all(...chunk) as Record<string, unknown>[]);
+  }
 
   for (const row of rows) {
     const houseId = String(row.house_id);

@@ -18,17 +18,22 @@ import {
   createHousePerson as apiCreatePerson,
   createIssue as apiCreateIssue,
   createTask as apiCreateTask,
+  expandFootprint,
   fetchHouse,
+  fetchHouseGeometry,
   fetchHouses,
   fetchHousesFromOsm,
   fetchViewer,
   getAreaMeta,
   readActiveCampaignId,
+  readCachedGeometryVersion,
   saveHouseAttributes,
   saveHouseState,
   uploadAttachment as apiUploadAttachment,
   writeActiveCampaignId,
+  writeCachedGeometryVersion,
 } from './electionsApi.js';
+import { computeHouseEstimate } from './osmBuildings.js';
 import { hydrateWorkspaceArea, subscribeToWorkspaceArea } from './workspaceArea.js';
 
 /**
@@ -78,21 +83,43 @@ export function useHousesData() {
   const [osmRefresh, setOsmRefresh] = useState(IDLE_REFRESH);
   const osmRefreshRef = useRef(null);
 
+  /**
+   * Whether the boundary has been reconciled with the server yet.
+   *
+   * The dataset waits for this, and that is the whole point of it. Loading
+   * immediately and reloading when the boundary landed meant every cold visit
+   * started downloading the houses for the *cached* territory, then threw that
+   * request away mid-flight and started again — measured at half a megabyte of
+   * the old payload transferred and discarded, and a second round trip before
+   * anything could be drawn. One boundary, then one dataset for it.
+   */
+  const [isAreaReady, setIsAreaReady] = useState(false);
+
   /*
    * The permanent boundary lives on the API; the first render used the local
-   * cache so the map would not open on the wrong district while waiting. If the
-   * two differ, applying the server's copy notifies the workspace store, which
-   * reloads the dataset through the subscription below.
+   * cache so the map would not open on the wrong district while waiting.
    */
   useEffect(() => {
     const controller = new AbortController();
+    let isActive = true;
 
-    hydrateWorkspaceArea({ signal: controller.signal }).catch(() => {
+    const settle = () => {
+      if (isActive) {
+        setIsAreaReady(true);
+      }
+    };
+
+    hydrateWorkspaceArea({ signal: controller.signal }).then(
+      settle,
       // A boundary that cannot be reconciled is not a reason to lose the map:
       // the cached territory stays in force and the dataset loads against it.
-    });
+      settle,
+    );
 
-    return () => controller.abort();
+    return () => {
+      isActive = false;
+      controller.abort();
+    };
   }, []);
 
   /*
@@ -116,7 +143,88 @@ export function useHousesData() {
     return () => controller.abort();
   }, []);
 
+  /**
+   * The outlines for the dataset currently on screen, once they have arrived.
+   *
+   * Held outside React state because the two responses race by design: on a
+   * repeat visit the geometry request goes out first and is answered from the
+   * browser's cache, so it can — and usually does — land *before* the houses
+   * it belongs to. Merging it straight into state at that moment wrote the
+   * shapes onto the previous dataset, which the houses response then replaced
+   * wholesale; the map came up with no buildings on it at all. Whichever
+   * arrives second does the merge, from here.
+   */
+  const geometryRef = useRef(null);
+
+  /**
+   * Puts the outlines onto the houses.
+   *
+   * One pass that reuses the existing objects for anything it did not change,
+   * so the map layer's own "a footprint never changes" rule still holds and the
+   * polygons are built once rather than rebuilt when the shapes land. Houses
+   * whose outline is missing keep `footprint: null` and stay off the map
+   * exactly as they did before.
+   */
+  const mergeGeometry = useCallback((houses, footprints) => {
+    if (!footprints) {
+      return houses;
+    }
+
+    let changed = false;
+    const merged = houses.map((house) => {
+      if (house.footprint) {
+        return house;
+      }
+
+      const ring = expandFootprint(footprints[house.id]);
+
+      if (!ring) {
+        return house;
+      }
+
+      changed = true;
+
+      return {
+        ...house,
+        footprint: ring,
+        // The entrance estimate needs the building's long side, which only
+        // exists once the ring does.
+        estimate: computeHouseEstimate({ ...house, footprint: ring }),
+      };
+    });
+
+    return changed ? merged : houses;
+  }, []);
+
+  const loadGeometry = useCallback((version, signal, isActive) => {
+    fetchHouseGeometry({ signal, campaignId, version })
+      .then(({ version: served, footprints }) => {
+        if (!isActive() || signal.aborted) {
+          return;
+        }
+
+        // Remembered so the next visit can ask for this URL up front, in
+        // parallel with the houses, and be answered from the browser's cache.
+        writeCachedGeometryVersion(served);
+        geometryRef.current = footprints;
+
+        setState((current) => {
+          const houses = mergeGeometry(current.houses, footprints);
+
+          return houses === current.houses ? current : { ...current, houses };
+        });
+      })
+      .catch(() => {
+        // No outlines is a degraded map, not a broken one: the list, the card
+        // and every filter still work, so this is not worth an error banner.
+      });
+  }, [campaignId, mergeGeometry]);
+
   useEffect(() => {
+    if (!isAreaReady) {
+      return undefined;
+    }
+
     const controller = new AbortController();
     let isActive = true;
 
@@ -132,6 +240,24 @@ export function useHousesData() {
 
     setState((current) => ({ ...current, status: 'loading', error: null }));
 
+    /*
+     * The outlines go out now, beside the houses, on the version this browser
+     * saw last time. On every visit after the first that is still the current
+     * version, so the request is answered from the browser's own cache and the
+     * shapes are ready as soon as the houses are — one build of the map layer
+     * instead of one without outlines followed by one with them. A version that
+     * has since moved on is caught below and re-fetched.
+     */
+    const remembered = readCachedGeometryVersion();
+
+    // Whatever the previous dataset's outlines were, they are not this one's
+    // until a response says so.
+    geometryRef.current = null;
+
+    if (remembered) {
+      loadGeometry(remembered, controller.signal, () => isActive);
+    }
+
     fetchHouses({ signal: controller.signal, campaignId })
       .then((payload) => {
         if (!isActive) {
@@ -141,7 +267,9 @@ export function useHousesData() {
         setState((current) => ({
           ...current,
           status: 'ready',
-          houses: payload.houses,
+          // The outlines may already be here — see `geometryRef`. Merging them
+          // now is what makes the map come up complete in one build.
+          houses: mergeGeometry(payload.houses, geometryRef.current),
           streets: payload.streets,
           area: payload.area,
           coverage: payload.coverage,
@@ -155,6 +283,17 @@ export function useHousesData() {
         // remembering its answer keeps the next reload on the same campaign.
         if (payload.campaign?.id && payload.campaign.id !== campaignId) {
           writeActiveCampaignId(payload.campaign.id);
+        }
+
+        /*
+         * The version we asked for up front was a guess from last time. When
+         * the server names a different one — somebody re-imported the snapshot,
+         * or the boundary moved — that guess was answered with the wrong
+         * outlines, so the right ones are fetched now. On every ordinary visit
+         * the two agree and this does nothing.
+         */
+        if (payload.geometryVersion && payload.geometryVersion !== remembered) {
+          loadGeometry(payload.geometryVersion, controller.signal, () => isActive);
         }
       })
       .catch((error) => {
@@ -173,7 +312,7 @@ export function useHousesData() {
       isActive = false;
       controller.abort();
     };
-  }, [campaignId, reloadToken]);
+  }, [campaignId, isAreaReady, loadGeometry, mergeGeometry, reloadToken]);
 
   const reload = useCallback(() => {
     setReloadToken((current) => current + 1);
@@ -281,18 +420,43 @@ export function useHousesData() {
   /**
    * Puts the server's copy of a house back into the list.
    *
-   * The `footprint` array is reused when it is unchanged, which keeps Leaflet's
-   * projection cache warm — a save re-styles one polygon instead of rebuilding
-   * the district.
+   * The detail response is a *superset* of the map record, and it is not merged
+   * in wholesale: it names the street in full ("Ірпінська вулиця") where the map
+   * payload uses the short form the street filter and the dictionary are built
+   * from, so copying it across would quietly drop the house out of its own
+   * street filter. Only the fields the map, the list and the filters read are
+   * taken, and the rest of the detail record stays where it belongs — in the
+   * card, which fetched it.
+   *
+   * The `footprint` array is reused, which keeps Leaflet's projection cache
+   * warm: a save re-styles one polygon instead of rebuilding the district.
    */
   const replaceHouse = useCallback((house) => {
     setState((current) => ({
       ...current,
-      houses: current.houses.map((existing) =>
-        existing.id === house.id
-          ? { ...house, footprint: existing.footprint ?? house.footprint }
-          : existing,
-      ),
+      houses: current.houses.map((existing) => {
+        if (existing.id !== house.id) {
+          return existing;
+        }
+
+        return {
+          ...existing,
+          type: house.type ?? existing.type,
+          name: house.name ?? existing.name,
+          floors: house.floors ?? existing.floors,
+          entrances: house.entrances ?? existing.entrances,
+          apartments: house.apartments ?? existing.apartments,
+          residentsCount: house.residentsCount ?? existing.residentsCount,
+          footprintAreaSqm: house.footprintAreaSqm ?? existing.footprintAreaSqm,
+          source: house.source ?? existing.source,
+          quality: house.quality ?? existing.quality,
+          contactsCount: house.contactsCount ?? existing.contactsCount,
+          precincts: house.precincts ?? existing.precincts,
+          campaign: house.campaign ?? existing.campaign,
+          estimate: existing.estimate,
+          footprint: existing.footprint ?? house.footprint ?? null,
+        };
+      }),
     }));
   }, []);
 
@@ -381,13 +545,9 @@ export function useHousesData() {
         apiCreateAction({ ...payload, houseId }, { campaignId }),
       );
 
-      if (outcome.ok) {
-        await refreshHouse(houseId);
-      }
-
       return outcome.ok;
     },
-    [campaignId, refreshHouse, runMutation],
+    [campaignId, runMutation],
   );
 
   const addIssue = useCallback(
@@ -396,13 +556,9 @@ export function useHousesData() {
         apiCreateIssue({ ...payload, houseId }, { campaignId }),
       );
 
-      if (outcome.ok) {
-        await refreshHouse(houseId);
-      }
-
       return outcome.ok;
     },
-    [campaignId, refreshHouse, runMutation],
+    [campaignId, runMutation],
   );
 
   const addTask = useCallback(
@@ -411,13 +567,9 @@ export function useHousesData() {
         apiCreateTask({ ...payload, houseId }, { campaignId }),
       );
 
-      if (outcome.ok) {
-        await refreshHouse(houseId);
-      }
-
       return outcome.ok;
     },
-    [campaignId, refreshHouse, runMutation],
+    [campaignId, runMutation],
   );
 
   const addPerson = useCallback(
@@ -426,13 +578,9 @@ export function useHousesData() {
         apiCreatePerson(houseId, payload, { campaignId }),
       );
 
-      if (outcome.ok) {
-        await refreshHouse(houseId);
-      }
-
       return outcome.ok;
     },
-    [campaignId, refreshHouse, runMutation],
+    [campaignId, runMutation],
   );
 
   const addAttachment = useCallback(
@@ -486,6 +634,7 @@ export function useHousesData() {
       cancelRefreshFromOsm,
       dismissOsmRefresh,
       refreshHouse,
+      replaceHouse,
       saveAttributes,
       saveState,
       addAction,

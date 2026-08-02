@@ -87,6 +87,17 @@ function HouseDetailsPanel({
   house,
   campaignId,
   isLoading,
+  /**
+   * The card's own record is still on its way.
+   *
+   * The address, the stage and the outline come from the map payload and are on
+   * screen from the click; the precinct, the responsible people and what the
+   * last action actually was are in the record being fetched. While that is in
+   * flight those read as "loading" rather than as "none" — the difference
+   * between the two is exactly what a canvasser is about to act on.
+   */
+  isDetailsLoading,
+  detailsError,
   hasError,
   isEditing,
   isSaving,
@@ -213,15 +224,25 @@ function HouseDetailsPanel({
 
         <h2 className={styles.panelTitle}>{house.address}</h2>
 
-        <p className={styles.panelSubtitle}>{formatPrecincts(house)}</p>
+        <p className={styles.panelSubtitle}>
+          {isDetailsLoading ? 'дільниця — завантаження…' : formatPrecincts(house)}
+        </p>
+
+        {detailsError && (
+          <p className={styles.panelNoticeError} role="status">
+            {detailsError}
+          </p>
+        )}
 
         <dl className={styles.panelFacts}>
           <div>
             <dt>Відповідальні</dt>
             <dd>
-              {state.assignees.length === 0
-                ? '—'
-                : state.assignees.map((assignee) => formatAssignee(assignee.email)).join(', ')}
+              {isDetailsLoading
+                ? '…'
+                : state.assignees.length === 0
+                  ? '—'
+                  : state.assignees.map((assignee) => formatAssignee(assignee.email)).join(', ')}
             </dd>
           </div>
 
@@ -229,9 +250,11 @@ function HouseDetailsPanel({
             <dt>Остання дія</dt>
             <dd>
               {state.lastActionAt
-                ? `${actionTypesById[state.lastActionType]?.label ?? 'Дія'} ${
-                    formatShortDate(state.lastActionAt)
-                  }`
+                ? `${
+                    isDetailsLoading
+                      ? 'Дія'
+                      : (actionTypesById[state.lastActionType]?.label ?? 'Дія')
+                  } ${formatShortDate(state.lastActionAt)}`
                 : '—'}
             </dd>
           </div>

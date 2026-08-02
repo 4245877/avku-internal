@@ -11,7 +11,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useHousesData } from '../../features/elections/useHousesData.js';
+import { useHouseDetails } from '../../features/elections/useHouseDetails.js';
 import { useAreaEditMode } from '../../features/elections/useWorkspaceEditor.js';
+import { useTablistKeys } from '../../features/elections/useTablistKeys.js';
 import {
   DEFAULT_HOUSE_FILTERS,
   campaignStateOf,
@@ -44,6 +46,8 @@ const PANEL_TABS = [
   { id: 'house', label: 'Картка будинку', icon: 'building' },
   { id: 'list', label: 'Список', icon: 'list' },
 ];
+
+const PANEL_TAB_IDS = PANEL_TABS.map((tab) => tab.id);
 
 function ElectionsPage() {
   const data = useHousesData();
@@ -81,10 +85,52 @@ function ElectionsPage() {
     [filteredHouses],
   );
 
-  const selectedHouse = useMemo(
+  /** The light record — enough for the map, the outline and the card's title. */
+  const selectedMapHouse = useMemo(
     () => data.houses.find((house) => house.id === selectedHouseId) ?? null,
     [data.houses, selectedHouseId],
   );
+
+  /* The rest of the card, fetched on selection rather than shipped with every
+   * house on the territory. */
+  const details = useHouseDetails(selectedHouseId, {
+    campaignId: data.campaignId,
+    refreshToken,
+  });
+
+  /*
+   * The card's own copy is also the freshest one the list has. Logging a visit
+   * used to fetch this house twice — once for the card and once to bring the
+   * map's counters up to date — and the confirmation waited on both. The card
+   * fetches, the list reads the result.
+   */
+  const { replaceHouse } = data;
+
+  useEffect(() => {
+    if (details.house) {
+      replaceHouse(details.house);
+    }
+  }, [details.house, replaceHouse]);
+
+  /*
+   * What the card renders. The full record once it arrives; until then the map
+   * record, so the address, the stage and the outline are on screen from the
+   * click rather than after a round trip — the panel shows its own loading
+   * state for the parts that are genuinely still coming.
+   */
+  const selectedHouse = useMemo(() => {
+    if (!selectedMapHouse) {
+      return details.house;
+    }
+
+    if (!details.house || details.house.id !== selectedMapHouse.id) {
+      return selectedMapHouse;
+    }
+
+    // The outline belongs to the map payload's copy; the detail response has
+    // it too, but reusing the object keeps Leaflet's projection cache warm.
+    return { ...details.house, footprint: selectedMapHouse.footprint ?? details.house.footprint };
+  }, [details.house, selectedMapHouse]);
 
   /** Everybody who is responsible for at least one visible house. */
   const assignees = useMemo(() => {
@@ -100,6 +146,7 @@ function ElectionsPage() {
   }, [data.houses]);
 
   const hasActiveFilters = checkActiveFilters(filters);
+  const panelTabs = useTablistKeys(PANEL_TAB_IDS, activeTab, setActiveTab);
 
   useEffect(() => {
     if (!data.isBackend) {
@@ -321,19 +368,23 @@ function ElectionsPage() {
         />
 
         <aside className={styles.sideColumn}>
-          <div aria-label="Панель будинків" className={styles.tabs} role="tablist">
+          <div
+            aria-label="Панель будинків"
+            className={styles.tabs}
+            onKeyDown={panelTabs.onKeyDown}
+            ref={panelTabs.listRef}
+            role="tablist"
+          >
             {PANEL_TABS.map((tab) => (
               <button
+                {...panelTabs.tabProps(tab.id)}
                 aria-controls={`elections-panel-${tab.id}`}
-                aria-selected={activeTab === tab.id}
                 className={[styles.tab, activeTab === tab.id ? styles.tabActive : '']
                   .filter(Boolean)
                   .join(' ')}
                 id={`elections-tab-${tab.id}`}
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                role="tab"
-                type="button"
               >
                 <ElectionsIcon name={tab.icon} size={16} />
                 {tab.label}
@@ -353,8 +404,10 @@ function ElectionsPage() {
           >
             <HouseDetailsPanel
               campaignId={data.campaignId}
+              detailsError={details.error}
               hasError={data.hasError}
               house={selectedHouse}
+              isDetailsLoading={details.isLoading}
               isEditing={isEditing}
               isLoading={data.isLoading}
               isSaving={

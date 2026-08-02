@@ -570,15 +570,45 @@ describe("campaigns and house state", () => {
     const house = listed.json.houses[0];
 
     houseId = house.id;
+
+    /*
+     * The map payload is a projection, not the record. A field at its default
+     * is omitted rather than sent — `stage` and `priority` are absent here
+     * precisely because this house is at `not_started`/`medium`, and the client
+     * fills those back in.
+     */
     assert.equal(
-      house.campaign.stage,
-      "not_started",
+      house.stage,
+      undefined,
+      "a house at the default stage does not carry one",
     );
     assert.equal(
-      house.campaign.openIssuesCount,
-      0,
+      house.openIssues,
+      undefined,
+      "a zero counter is omitted rather than sent",
     );
-    assert.ok(Array.isArray(house.footprint));
+    assert.equal(
+      typeof house.lat,
+      "number",
+    );
+    assert.equal(
+      typeof house.street,
+      "number",
+      "the street is an index into the payload's dictionary",
+    );
+    assert.ok(Array.isArray(listed.json.streets));
+
+    /*
+     * The outline is not in the map payload at all — it is immutable, so it is
+     * served under its own version by `/houses/geometry` and cached by the
+     * browser rather than re-sent with every campaign update.
+     */
+    assert.equal(
+      house.footprint,
+      undefined,
+    );
+    assert.ok(listed.json.geometryVersion);
+
     // Nothing about a resident's politics or age exists in the payload.
     assert.equal(
       listed.text.includes("stance"),
@@ -1138,6 +1168,82 @@ describe("assignments and contact visibility", () => {
       people.text.includes("380671234567"),
       false,
       "an unrelated agitator must never receive the number in any form",
+    );
+  });
+
+  /**
+   * What the map is allowed to weigh.
+   *
+   * By this point the house has a resident with a phone number, an access note,
+   * a visit log, an open issue and an overdue task — everything the card shows.
+   * The map payload is drawn for the whole territory at once, so none of it may
+   * travel with it: a canvasser opening the section downloads a map, not
+   * everybody's phone number. Each of these was in the response before the
+   * split, which is why they are asserted by name rather than in a loop.
+   */
+  test("the map payload carries no contact, note or record detail", async () => {
+    const listed = await api(
+      "GET",
+      "/api/elections/houses",
+      {
+        as: MANAGER,
+      },
+    );
+
+    assert.equal(
+      listed.status,
+      200,
+      listed.text,
+    );
+
+    for (const forbidden of [
+      "380671234567", // a resident's phone number
+      "Коваленко", // a resident's name
+      "Домофон", // the building's access note
+      "comment", // what was said on a visit
+      "description", // an issue's or a task's body
+      "changedAt", // the change log
+      "attachment", // uploaded files
+      "priorityReason", // why somebody set this priority
+      "summary", // the coordinator's free-text note
+      "canSeeContacts", // a per-house permission flag the map never reads
+    ]) {
+      assert.equal(
+        listed.text.includes(forbidden),
+        false,
+        `the map payload must not contain "${forbidden}"`,
+      );
+    }
+
+    // The counters the filters run on do survive — they are numbers about the
+    // house, not records about a person. They also have to agree with the card,
+    // or the map would filter on one set of numbers and the card show another.
+    const house = listed.json.houses.find(
+      (candidate: { id: string }) => candidate.id === houseId,
+    );
+
+    assert.ok(house);
+
+    const card = await api(
+      "GET",
+      `/api/elections/houses/${houseId}`,
+      {
+        as: MANAGER,
+      },
+    );
+
+    assert.equal(
+      house.openIssues ?? 0,
+      card.json.campaign.openIssuesCount,
+    );
+    assert.equal(
+      house.overdueTasks ?? 0,
+      card.json.campaign.overdueTasksCount,
+    );
+    assert.equal(
+      house.lastActionAt ?? null,
+      card.json.campaign.lastActionAt,
+      "the map shows when a house was last visited, not what was said",
     );
   });
 

@@ -42,6 +42,15 @@ import {
   updateHouseCampaignState,
 } from "../modules/elections/house-records";
 import {
+  listHouseGeometry,
+  listHouseMap,
+  readGeometryVersion,
+} from "../modules/elections/house-map-records";
+import {
+  type WorkspacePolygon,
+  toWorkspacePolygon,
+} from "../modules/elections/workspace-polygon";
+import {
   bulkAssignHouses,
   createAssignment,
   createPerson,
@@ -247,6 +256,45 @@ function sendReferenceData(response: ServerResponse): void {
  * Houses
  * ------------------------------------------------------------------ */
 
+/**
+ * The stored boundary, parsed once per version rather than per request.
+ *
+ * Every house read consults it, and re-walking a few-hundred-vertex polygon
+ * into flat arrays on each one would put the cost back where removing it was
+ * the point. The stored document carries `updatedAt`, so a save invalidates
+ * this without anything having to remember to clear it.
+ */
+let workspacePolygonCache: { key: string; polygon: WorkspacePolygon | null } | null = null;
+
+async function readWorkspacePolygon(
+  dependencies: ElectionsRouteDependencies,
+): Promise<WorkspacePolygon | null> {
+  const stored = await dependencies.workspaceArea.read();
+
+  if (!stored) {
+    // No saved boundary means the territory shipped with the client is in
+    // force. The server does not have it, so it filters nothing and says so —
+    // the client then applies its own, exactly as it did before.
+    workspacePolygonCache = null;
+    return null;
+  }
+
+  const key = `${stored.updatedAt}|${stored.updatedBy ?? ""}`;
+
+  if (workspacePolygonCache?.key === key) {
+    return workspacePolygonCache.polygon;
+  }
+
+  const polygon = toWorkspacePolygon(stored.area);
+
+  workspacePolygonCache = {
+    key,
+    polygon,
+  };
+
+  return polygon;
+}
+
 async function handleHouses(
   request: IncomingMessage,
   response: ServerResponse,
@@ -269,6 +317,7 @@ async function handleHouses(
         200,
         {
           houses: [],
+          streets: [],
           campaign: null,
           campaigns: listCampaigns(database),
         },
@@ -276,11 +325,13 @@ async function handleHouses(
       return true;
     }
 
-    const houses = listHouses(
+    const area = await readWorkspacePolygon(dependencies);
+    const map = listHouseMap(
       database,
       {
         campaignId,
         viewer,
+        area,
       },
     );
 
@@ -288,7 +339,19 @@ async function handleHouses(
       response,
       200,
       {
-        houses,
+        houses: map.houses,
+        streets: map.streets,
+        /*
+         * The boundary was applied here, so the client must not apply it again
+         * — it no longer has the outlines to apply it with, and re-filtering on
+         * a rounded centre would quietly drop houses on the edge.
+         */
+        areaApplied: area !== null,
+        outsideArea: map.outsideArea,
+        geometryVersion: readGeometryVersion(
+          database,
+          area,
+        ),
         campaign: findCampaign(
           database,
           campaignId,
@@ -308,6 +371,59 @@ async function handleHouses(
           isDevAuth: viewer.isDevAuth,
           isLocalAuth: viewer.isLocalAuth,
         },
+      },
+      {
+        // Rows are per-viewer, so a shared cache must never reuse them.
+        cacheControl: "private, no-cache",
+        etagSalt: `${viewer.email ?? ""}|${viewer.role ?? ""}|${campaignId}`,
+      },
+    );
+    return true;
+  }
+
+  /*
+   * Outlines, versioned and cached hard.
+   *
+   * A client that asks for the version it already holds is answered by its own
+   * disk cache without a request reaching here at all; one that asks for a
+   * stale version gets a fresh body and a new URL to remember. Only an explicit
+   * version earns `immutable` — a request without one has to revalidate,
+   * because "the current geometry" is by definition a moving target.
+   */
+  if (segments.length === 2 && segments[1] === "geometry" &&
+    request.method === "GET") {
+    if (!campaignId) {
+      sendJson(
+        response,
+        200,
+        {
+          version: "",
+          footprints: {},
+        },
+      );
+      return true;
+    }
+
+    const area = await readWorkspacePolygon(dependencies);
+    const geometry = listHouseGeometry(
+      database,
+      {
+        campaignId,
+        viewer,
+        area,
+      },
+    );
+    const requested = url.searchParams.get("v");
+
+    sendJson(
+      response,
+      200,
+      geometry,
+      {
+        cacheControl: requested && requested === geometry.version
+          ? "private, max-age=31536000, immutable"
+          : "private, no-cache",
+        etagSalt: `${viewer.email ?? ""}|${viewer.role ?? ""}`,
       },
     );
     return true;

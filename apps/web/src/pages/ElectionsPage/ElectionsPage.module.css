@@ -2303,6 +2303,19 @@
   animation: dropIn var(--duration-base) var(--ease-out) both;
 }
 
+/*
+ * The card's own record could not be fetched. Said inside the header rather
+ * than replacing it: the address, the stage and the outline came from the map
+ * payload and are still true, so the card stays usable and only reports the
+ * part that is missing.
+ */
+.panelNoticeError {
+  margin: var(--space-2) 0 0;
+
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+}
+
 .panelBody {
   flex: 1;
   min-height: 0;

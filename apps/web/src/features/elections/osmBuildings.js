@@ -167,7 +167,10 @@ function estimateFromGeometry({ areaSqm, dimensions, levels, houseType }) {
     return { entrances: 1, apartments: 1, residents: Math.round(RESIDENTS_PER_FLAT) };
   }
 
-  const entrances = Math.max(1, Math.round(dimensions.length / METERS_PER_ENTRANCE));
+  // Null when the outline has not arrived yet — see `computeHouseEstimate`.
+  const entrances = dimensions
+    ? Math.max(1, Math.round(dimensions.length / METERS_PER_ENTRANCE))
+    : null;
 
   if (!levels) {
     return { entrances, apartments: null, residents: null };
@@ -320,18 +323,28 @@ out body geom;`;
  */
 export function computeHouseEstimate(house) {
   const footprint = house?.footprint ?? [];
+  const hasRing = footprint.length >= 3;
+  const areaSqm = Number.isFinite(house?.footprintAreaSqm)
+    ? house.footprintAreaSqm
+    : hasRing
+      ? ringAreaSquareMeters(footprint)
+      : null;
 
-  if (footprint.length < 3) {
+  if (!hasRing && !Number.isFinite(areaSqm)) {
     return { entrances: null, apartments: null, residents: null };
   }
 
-  const areaSqm = Number.isFinite(house.footprintAreaSqm)
-    ? house.footprintAreaSqm
-    : ringAreaSquareMeters(footprint);
-
+  /*
+   * The map payload carries the footprint's area but not the footprint: the
+   * outlines are fetched separately and cached, so they may not have arrived
+   * yet. Area and storey count are all the flat and resident estimates need, so
+   * those are right immediately; the entrance count needs the building's long
+   * side and therefore waits for the ring, which is why it is `null` rather
+   * than guessed from area alone.
+   */
   return estimateFromGeometry({
     areaSqm,
-    dimensions: ringDimensions(footprint),
+    dimensions: hasRing ? ringDimensions(footprint) : null,
     levels: Number.isFinite(house.floors) ? house.floors : null,
     houseType: house.type,
   });

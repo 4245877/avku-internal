@@ -93,6 +93,39 @@ export function writeActiveCampaignId(campaignId) {
 }
 
 /**
+ * The geometry version this browser saw last time.
+ *
+ * Not a cache of the outlines — the browser's own HTTP cache holds those, under
+ * the versioned URL. This is only the URL, remembered so the next visit can ask
+ * for the outlines *at the same time* as the houses instead of waiting to be
+ * told which version to ask for. When it is still the current one the request
+ * never leaves the machine and the shapes are on the map in the same frame as
+ * the list; when it is stale the houses response says so and the right version
+ * is fetched instead.
+ */
+const GEOMETRY_VERSION_KEY = 'avku-elections-geometry-v1';
+
+export function readCachedGeometryVersion() {
+  try {
+    return window.localStorage.getItem(GEOMETRY_VERSION_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedGeometryVersion(version) {
+  try {
+    if (version) {
+      window.localStorage.setItem(GEOMETRY_VERSION_KEY, version);
+    } else {
+      window.localStorage.removeItem(GEOMETRY_VERSION_KEY);
+    }
+  } catch {
+    // Same as above: a browser without storage simply pays one round trip.
+  }
+}
+
+/**
  * Append `?electionsMockError=1` to the URL to exercise the load-failure state
  * without touching any code.
  */
@@ -244,13 +277,20 @@ function readDatasetBox(snapshot) {
     return null;
   }
 
+  // Either wire shape: the snapshot and Overpass sources nest the coordinates
+  // under `location`, the map payload carries them flat.
   return houses.reduce(
-    (box, house) => ({
-      minLat: Math.min(box.minLat, house.location.lat),
-      maxLat: Math.max(box.maxLat, house.location.lat),
-      minLon: Math.min(box.minLon, house.location.lon),
-      maxLon: Math.max(box.maxLon, house.location.lon),
-    }),
+    (box, house) => {
+      const lat = house.location ? house.location.lat : house.lat;
+      const lon = house.location ? house.location.lon : house.lon;
+
+      return {
+        minLat: Math.min(box.minLat, lat),
+        maxLat: Math.max(box.maxLat, lat),
+        minLon: Math.min(box.minLon, lon),
+        maxLon: Math.max(box.maxLon, lon),
+      };
+    },
     {
       minLat: Infinity,
       maxLat: -Infinity,
@@ -332,15 +372,118 @@ async function loadDataset(signal, campaignId) {
     signal,
   );
 
+  const streets = payload.streets ?? [];
+
   return {
-    houses: payload.houses ?? [],
+    houses: (payload.houses ?? []).map((house) => expandMapHouse(house, streets)),
     osmTimestamp: payload.osmTimestamp ?? null,
     datasetBox: readDatasetBox(payload),
     campaign: payload.campaign ?? null,
     campaigns: payload.campaigns ?? [],
     viewer: payload.viewer ?? null,
+    /*
+     * The server cut the set to the working-area polygon, so this client must
+     * not cut it again — it no longer receives the outlines the old test used,
+     * and re-testing a rounded centre would drop houses on the border.
+     */
+    areaApplied: payload.areaApplied === true,
+    outsideArea: payload.outsideArea ?? 0,
+    geometryVersion: payload.geometryVersion ?? null,
     source: 'backend',
   };
+}
+
+/**
+ * One row of the map payload → the house shape the rest of the module expects.
+ *
+ * The wire format is deliberately not this shape: streets are sent once and
+ * referenced by index, and any field sitting at its default is left out
+ * altogether. On a district nobody has canvassed yet that is most of the
+ * record, so the saving is largest exactly when the payload is otherwise most
+ * repetitive. Rebuilding it here keeps `houseUtils`, the results list and the
+ * map layer working on the same objects they always did.
+ *
+ * `footprint` is absent on purpose — outlines arrive from `/houses/geometry`
+ * under their own cache lifetime and are merged in by `useHousesData`.
+ */
+function expandMapHouse(house, streets) {
+  const streetShort = streets[house.street] ?? '';
+  const number = house.number ?? '';
+
+  return {
+    id: house.id,
+    street: streetShort,
+    streetShort,
+    number,
+    address: `${streetShort}, ${number}`,
+    fullAddress: `${streetShort}, ${number}`,
+    location: { lat: house.lat, lon: house.lon },
+    footprint: null,
+    footprintAreaSqm: house.area ?? null,
+    type: house.type ?? 'other',
+    name: house.name ?? null,
+    floors: house.floors ?? null,
+    entrances: house.entrances ?? null,
+    apartments: house.apartments ?? null,
+    residentsCount: house.residents ?? null,
+    source: house.source ?? 'osm',
+    quality: house.quality ?? [],
+    contactsCount: house.contacts ?? 0,
+    precincts: (house.precincts ?? []).map((precinctId, index) => ({
+      precinctId,
+      district: house.districts?.[index] ?? '',
+    })),
+    campaign: {
+      ...createEmptyCampaignState(),
+      stage: house.stage ?? 'not_started',
+      priority: house.priority ?? 'medium',
+      lastActionAt: house.lastActionAt ?? null,
+      nextActionAt: house.nextActionAt ?? null,
+      openIssuesCount: house.openIssues ?? 0,
+      openTasksCount: house.openTasks ?? 0,
+      overdueTasksCount: house.overdueTasks ?? 0,
+      todayTasksCount: house.todayTasks ?? 0,
+      assignees: (house.assignees ?? []).map((email) => ({ email })),
+    },
+  };
+}
+
+/**
+ * Building outlines for the current dataset.
+ *
+ * Asked for by version, which is what makes the browser able to answer from its
+ * own cache instead of coming back here: the map payload names the version it
+ * belongs to, and as long as that does not change this request never leaves the
+ * machine a second time.
+ */
+export async function fetchHouseGeometry({ signal, campaignId, version } = {}) {
+  const payload = await fetchJson(
+    `${BACKEND_URL}/houses/geometry${campaignQuery(
+      campaignId,
+      version ? `v=${encodeURIComponent(version)}` : '',
+    )}`,
+    signal,
+  );
+
+  return {
+    version: payload.version ?? null,
+    footprints: payload.footprints ?? {},
+  };
+}
+
+/** `[lat, lon, lat, lon, …]` → the `{lat, lon}` points the map draws from. */
+export function expandFootprint(flat) {
+  if (!Array.isArray(flat) || flat.length < 6) {
+    return null;
+  }
+
+  const ring = new Array(flat.length / 2);
+
+  for (let index = 0; index < ring.length; index += 1) {
+    ring[index] = { lat: flat[index * 2], lon: flat[index * 2 + 1] };
+  }
+
+  return ring;
 }
 
 /** The command that rebuilds the shipped dataset for the current boundary. */
@@ -450,11 +593,21 @@ export async function fetchHouses({ signal, campaignId } = {}) {
     );
   }
 
-  // The download is a box wide enough to contain the polygon; the polygon
-  // itself is what the module works with. Filtering here — and not in the map —
-  // is what keeps the list, the filters, the counters and the outlines talking
-  // about the same set of buildings.
-  const covered = filterHousesToWorkspace(dataset.houses);
+  /*
+   * The download is a box wide enough to contain the polygon; the polygon
+   * itself is what the module works with. Filtering here — and not in the map —
+   * is what keeps the list, the filters, the counters and the outlines talking
+   * about the same set of buildings.
+   *
+   * The backend now does this itself when it has a stored boundary, and says so
+   * with `areaApplied`. That is not a micro-optimisation: on the live territory
+   * the polygon rejects about four houses in five, and every one of them used
+   * to be queried, serialised, sent, parsed and then dropped here. The snapshot
+   * and Overpass sources still arrive as a raw box and are cut below.
+   */
+  const covered = dataset.areaApplied
+    ? dataset.houses
+    : filterHousesToWorkspace(dataset.houses);
   const houses = covered.map((house) => hydrateHouse(house, { campaign: dataset.campaign }));
 
   return {

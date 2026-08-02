@@ -41,6 +41,7 @@ import {
   resolveResidents,
 } from '../../../features/elections/houseUtils.js';
 import { useHouseRelated } from '../../../features/elections/useHouseRelated.js';
+import { useTablistKeys } from '../../../features/elections/useTablistKeys.js';
 import { formatDistance } from '../../../features/elections/geo.js';
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
 import styles from '../ElectionsPage.module.css';
@@ -54,6 +55,8 @@ const TABS = [
   { id: 'files', label: 'Файли', icon: 'layers', collection: 'files' },
   { id: 'history', label: 'Історія', icon: 'refresh', collection: 'history' },
 ];
+
+const TAB_IDS = TABS.map((tab) => tab.id);
 
 const toneClassNames = {
   success: styles.badgeSuccess,
@@ -640,23 +643,34 @@ function HouseTabs({
     tasks: state.openTasksCount || null,
     people: house.contactsCount || null,
   };
+  const { listRef, onKeyDown, tabProps } = useTablistKeys(
+    TAB_IDS,
+    activeTab,
+    setActiveTab,
+  );
 
   return (
     <div className={styles.houseTabs}>
-      <div aria-label="Розділи картки будинку" className={styles.houseTabList} role="tablist">
+      <div
+        aria-label="Розділи картки будинку"
+        className={styles.houseTabList}
+        onKeyDown={onKeyDown}
+        ref={listRef}
+        role="tablist"
+      >
         {TABS.map((tab) => (
           <button
-            aria-selected={activeTab === tab.id}
+            {...tabProps(tab.id)}
+            aria-controls={`house-tabpanel-${tab.id}`}
             className={[
               styles.houseTab,
               activeTab === tab.id ? styles.houseTabActive : '',
             ]
               .filter(Boolean)
               .join(' ')}
+            id={`house-tab-${tab.id}`}
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            role="tab"
-            type="button"
           >
             <ElectionsIcon name={tab.icon} size={15} />
             <span>{tab.label}</span>
@@ -667,7 +681,13 @@ function HouseTabs({
         ))}
       </div>
 
-      <div className={styles.houseTabPanel} role="tabpanel">
+      <div
+        aria-labelledby={`house-tab-${activeTab}`}
+        className={styles.houseTabPanel}
+        id={`house-tabpanel-${activeTab}`}
+        role="tabpanel"
+        tabIndex={0}
+      >
         {activeTab === 'overview' && (
           <OverviewTab canEdit={canEdit} house={house} onStartEditing={onStartEditing} />
         )}

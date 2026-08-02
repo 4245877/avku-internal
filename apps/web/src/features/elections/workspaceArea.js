@@ -442,9 +442,36 @@ export function coversFootprint(footprint) {
   return polygonIntersectsRing(currentArea.rings, footprint);
 }
 
-/** Keeps only the houses the working area covers. */
+/**
+ * Whether the working area covers this point.
+ *
+ * The fallback for a house with no outline to test. Since the backend started
+ * cutting the set itself, the outlines arrive separately from the houses and
+ * may not be here yet — and a house is still a house without one, so "is it in
+ * the district" has to be answerable from its centre. This is also the test the
+ * server applies, so the two agree.
+ */
+export function coversLocation(location) {
+  if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lon)) {
+    return false;
+  }
+
+  return isPointInPolygon(location, currentArea.rings);
+}
+
+/**
+ * Keeps only the houses the working area covers.
+ *
+ * A house with an outline is judged on the outline — one hanging a few metres
+ * over the line is still a house to canvass. A house without one is judged on
+ * its centre, which is the only thing there is to judge.
+ */
 export function filterHousesToWorkspace(houses) {
-  return houses.filter((house) => coversFootprint(house.footprint));
+  return houses.filter((house) =>
+    Array.isArray(house.footprint) && house.footprint.length >= 3
+      ? coversFootprint(house.footprint)
+      : coversLocation(house.location),
+  );
 }
 
 /**

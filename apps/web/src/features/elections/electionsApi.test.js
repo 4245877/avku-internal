@@ -56,13 +56,42 @@ function houseAt({ x, y }, id, size = 15) {
 }
 
 /**
- * Serves a snapshot whose declared coverage is a box around the campaign
- * address — the shape of the real shipped file.
+ * One house as the map endpoint sends it: streets by index into a shared
+ * dictionary, coordinates flat, and no outline — those come from
+ * `/houses/geometry` under their own cache lifetime.
+ */
+function mapHouse({ x, y }, id) {
+  const location = unprojectFromMeters({ x, y });
+
+  return {
+    id: String(id),
+    street: 0,
+    number: String(id),
+    lat: location.lat,
+    lon: location.lon,
+    type: 'apartments',
+  };
+}
+
+/**
+ * Serves the map payload with a declared coverage box around the campaign
+ * address — the shape of the real endpoint.
+ *
+ * `areaApplied: false` because these tests are about the client's own boundary
+ * handling; a deployment with a saved boundary has the server cut the set and
+ * `fetchHouses` then leaves it alone.
  */
 function serveSnapshot({ houses, coverageBox }) {
   return vi.fn(async (url) => {
     if (String(url).includes('/elections/area')) {
       return new Response(JSON.stringify({ error: 'немає' }), { status: 404 });
+    }
+
+    if (String(url).includes('/houses/geometry')) {
+      return new Response(JSON.stringify({ version: 'test', footprints: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     return new Response(
@@ -71,6 +100,8 @@ function serveSnapshot({ houses, coverageBox }) {
         license: 'ODbL 1.0',
         osmTimestamp: '2026-07-01T00:00:00Z',
         coverage: { box: coverageBox },
+        areaApplied: false,
+        streets: ['вулиця Якуба Коласа'],
         houses,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -104,7 +135,7 @@ describe('fetchHouses coverage reporting', () => {
 
     vi.stubGlobal(
       'fetch',
-      serveSnapshot({ houses: [houseAt({ x: 0, y: 0 }, 1)], coverageBox }),
+      serveSnapshot({ houses: [mapHouse({ x: 0, y: 0 }, 1)], coverageBox }),
     );
 
     const payload = await fetchHouses();
@@ -119,7 +150,7 @@ describe('fetchHouses coverage reporting', () => {
 
     vi.stubGlobal(
       'fetch',
-      serveSnapshot({ houses: [houseAt({ x: 0, y: 0 }, 1)], coverageBox }),
+      serveSnapshot({ houses: [mapHouse({ x: 0, y: 0 }, 1)], coverageBox }),
     );
 
     // 12 km east — well outside the snapshot's box.
@@ -142,7 +173,7 @@ describe('fetchHouses coverage reporting', () => {
     vi.stubGlobal(
       'fetch',
       serveSnapshot({
-        houses: [houseAt({ x: 0, y: 0 }, 1), houseAt({ x: 500, y: 0 }, 2)],
+        houses: [mapHouse({ x: 0, y: 0 }, 1), mapHouse({ x: 500, y: 0 }, 2)],
         coverageBox,
       }),
     );
@@ -188,7 +219,7 @@ describe('fetchHouses coverage reporting', () => {
 
     vi.stubGlobal(
       'fetch',
-      serveSnapshot({ houses: [houseAt({ x: 0, y: 0 }, 1)], coverageBox }),
+      serveSnapshot({ houses: [mapHouse({ x: 0, y: 0 }, 1)], coverageBox }),
     );
 
     await saveWorkspaceArea(toWorkspaceFeature(spike));
@@ -215,7 +246,7 @@ describe('fetchHouses coverage reporting', () => {
               center: { lat: 50.4345086, lon: 30.3774787 },
               downloadRadiusMeters: 3000,
             },
-            houses: [houseAt({ x: 0, y: 0 }, 1)],
+            houses: [mapHouse({ x: 0, y: 0 }, 1)],
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -309,7 +340,7 @@ function serveOverpass(elements, coverageBox) {
       JSON.stringify({
         version: 2,
         coverage: { box: coverageBox },
-        houses: [houseAt({ x: 0, y: 0 }, 1)],
+        houses: [mapHouse({ x: 0, y: 0 }, 1)],
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
