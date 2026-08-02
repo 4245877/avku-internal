@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AREA_CENTER,
   AREA_RADIUS_METERS,
+  boxShortfallMeters,
   distanceMeters,
   formatDistance,
   isInsideArea,
@@ -151,5 +152,40 @@ describe('formatDistance', () => {
   it('handles missing values', () => {
     expect(formatDistance(undefined)).toBe('—');
     expect(formatDistance(Number.NaN)).toBe('—');
+  });
+});
+
+describe('boxShortfallMeters', () => {
+  const inner = {
+    minLat: AREA_CENTER.lat - 0.01,
+    maxLat: AREA_CENTER.lat + 0.01,
+    minLon: AREA_CENTER.lon - 0.01,
+    maxLon: AREA_CENTER.lon + 0.01,
+  };
+
+  it('is zero when the outer box covers the inner one', () => {
+    expect(boxShortfallMeters({ ...inner, maxLat: inner.maxLat + 0.001 }, inner)).toBe(0);
+  });
+
+  it('measures a northern overhang in metres on the ground', () => {
+    const outer = { ...inner, maxLat: inner.maxLat - 0.001 };
+
+    // 0.001° of latitude is ~111 m anywhere on the ellipsoid.
+    expect(boxShortfallMeters(outer, inner)).toBeCloseTo(111, 0);
+  });
+
+  it('shortens a longitude overhang by the latitude, not just the degrees', () => {
+    const outer = { ...inner, maxLon: inner.maxLon - 0.001 };
+    const eastWest = boxShortfallMeters(outer, inner);
+
+    // At Kyiv's latitude a degree of longitude is ~0.64 of a degree of latitude.
+    expect(eastWest).toBeGreaterThan(60);
+    expect(eastWest).toBeLessThan(80);
+  });
+
+  it('reports the worst side when the box falls short on two of them', () => {
+    const outer = { ...inner, maxLat: inner.maxLat - 0.0005, minLon: inner.minLon + 0.002 };
+
+    expect(boxShortfallMeters(outer, inner)).toBeCloseTo(142, 0);
   });
 });

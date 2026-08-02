@@ -9,10 +9,12 @@
  *
  * The working area is the polygon the workspace store holds: the initial view
  * is fitted to it, its outline is drawn on top of the tiles, and everything
- * outside is covered by a dimming mask. While the boundary is being re-traced
- * (`isAreaEditing`) both overlays and the pan limits step aside, so the new
- * outline can be drawn beyond the old one — and when a re-traced boundary is
- * saved, the overlays, the pan limits and the home view all follow it.
+ * outside is covered by a dimming mask that dissolves into fog well before its
+ * own edge, so the widest view never shows the rectangle it is cut from. While
+ * the boundary is being re-traced (`isAreaEditing`) both overlays and the pan
+ * limits step aside, so the new outline can be drawn beyond the old one — and
+ * when a re-traced boundary is saved, the overlays, the pan limits and the home
+ * view all follow it.
  *
  * Switching «Карта» ⇄ «Супутник» replaces the base layer set and nothing else.
  * The map instance, the view, the pan limits, the traced boundary, the mask,
@@ -33,6 +35,18 @@ import { LABELS_PANE, MAP_MAX_ZOOM, getMapMode, layersOf } from './basemaps.js';
 const FIT_PADDING_PIXELS = 24;
 /** How far outside the working area panning is still allowed. */
 const PAN_MARGIN_RATIO = 0.3;
+/** How far the dimming mask reaches past the working area, as a share of it. */
+const MASK_PAD_RATIO = PAN_MARGIN_RATIO * 2;
+/**
+ * How far below the fitted view zooming out may still go, in zoom levels.
+ *
+ * Zero would pin the widest view to the district exactly. A whole level — what
+ * this used to be — pulls back to four times the district's area, far enough
+ * that the mask stops covering the viewport and the ground beyond it reads as a
+ * plain rectangle of dimming. Half a step keeps a band of surrounding city for
+ * orientation and stays inside the fog.
+ */
+const MIN_ZOOM_SLACK = 0.5;
 /** Closest zoom a single-house focus is allowed to reach. */
 const FOCUS_MAX_ZOOM = 19;
 /**
@@ -87,7 +101,7 @@ function whenSized(container, callback) {
  * and a world-sized SVG path turns into millions of pixels at street zoom.
  */
 function maskRings(bounds, rings) {
-  const outside = bounds.pad(PAN_MARGIN_RATIO * 2);
+  const outside = bounds.pad(MASK_PAD_RATIO);
   const north = outside.getNorth();
   const south = outside.getSouth();
   const east = outside.getEast();
@@ -102,6 +116,91 @@ function maskRings(bounds, rings) {
     ],
     ...toLeafletLatLngs(rings),
   ];
+}
+
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+/** Ties the mask's `fill` to the gradient below. Document-wide, as SVG ids are. */
+const FOG_GRADIENT_ID = 'elections-area-fog';
+/** Stops across the fade. Six is past the point where the ramp shows steps. */
+const FOG_FADE_STEPS = 5;
+
+/**
+ * The fog: how the dimming outside the working area gives out.
+ *
+ * The mask has an outer edge nobody drew — the rectangle it is cut from — and
+ * at the widest zoom that edge used to sit in plain view as a hard-cornered
+ * dark square around the district. So the mask is painted with a radial
+ * gradient rather than a flat colour, and simply stops existing before it
+ * reaches its own boundary.
+ *
+ * The gradient is mapped onto the mask's own bounding box, which is what makes
+ * this hold at every zoom and for any shape of territory: it stretches with the
+ * box and needs no recomputing when the map moves. Offsets are fractions of the
+ * gradient's radius, and that radius is half the box — so `1` lands on the
+ * middle of the box's edge, and the corners lie beyond it, left transparent by
+ * the final stop.
+ *
+ * Exported for the one thing here that is easy to get quietly wrong: the fade
+ * must not start until past everything the working area can reach, or houses
+ * just inside the border would sit in half-lit ground and read as excluded.
+ * The polygon is inscribed in `bounds`, whose furthest point from the centre is
+ * a corner — so that corner's radius is the earliest the fade may begin.
+ */
+export function fogGradientStops(padRatio = MASK_PAD_RATIO, steps = FOG_FADE_STEPS) {
+  // The mask's box is `bounds` grown by `padRatio` of its full size on each
+  // side, so `bounds` reaches `1 / span` of the way across it — and its corner,
+  // `√2` further out along the diagonal, `√2 / span` of the way to the edge.
+  const span = 1 + 2 * padRatio;
+  const solid = Math.SQRT2 / span;
+
+  return Array.from({ length: steps + 1 }, (_, index) => {
+    const progress = index / steps;
+
+    return {
+      offset: solid + progress * (1 - solid),
+      // Raised cosine: flat at both ends, so neither where the fog starts nor
+      // where it runs out leaves an edge for the eye to catch.
+      opacity: (1 + Math.cos(Math.PI * progress)) / 2,
+    };
+  });
+}
+
+/**
+ * Puts the gradient in the document so the mask's `fill` can name it.
+ *
+ * It goes in the map container rather than the page: it belongs to this map,
+ * dies with it, and inherits the theme's palette from the same place the rest
+ * of the map does — the stops take their colour from CSS, this only describes
+ * the shape of the falloff. The host `<svg>` carries no size and paints
+ * nothing; `<defs>` is only ever referenced.
+ */
+function addFogGradient(container) {
+  const host = document.createElementNS(SVG_NAMESPACE, 'svg');
+
+  host.setAttribute('width', '0');
+  host.setAttribute('height', '0');
+  host.setAttribute('aria-hidden', 'true');
+  host.setAttribute('focusable', 'false');
+  host.setAttribute('class', 'elections-area-fog');
+
+  const defs = document.createElementNS(SVG_NAMESPACE, 'defs');
+  const gradient = document.createElementNS(SVG_NAMESPACE, 'radialGradient');
+
+  gradient.setAttribute('id', FOG_GRADIENT_ID);
+
+  for (const stop of fogGradientStops()) {
+    const node = document.createElementNS(SVG_NAMESPACE, 'stop');
+
+    node.setAttribute('offset', stop.offset.toFixed(4));
+    node.setAttribute('stop-opacity', stop.opacity.toFixed(4));
+    gradient.append(node);
+  }
+
+  defs.append(gradient);
+  host.append(defs);
+  container.append(host);
+
+  return () => host.remove();
 }
 
 export function useLeafletMap({ center = AREA_CENTER, mapModeId, isAreaEditing = false } = {}) {
@@ -375,7 +474,7 @@ export function useLeafletMap({ center = AREA_CENTER, mapModeId, isAreaEditing =
 
       const fitted = map.getBoundsZoom(bounds, false, [FIT_PADDING_PIXELS, FIT_PADDING_PIXELS]);
 
-      map.setMinZoom(fitted - 1);
+      map.setMinZoom(fitted - MIN_ZOOM_SLACK);
       map.setMaxBounds(bounds.pad(PAN_MARGIN_RATIO));
     };
 
@@ -386,6 +485,11 @@ export function useLeafletMap({ center = AREA_CENTER, mapModeId, isAreaEditing =
       map.off('resize', applyLimits);
     };
   }, [area, isAreaEditing, map]);
+
+  /* The gradient the mask fades out with. Tied to the map's own lifetime: the
+   * mask below is rebuilt on every change of territory, and re-creating a
+   * definition that never varies along with it would be pure churn. */
+  useEffect(() => (map ? addFogGradient(map.getContainer()) : undefined), [map]);
 
   /* The working area: dimmed surroundings, outlined border, campaign anchor. */
   useEffect(() => {
@@ -398,9 +502,14 @@ export function useLeafletMap({ center = AREA_CENTER, mapModeId, isAreaEditing =
     // Non-interactive on purpose: the mask covers the whole viewport, and a
     // path that swallowed clicks would also swallow panning. Nothing outside
     // the polygon is clickable anyway — those houses are never added to the map.
+    //
+    // The fill is named here rather than in CSS so the reference resolves
+    // against the document: a fragment url in a stylesheet is resolved against
+    // the stylesheet's own address, which in a built bundle is not this page.
     const mask = L.polygon(maskRings(L.latLngBounds(area.bounds), area.rings), {
       interactive: false,
       className: 'elections-area-mask',
+      fillColor: `url(#${FOG_GRADIENT_ID})`,
       renderer,
     }).addTo(map);
 

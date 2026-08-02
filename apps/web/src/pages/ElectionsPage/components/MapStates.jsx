@@ -132,16 +132,56 @@ export function MapTilesErrorState({ mode, onRetry }) {
 }
 
 /**
+ * The command that regenerates the shipped snapshot — a real answer, but only
+ * for somebody with the repository checked out. A canvasser on a tablet has no
+ * terminal to run it in, so for them it is noise beside the button that does
+ * the same thing, and it is shown in development only.
+ */
+const IS_DEVELOPMENT = Boolean(import.meta.env?.DEV);
+
+/** How much of the territory has no data, in words a canvasser can act on. */
+function describeGap(coverage) {
+  const missingShare = 1 - (coverage.coveredShare ?? 0);
+
+  if (!(missingShare > 0)) {
+    return 'Частина території залишилася без даних';
+  }
+
+  // Rounding must never turn a real gap into "0% missing": under half a per
+  // cent the honest word is "small", not a number that reads as nothing.
+  const percent = missingShare < 0.005 ? null : Math.round(missingShare * 100);
+  const extent =
+    percent === null
+      ? 'Без даних лишилася невелика ділянка скраю'
+      : `Без даних лишилося приблизно ${percent}% території`;
+
+  return coverage.gapMeters > 0
+    ? `${extent}: межа виходить за завантажену ділянку на ${coverage.gapMeters} м`
+    : extent;
+}
+
+/**
  * The boundary was re-traced onto ground the local OSM snapshot never covered.
  *
  * This is the state that used to present itself as an empty map: the polygon is
- * right, the filter is right, and the dataset simply does not reach there. It
- * offers both ways out — a live download for this session, and the command that
- * makes the refreshed snapshot permanent.
+ * right, the filter is right, and the dataset simply does not reach there.
+ *
+ * The banner is also where the way out lives, so it carries the whole life of
+ * that download — running, failed, done — instead of handing a failure to the
+ * page-wide error state, which would blame the map for a busy Overpass mirror
+ * and offer a retry of the wrong request.
  */
-export function MapCoverageState({ coverage, isRefreshing, onRefresh }) {
+export function MapCoverageState({ coverage, refresh, onRefresh, onCancel }) {
+  const isRefreshing = refresh.status === 'loading';
+  const hasFailed = refresh.status === 'error';
+  const progress = refresh.progress;
+
   return (
-    <div className={styles.mapBanner} data-map-overlay="" role="status">
+    <div
+      className={styles.mapBanner}
+      data-map-overlay=""
+      role={hasFailed ? 'alert' : 'status'}
+    >
       <span aria-hidden="true" className={styles.mapBannerIcon}>
         <ElectionsIcon name="warning" size={20} />
       </span>
@@ -149,27 +189,57 @@ export function MapCoverageState({ coverage, isRefreshing, onRefresh }) {
       <span className={styles.mapBannerText}>
         <strong>
           {coverage.houseCount > 0
-            ? 'Локальний набір OSM покриває межу лише частково'
-            : 'Локальний набір OSM не покриває нову межу'}
+            ? 'Дані OSM покривають територію не повністю'
+            : 'Для цієї території ще немає даних OSM'}
         </strong>
+
         <small>
+          {/* "Завантажено", not "показано": the filters decide what is on the
+              map right now, and this number is about the dataset. */}
           {coverage.houseCount > 0
-            ? `Показано ${coverage.houseCount} буд. із завантаженої раніше ділянки. `
-            : 'Будинки для цієї території ще не завантажено. '}
-          Оновіть набір із OpenStreetMap або виконайте{' '}
-          <code>{coverage.command}</code>.
+            ? `Завантажено ${coverage.houseCount} буд. із раніше збереженої ділянки. `
+            : 'Жодного будинку для цієї межі ще не завантажено. '}
+          {describeGap(coverage)}. Завантажте будівлі з OpenStreetMap — карта
+          доповниться по всій поточній межі.
         </small>
+
+        {isRefreshing && (
+          <small className={styles.mapBannerProgress}>
+            <span aria-hidden="true" className={styles.mapSpinner} />
+            Запитуємо OpenStreetMap
+            {progress ? ` (спроба ${progress.round} з ${progress.attempts})` : ''}… Це
+            може тривати до хвилини.
+          </small>
+        )}
+
+        {hasFailed && (
+          <small className={styles.mapBannerError}>
+            Не вдалося звʼязатися з OpenStreetMap. Сервіс безкоштовний і часто
+            буває перевантажений — спробуйте ще раз за хвилину.
+          </small>
+        )}
+
+        {/* Which mirror said what is a developer's question; a canvasser gets
+            the sentence above and the button. */}
+        {hasFailed && IS_DEVELOPMENT && <small>{refresh.error}</small>}
+
+        {IS_DEVELOPMENT && (
+          <small>
+            Щоб оновити набір у репозиторії: <code>{coverage.command}</code>
+          </small>
+        )}
       </span>
 
-      <button
-        className={styles.primaryButton}
-        disabled={isRefreshing}
-        onClick={onRefresh}
-        type="button"
-      >
-        <ElectionsIcon name="refresh" size={17} />
-        {isRefreshing ? 'Завантажуємо…' : 'Завантажити з OSM'}
-      </button>
+      {isRefreshing ? (
+        <button className={styles.ghostButton} onClick={onCancel} type="button">
+          Скасувати
+        </button>
+      ) : (
+        <button className={styles.primaryButton} onClick={onRefresh} type="button">
+          <ElectionsIcon name="refresh" size={17} />
+          {hasFailed ? 'Спробувати ще раз' : 'Завантажити з OSM'}
+        </button>
+      )}
     </div>
   );
 }

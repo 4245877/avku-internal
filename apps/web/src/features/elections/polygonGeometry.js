@@ -31,6 +31,63 @@ export function ringBox(ring) {
   return { minLat, minLon, maxLat, maxLon };
 }
 
+/**
+ * The part of `ring` that falls inside `box`, as a ring — empty when the two do
+ * not overlap at all.
+ *
+ * Sutherland–Hodgman against the four half-planes of the box, which is exact
+ * here because the clip region is convex. It exists so that "the dataset does
+ * not cover the territory" can be answered in ground area rather than as a
+ * bounding-box yes/no: a boundary traced by hand routinely pokes a metre past
+ * the downloaded box in one corner, and a warning that cannot tell that sliver
+ * from a missing neighbourhood is a warning people learn to ignore.
+ */
+export function clipRingToBox(ring, box) {
+  const edges = [
+    { keep: (point) => point.lon >= box.minLon, axis: 'lon', at: box.minLon },
+    { keep: (point) => point.lon <= box.maxLon, axis: 'lon', at: box.maxLon },
+    { keep: (point) => point.lat >= box.minLat, axis: 'lat', at: box.minLat },
+    { keep: (point) => point.lat <= box.maxLat, axis: 'lat', at: box.maxLat },
+  ];
+
+  return edges.reduce((current, edge) => {
+    if (current.length === 0) {
+      return current;
+    }
+
+    const clipped = [];
+
+    for (let index = 0; index < current.length; index += 1) {
+      const from = current[(index + current.length - 1) % current.length];
+      const to = current[index];
+      const isFromInside = edge.keep(from);
+      const isToInside = edge.keep(to);
+
+      if (isFromInside !== isToInside) {
+        clipped.push(intersectAtEdge(from, to, edge));
+      }
+
+      if (isToInside) {
+        clipped.push(to);
+      }
+    }
+
+    return clipped;
+  }, ring);
+}
+
+/** Where the segment `from → to` crosses one axis-aligned edge of a box. */
+function intersectAtEdge(from, to, edge) {
+  const span = to[edge.axis] - from[edge.axis];
+  const ratio = span === 0 ? 0 : (edge.at - from[edge.axis]) / span;
+  const other = edge.axis === 'lon' ? 'lat' : 'lon';
+
+  return {
+    [edge.axis]: edge.at,
+    [other]: from[other] + (to[other] - from[other]) * ratio,
+  };
+}
+
 /** True when two boxes share at least one point — the cheap early reject. */
 export function boxesOverlap(first, second) {
   return (

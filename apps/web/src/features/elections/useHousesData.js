@@ -5,7 +5,7 @@
  * `electionsApi`, so pointing the module at a real backend is a one-file change.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   fetchHouses,
@@ -32,12 +32,32 @@ function createInitialState() {
   };
 }
 
+/**
+ * Rounds of the Overpass mirror list a person is asked to sit through.
+ *
+ * The snapshot script can afford the client's default three rounds — nobody is
+ * watching it — but here somebody is holding a banner open, and every extra
+ * round adds its own back-off on top of four endpoint timeouts. Two rounds is
+ * long enough to ride out one busy mirror and short enough to fail while the
+ * question is still current; the refresh is cancellable either way.
+ */
+const OSM_REFRESH_ATTEMPTS = 2;
+
+/** Nothing is being downloaded and nothing needs saying about it. */
+const IDLE_REFRESH = { status: 'idle', error: null, houseCount: 0, progress: null };
+
 export function useHousesData() {
   const [state, setState] = useState(createInitialState);
   const [reloadToken, setReloadToken] = useState(0);
   const [savingHouseId, setSavingHouseId] = useState(null);
   const [saveError, setSaveError] = useState(null);
-  const [isRefreshingFromOsm, setIsRefreshingFromOsm] = useState(false);
+  /**
+   * The live refresh runs beside the dataset rather than inside it: it is one
+   * banner's business, and a failed download must not take the houses already
+   * on the map down with it.
+   */
+  const [osmRefresh, setOsmRefresh] = useState(IDLE_REFRESH);
+  const osmRefreshRef = useRef(null);
 
   /*
    * The permanent boundary lives on the API; the first render used the local
@@ -59,6 +79,16 @@ export function useHousesData() {
   useEffect(() => {
     const controller = new AbortController();
     let isActive = true;
+
+    /*
+     * A live download is always for the boundary that was in force when it
+     * started, so a boundary that changes under it makes it the answer to a
+     * question nobody asked any more — and its banner, success or failure,
+     * would be about a territory that is no longer on screen.
+     */
+    osmRefreshRef.current?.abort();
+    osmRefreshRef.current = null;
+    setOsmRefresh(IDLE_REFRESH);
 
     setState((current) => ({ ...current, status: 'loading', error: null }));
 
@@ -107,16 +137,48 @@ export function useHousesData() {
    */
   useEffect(() => subscribeToWorkspaceArea(reload), [reload]);
 
+  /** A download nobody is waiting for any more is stopped, not left running. */
+  const cancelRefreshFromOsm = useCallback(() => {
+    osmRefreshRef.current?.abort();
+    osmRefreshRef.current = null;
+    setOsmRefresh(IDLE_REFRESH);
+  }, []);
+
+  useEffect(() => () => osmRefreshRef.current?.abort(), []);
+
   /**
    * Pulls buildings for the current boundary straight from OpenStreetMap, for
-   * when the shipped snapshot does not reach the newly traced territory. The
-   * result replaces the dataset for this session only.
+   * when the shipped snapshot does not reach the newly traced territory.
+   *
+   * A failure is reported on the refresh itself and nowhere else: the map keeps
+   * the houses, the border and the coverage banner it already had, and the
+   * retry offered is the download that failed rather than a reload of the
+   * snapshot that was never the problem.
    */
   const refreshFromOsm = useCallback(async () => {
-    setIsRefreshingFromOsm(true);
+    osmRefreshRef.current?.abort();
+
+    const controller = new AbortController();
+    osmRefreshRef.current = controller;
+
+    setOsmRefresh({ ...IDLE_REFRESH, status: 'loading' });
 
     try {
-      const payload = await fetchHousesFromOsm();
+      const payload = await fetchHousesFromOsm({
+        signal: controller.signal,
+        attempts: OSM_REFRESH_ATTEMPTS,
+        onProgress: ({ round, attempts }) => {
+          if (!controller.signal.aborted) {
+            setOsmRefresh((current) =>
+              current.status === 'loading' ? { ...current, progress: { round, attempts } } : current,
+            );
+          }
+        },
+      });
+
+      if (controller.signal.aborted) {
+        return false;
+      }
 
       setState({
         status: 'ready',
@@ -127,19 +189,37 @@ export function useHousesData() {
         error: null,
       });
 
+      setOsmRefresh({
+        ...IDLE_REFRESH,
+        status: 'success',
+        houseCount: payload.houses.length,
+      });
+
       return true;
     } catch (error) {
-      setState((current) => ({
-        ...current,
+      if (controller.signal.aborted || error?.name === 'AbortError') {
+        return false;
+      }
+
+      setOsmRefresh({
+        ...IDLE_REFRESH,
         status: 'error',
         error: error?.message ?? 'Не вдалося завантажити дані з OpenStreetMap.',
-      }));
+      });
 
       return false;
     } finally {
-      setIsRefreshingFromOsm(false);
+      if (osmRefreshRef.current === controller) {
+        osmRefreshRef.current = null;
+      }
     }
   }, []);
+
+  /** Puts the banner's confirmation away once it has been read. */
+  const dismissOsmRefresh = useCallback(
+    () => setOsmRefresh((current) => (current.status === 'idle' ? current : IDLE_REFRESH)),
+    [],
+  );
 
   /**
    * Saves one house's survey data. The house object is replaced but its
@@ -195,18 +275,24 @@ export function useHousesData() {
         state.status === 'ready' &&
         state.houses.length === 0 &&
         state.coverage?.isCovered !== false,
-      isRefreshingFromOsm,
+      /** `idle` | `loading` | `success` | `error`, plus what each one needs. */
+      osmRefresh,
+      isRefreshingFromOsm: osmRefresh.status === 'loading',
       savingHouseId,
       saveError,
       reload,
       refreshFromOsm,
+      cancelRefreshFromOsm,
+      dismissOsmRefresh,
       saveDetails,
       resetDemoData,
       dismissSaveError,
     }),
     [
+      cancelRefreshFromOsm,
+      dismissOsmRefresh,
       dismissSaveError,
-      isRefreshingFromOsm,
+      osmRefresh,
       refreshFromOsm,
       reload,
       resetDemoData,

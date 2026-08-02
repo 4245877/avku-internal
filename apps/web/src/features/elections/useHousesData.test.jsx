@@ -13,6 +13,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { unprojectFromMeters } from './geo.js';
 import { useHousesData } from './useHousesData.js';
+
+/**
+ * The live download itself is the Overpass client's business and is tested with
+ * it; what matters here is the state machine around it — which is exactly the
+ * part that used to hand a busy mirror to the page-wide error state and take
+ * the map down with it.
+ */
+const osm = vi.hoisted(() => ({ download: null }));
+
+vi.mock('./electionsApi.js', async (importOriginal) => {
+  const actual = await importOriginal();
+
+  return {
+    ...actual,
+    fetchHousesFromOsm: (options) => osm.download(options),
+  };
+});
+
 import { AREA_STORAGE_KEY } from './workspaceAreaStorage.js';
 import {
   resetWorkspaceAreaToShipped,
@@ -234,6 +252,89 @@ describe('useHousesData', () => {
 
     expect(result.current.area.isCustom).toBe(true);
     expect(result.current.houses).toHaveLength(2);
+  });
+
+  /** Puts the hook in the state the coverage banner is shown for. */
+  async function renderOnUncoveredGround() {
+    const view = renderHook(() => useHousesData());
+
+    await waitFor(() => expect(view.result.current.isReady).toBe(true));
+
+    await act(async () => {
+      await saveWorkspaceArea(toWorkspaceFeature(district({ east: 12000, half: 300 })));
+    });
+
+    await waitFor(() => expect(view.result.current.hasMissingCoverage).toBe(true));
+
+    return view;
+  }
+
+  it('closes the coverage warning and redraws the map after a live refresh', async () => {
+    const { result } = await renderOnUncoveredGround();
+
+    osm.download = async () => ({
+      houses: [{ ...HOUSES[2], id: 'osm/1' }],
+      streets: ['вулиця Якуба Коласа'],
+      area: result.current.area,
+      coverage: { isCovered: true, houseCount: 1, coveredShare: 1, source: 'osm' },
+    });
+
+    await act(async () => {
+      await result.current.refreshFromOsm();
+    });
+
+    expect(result.current.hasMissingCoverage).toBe(false);
+    expect(result.current.houses.map((house) => house.id)).toEqual(['osm/1']);
+    expect(result.current.osmRefresh).toMatchObject({ status: 'success', houseCount: 1 });
+    expect(result.current.isRefreshingFromOsm).toBe(false);
+  });
+
+  it('keeps the map and the warning when the download fails', async () => {
+    const { result } = await renderOnUncoveredGround();
+
+    osm.download = async () => {
+      throw new Error('Overpass API недоступний після 2 спроб');
+    };
+
+    await act(async () => {
+      await result.current.refreshFromOsm();
+    });
+
+    // The dataset never moved: the failure belongs to the refresh, and the
+    // retry it offers is the download — not a reload of the snapshot.
+    expect(result.current.status).toBe('ready');
+    expect(result.current.hasError).toBe(false);
+    expect(result.current.hasMissingCoverage).toBe(true);
+    expect(result.current.osmRefresh.status).toBe('error');
+    expect(result.current.osmRefresh.error).toMatch(/Overpass/);
+  });
+
+  it('reports progress while downloading and stops on cancel', async () => {
+    const { result } = await renderOnUncoveredGround();
+
+    osm.download = ({ onProgress, signal }) =>
+      new Promise((resolve, reject) => {
+        onProgress({ round: 1, attempts: 2 });
+        signal.addEventListener('abort', () => reject(new DOMException('stop', 'AbortError')));
+      });
+
+    let refresh;
+
+    act(() => {
+      refresh = result.current.refreshFromOsm();
+    });
+
+    await waitFor(() => expect(result.current.isRefreshingFromOsm).toBe(true));
+
+    expect(result.current.osmRefresh.progress).toEqual({ round: 1, attempts: 2 });
+
+    await act(async () => {
+      result.current.cancelRefreshFromOsm();
+      await refresh;
+    });
+
+    expect(result.current.osmRefresh.status).toBe('idle');
+    expect(result.current.hasError).toBe(false);
   });
 
   it('surfaces a failed dataset request as an error the page can retry', async () => {

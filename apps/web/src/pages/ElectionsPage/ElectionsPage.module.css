@@ -986,11 +986,31 @@
 /*
  * Everything outside the polygon. One path with the working area punched out
  * of it as a hole, so the dimming stops exactly at the border.
+ *
+ * Its own outer edge is the opposite problem — a rectangle nobody drew, which
+ * at the widest zoom sat in view as a hard-cornered square around the district.
+ * So the path is painted with the fog gradient (see `useLeafletMap.js`) instead
+ * of a flat colour: full strength everywhere the working area reaches, then
+ * fading to nothing before it ever arrives at its own border. `fill` itself is
+ * set on the element, not here, and must stay that way — a fragment url in a
+ * stylesheet resolves against the stylesheet, not the page.
  */
 :global(.elections-area-mask) {
-  fill: var(--map-outside-fill);
   fill-opacity: 1;
   stroke: none;
+}
+
+/* The falloff is the gradient's; the colour is the theme's. */
+.mapCanvas :global(.elections-area-fog) stop {
+  stop-color: var(--map-outside-fill);
+}
+
+/* Definitions only — nothing to lay out, nothing to paint, nothing to hit. */
+.mapCanvas :global(.elections-area-fog) {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
 /* ── BOUNDARY EDITING (?areaEdit=1) ───────────────────────── */
@@ -1832,6 +1852,38 @@
 
   background: var(--panel-inset);
   border-radius: var(--radius-sm);
+}
+
+/*
+ * The life of the live OSM download, reported inside the banner that asked for
+ * it: a running request and a failed one are answers to the button beside them,
+ * not new states of the map, so they get a line each rather than a card of
+ * their own.
+ */
+.mapBannerProgress,
+.mapBannerError {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  margin-top: 2px;
+}
+
+.mapBannerProgress {
+  color: var(--color-text-secondary);
+}
+
+.mapBannerProgress .mapSpinner {
+  width: 12px;
+  height: 12px;
+  margin-bottom: 0;
+  border-width: 2px;
+  /* Baseline alignment would hang a circle below the text it sits beside. */
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.mapBannerError {
+  color: var(--color-warning-strong);
 }
 
 .mapBanner button {

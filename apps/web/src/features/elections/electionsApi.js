@@ -26,7 +26,13 @@
  * `PATCH` and the rest of the module stays as it is.
  */
 
-import { boxCoversBox, boxFromCircle, expandBox } from './geo.js';
+import {
+  boxCoversBox,
+  boxFromCircle,
+  boxShortfallMeters,
+  expandBox,
+  ringAreaSquareMeters,
+} from './geo.js';
 import {
   AREA_DOWNLOAD_MARGIN_METERS,
   filterHousesToWorkspace,
@@ -34,6 +40,7 @@ import {
   getWorkspaceMeta,
   workspaceBoundingBox,
 } from './workspaceArea.js';
+import { clipRingToBox } from './polygonGeometry.js';
 import { createEmptyDetails } from './electionsTypes.js';
 import { listStreetNames } from './osmBuildings.js';
 import { fetchHousesFromOverpass } from './overpassClient.js';
@@ -167,12 +174,59 @@ function readDatasetBox(snapshot) {
   );
 }
 
+/**
+ * Buildings downloaded live during this session, and the box they were asked
+ * for.
+ *
+ * Without it the live refresh only survives until the next load: re-tracing the
+ * boundary, retrying a failed request or reopening the page all go back to the
+ * shipped snapshot, and the coverage banner returns to ask for a refresh that
+ * has already been done. Holding the answer for the session means the warning
+ * is raised once and stays answered — the CLI is still what makes it permanent
+ * for everybody else.
+ */
+let sessionOsmDataset = null;
+
+/** Drops the live dataset, so the next load goes back to the shipped one. */
+export function forgetOsmDataset() {
+  sessionOsmDataset = null;
+}
+
+/**
+ * The live dataset, when it reaches the territory currently in force. A
+ * boundary re-traced *inside* the box that was downloaded is still covered by
+ * it; one traced outside is not, and falls back to the snapshot so the banner
+ * can offer a refresh for the new ground.
+ */
+function readSessionOsmDataset() {
+  if (!sessionOsmDataset || SOURCE === 'overpass') {
+    return null;
+  }
+
+  if (!boxCoversBox(sessionOsmDataset.box, getWorkspaceArea().box)) {
+    return null;
+  }
+
+  return {
+    houses: sessionOsmDataset.houses,
+    osmTimestamp: sessionOsmDataset.osmTimestamp,
+    datasetBox: sessionOsmDataset.box,
+    source: 'osm',
+  };
+}
+
 async function loadDataset(signal) {
+  const session = readSessionOsmDataset();
+
+  if (session) {
+    return session;
+  }
+
   if (SOURCE === 'overpass') {
     const box = workspaceBoundingBox();
     const { houses, generatedAt } = await fetchHousesFromOverpass({ box, signal });
 
-    return { houses, osmTimestamp: generatedAt, datasetBox: box };
+    return { houses, osmTimestamp: generatedAt, datasetBox: box, source: 'osm' };
   }
 
   if (SOURCE === 'backend') {
@@ -185,6 +239,7 @@ async function loadDataset(signal) {
     return {
       houses: payload.houses ?? [],
       datasetBox: readDatasetBox(payload),
+      source: 'backend',
     };
   }
 
@@ -195,6 +250,7 @@ async function loadDataset(signal) {
     osmTimestamp: snapshot.osmTimestamp ?? null,
     attribution: snapshot.license ?? null,
     datasetBox: readDatasetBox(snapshot),
+    source: 'snapshot',
   };
 }
 
@@ -215,25 +271,72 @@ export const REFRESH_DATASET_COMMAND = 'pnpm --filter @avku/web data:houses';
 const COVERAGE_TOLERANCE_METERS = 25;
 
 /**
- * Whether the dataset reaches the territory it is about to be filtered against.
+ * Ground the dataset misses that is too small to hide a building, in m².
+ *
+ * The bounding-box test is exact — a polygon lies inside a box exactly when its
+ * own box does — so any overhang at all is real missing ground. It is not
+ * always *meaningful* missing ground: one vertex of a hand-traced outline
+ * landing thirty metres past the downloaded box carves off a triangle of a few
+ * hundred square metres, and warning that the dataset "covers the border only
+ * partially" because of it is how a true warning becomes a nuisance. 400 m² is
+ * the footprint of a detached house — below it there is provably nothing to
+ * download.
+ */
+const MIN_MISSING_AREA_SQM = 400;
+
+/**
+ * Whether the dataset reaches the territory it is about to be filtered against,
+ * and by how much it falls short when it does not.
  *
  * `isCovered: false` is the state that used to present itself as an empty map:
  * the boundary was re-traced onto ground the snapshot never covered, so the
  * polygon is correct, the filter is correct, and there is simply nothing there
  * to find. Saying so — and offering the live refresh — is the whole point.
+ *
+ * The measurements beside it are what let the banner be specific instead of
+ * alarming: `coveredShare` is the fraction of the territory's own ground the
+ * dataset reaches (measured on the polygon, not on its bounding box, so a
+ * diagonal district is not blamed for its empty corners), `missingAreaSqm` is
+ * the rest of it, and `gapMeters` is how far past the data the border reaches
+ * at its worst point.
  */
-function describeCoverage({ datasetBox, houseCount }) {
-  const areaBox = getWorkspaceArea().box;
+function describeCoverage({ datasetBox, houseCount, source = 'snapshot' }) {
+  const area = getWorkspaceArea();
+  const areaBox = area.box;
+  const totalSqm = ringAreaSquareMeters(area.outerRing);
 
-  return {
+  const shared = {
     areaBox,
     datasetBox: datasetBox ?? null,
     marginMeters: AREA_DOWNLOAD_MARGIN_METERS,
-    isCovered:
-      Boolean(datasetBox) &&
-      boxCoversBox(expandBox(datasetBox, COVERAGE_TOLERANCE_METERS), areaBox),
     houseCount,
+    source,
     command: REFRESH_DATASET_COMMAND,
+  };
+
+  if (!datasetBox) {
+    return {
+      ...shared,
+      isCovered: false,
+      coveredShare: 0,
+      missingAreaSqm: totalSqm,
+      gapMeters: null,
+    };
+  }
+
+  // The tolerance is spent once, here: every number below is measured against
+  // the same reach, so the share and the gap can never disagree with the yes/no.
+  const reach = expandBox(datasetBox, COVERAGE_TOLERANCE_METERS);
+  const covered = clipRingToBox(area.outerRing, reach);
+  const coveredSqm = covered.length >= 3 ? ringAreaSquareMeters(covered) : 0;
+  const missingAreaSqm = Math.max(0, totalSqm - coveredSqm);
+
+  return {
+    ...shared,
+    isCovered: boxCoversBox(reach, areaBox) || missingAreaSqm < MIN_MISSING_AREA_SQM,
+    coveredShare: totalSqm > 0 ? Math.min(1, coveredSqm / totalSqm) : 1,
+    missingAreaSqm,
+    gapMeters: Math.round(boxShortfallMeters(reach, areaBox)),
   };
 }
 
@@ -271,6 +374,7 @@ export async function fetchHouses({ signal } = {}) {
     coverage: describeCoverage({
       datasetBox: dataset.datasetBox,
       houseCount: covered.length,
+      source: dataset.source,
     }),
     streets: listStreetNames(covered).sort(compareStreetNames),
     houses: covered.map((house) =>
@@ -286,12 +390,27 @@ export async function fetchHouses({ signal } = {}) {
  *
  * This is the answer to "the shipped snapshot does not reach my new district"
  * that does not require a terminal: it queries Overpass for the polygon's own
- * bounding box. The result lives for this session only — committing a refreshed
- * `houses.json` is what makes it everybody's, and that is still the CLI's job.
+ * bounding box. The result is kept for the rest of the session — including
+ * across boundary changes that stay inside the box it was downloaded for, which
+ * is what stops the coverage banner from asking again for what it just got.
+ * Committing a refreshed `houses.json` is what makes it everybody's, and that
+ * is still the CLI's job.
+ *
+ * `attempts` and `onProgress` come from the Overpass client: a browser caller
+ * has somebody waiting on it, so it can afford fewer retries than the snapshot
+ * script and has to be able to say which attempt is running.
  */
-export async function fetchHousesFromOsm({ signal } = {}) {
+export async function fetchHousesFromOsm({ signal, attempts, onProgress } = {}) {
   const box = workspaceBoundingBox();
-  const { houses, generatedAt } = await fetchHousesFromOverpass({ box, signal });
+  const { houses, generatedAt } = await fetchHousesFromOverpass({
+    box,
+    signal,
+    attempts,
+    onProgress,
+  });
+
+  sessionOsmDataset = { houses, box, osmTimestamp: generatedAt };
+
   const covered = filterHousesToWorkspace(houses);
   const overrides = readOverrides();
 
@@ -303,7 +422,11 @@ export async function fetchHousesFromOsm({ signal } = {}) {
     ),
     osmTimestamp: generatedAt,
     area: getAreaMeta(),
-    coverage: describeCoverage({ datasetBox: box, houseCount: covered.length }),
+    coverage: describeCoverage({
+      datasetBox: box,
+      houseCount: covered.length,
+      source: 'osm',
+    }),
     streets: listStreetNames(covered).sort(compareStreetNames),
   };
 }

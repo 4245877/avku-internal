@@ -174,8 +174,9 @@ function ElectionsPage() {
           houses={data.houses}
           isAreaEditing={areaEdit.isActive}
           isAreaEmpty={data.isAreaEmpty}
-          isRefreshingFromOsm={data.isRefreshingFromOsm}
           matchedIds={matchedIds}
+          onCancelRefreshFromOsm={data.cancelRefreshFromOsm}
+          onDismissOsmRefresh={data.dismissOsmRefresh}
           onEnterAreaEditing={enterAreaEditing}
           onExitAreaEditing={areaEdit.exit}
           onFillStatusChange={(fillStatus) => updateFilters({ fillStatus })}
@@ -183,6 +184,7 @@ function ElectionsPage() {
           onResetFilters={resetFilters}
           onRetry={data.reload}
           onSelectHouse={selectHouse}
+          osmRefresh={data.osmRefresh}
           selectedHouse={selectedHouse}
           status={data.status}
           summary={summary}

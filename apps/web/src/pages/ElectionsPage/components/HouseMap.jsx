@@ -99,8 +99,10 @@ function HouseMap({
   coverage,
   hasMissingCoverage,
   isAreaEmpty,
-  isRefreshingFromOsm,
+  osmRefresh,
   onRefreshFromOsm,
+  onCancelRefreshFromOsm,
+  onDismissOsmRefresh,
   isAreaEditing,
   onEnterAreaEditing,
   onExitAreaEditing,
@@ -174,6 +176,20 @@ function HouseMap({
 
     return () => clearTimeout(timeoutId);
   }, [areaNotice]);
+
+  /*
+   * A finished download closes its own banner — the houses are on the map by
+   * then, so the confirmation is a receipt, not a state to sit in.
+   */
+  useEffect(() => {
+    if (osmRefresh.status !== 'success') {
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(onDismissOsmRefresh, AREA_NOTICE_TIMEOUT_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [onDismissOsmRefresh, osmRefresh.status]);
 
   const handleSelectHouse = useCallback(
     (houseId) => onSelectHouse(houseId ?? null),
@@ -305,6 +321,17 @@ function HouseMap({
           />
         )}
 
+        {/* One notice slot, and a freshly downloaded dataset is the newer news
+            of the two — a saved boundary is what caused the download. */}
+        {!areaNotice && osmRefresh.status === 'success' && (
+          <p className={styles.mapNotice} data-map-overlay="" role="status">
+            <ElectionsIcon name="check" size={16} />
+            {osmRefresh.houseCount > 0
+              ? `Дані оновлено з OpenStreetMap — ${osmRefresh.houseCount} буд. у межах території.`
+              : 'Дані оновлено з OpenStreetMap — у межах цієї території будинків немає.'}
+          </p>
+        )}
+
         {areaNotice && (
           <p
             className={[styles.mapNotice, areaNotice.isWarning ? styles.mapNoticeWarning : '']
@@ -347,8 +374,9 @@ function HouseMap({
         {status === 'ready' && tileStatus !== 'error' && !isAreaEditing && hasMissingCoverage && (
           <MapCoverageState
             coverage={coverage}
-            isRefreshing={isRefreshingFromOsm}
+            onCancel={onCancelRefreshFromOsm}
             onRefresh={onRefreshFromOsm}
+            refresh={osmRefresh}
           />
         )}
 

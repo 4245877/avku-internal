@@ -14,7 +14,10 @@ import { unprojectFromMeters } from './geo.js';
 import {
   REFRESH_DATASET_COMMAND,
   fetchHouses,
+  fetchHousesFromOsm,
+  forgetOsmDataset,
 } from './electionsApi.js';
+import { ringBox } from './polygonGeometry.js';
 import {
   resetWorkspaceAreaToShipped,
   saveWorkspaceArea,
@@ -85,12 +88,14 @@ function shippedCoverageBox() {
 beforeEach(() => {
   window.localStorage.clear();
   resetWorkspaceAreaToShipped();
+  forgetOsmDataset();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   window.localStorage.clear();
   resetWorkspaceAreaToShipped();
+  forgetOsmDataset();
 });
 
 describe('fetchHouses coverage reporting', () => {
@@ -152,7 +157,48 @@ describe('fetchHouses coverage reporting', () => {
     expect(payload.coverage.isCovered).toBe(false);
     expect(payload.coverage.houseCount).toBeGreaterThan(0);
     expect(payload.houses.length).toBe(payload.coverage.houseCount);
+
+    // The banner has to be able to say *how* partial: half a district missing
+    // and a metre of it must not produce the same sentence.
+    expect(payload.coverage.coveredShare).toBeGreaterThan(0);
+    expect(payload.coverage.coveredShare).toBeLessThan(1);
+    expect(payload.coverage.gapMeters).toBeGreaterThan(0);
   });
+
+  /**
+   * The bounding-box test is exact, which is precisely why it needs a floor: a
+   * hand-traced outline that clips the downloaded box by a wedge of a few
+   * square metres is not a district with missing houses, and a warning that
+   * cannot tell the two apart is a warning nobody reads.
+   */
+  it('treats an overhang too small to hold a building as covered', async () => {
+    // The dataset covers exactly the square district, with no margin at all.
+    const coverageBox = ringBox(district({ half: 400 }));
+
+    // The same square with one vertex nudged 40 m east on a narrow wedge.
+    const spike = [
+      { x: -400, y: -400 },
+      { x: 400, y: -400 },
+      { x: 400, y: -4 },
+      { x: 440, y: 0 },
+      { x: 400, y: 4 },
+      { x: 400, y: 400 },
+      { x: -400, y: 400 },
+    ].map((point) => unprojectFromMeters(point));
+
+    vi.stubGlobal(
+      'fetch',
+      serveSnapshot({ houses: [houseAt({ x: 0, y: 0 }, 1)], coverageBox }),
+    );
+
+    await saveWorkspaceArea(toWorkspaceFeature(spike));
+
+    const payload = await fetchHouses();
+
+    expect(payload.coverage.isCovered).toBe(true);
+    expect(payload.coverage.missingAreaSqm).toBeLessThan(400);
+  });
+
 
   it('derives coverage from a legacy snapshot that only records its radius', async () => {
     vi.stubGlobal(
@@ -210,5 +256,113 @@ describe('fetchHouses coverage reporting', () => {
     );
 
     await expect(fetchHouses()).rejects.toThrow(/500/);
+  });
+});
+
+/** One Overpass element, in the `out body geom` shape the normalizer reads. */
+function overpassBuilding({ x, y }, id, size = 12) {
+  return {
+    type: 'way',
+    id,
+    tags: {
+      building: 'apartments',
+      'addr:street': 'вулиця Якуба Коласа',
+      'addr:housenumber': String(id),
+    },
+    geometry: [
+      { x: x - size, y: y - size },
+      { x: x + size, y: y - size },
+      { x: x + size, y: y + size },
+      { x: x - size, y: y + size },
+      { x: x - size, y: y - size },
+    ].map((point) => unprojectFromMeters(point)),
+  };
+}
+
+/**
+ * The snapshot *and* the Overpass mirrors behind one handler. The coverage box
+ * is taken as an argument rather than derived here, because deriving it would
+ * reset the boundary in the middle of a request.
+ */
+function serveOverpass(elements, coverageBox) {
+  return vi.fn(async (url) => {
+    if (String(url).includes('/elections/area')) {
+      return new Response('{}', { status: 404 });
+    }
+
+    if (String(url).includes('overpass')) {
+      return new Response(
+        JSON.stringify({
+          osm3s: { timestamp_osm_base: '2026-08-01T00:00:00Z' },
+          elements,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        version: 2,
+        coverage: { box: coverageBox },
+        houses: [houseAt({ x: 0, y: 0 }, 1)],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  });
+}
+
+/**
+ * The warning has to be answerable once. Before this, a live refresh lived only
+ * in React state: the next reload — a retried request, a nudged boundary, a
+ * reopened page — went back to the shipped snapshot and asked for exactly the
+ * download that had just been made.
+ */
+describe('a live refresh answers the coverage warning for the session', () => {
+  it('serves the downloaded buildings to later loads of the same territory', async () => {
+    const coverageBox = shippedCoverageBox();
+
+    vi.stubGlobal(
+      'fetch',
+      serveOverpass([overpassBuilding({ x: 12000, y: 0 }, 501)], coverageBox),
+    );
+
+    await saveWorkspaceArea(toWorkspaceFeature(district({ east: 12000, half: 300 })));
+
+    // The shipped snapshot does not reach 12 km east.
+    const before = await fetchHouses();
+
+    expect(before.coverage.isCovered).toBe(false);
+
+    const refreshed = await fetchHousesFromOsm();
+
+    expect(refreshed.coverage.isCovered).toBe(true);
+    expect(refreshed.houses).toHaveLength(1);
+
+    // The reload the page does after any boundary change or retry.
+    const after = await fetchHouses();
+
+    expect(after.coverage.isCovered).toBe(true);
+    expect(after.coverage.source).toBe('osm');
+    expect(after.houses.map((house) => house.id)).toEqual(['way/501']);
+  });
+
+  it('goes back to the snapshot for a boundary the download never reached', async () => {
+    const coverageBox = shippedCoverageBox();
+
+    vi.stubGlobal(
+      'fetch',
+      serveOverpass([overpassBuilding({ x: 12000, y: 0 }, 501)], coverageBox),
+    );
+
+    await saveWorkspaceArea(toWorkspaceFeature(district({ east: 12000, half: 300 })));
+    await fetchHousesFromOsm();
+
+    // Somewhere else entirely — the session download says nothing about it.
+    await saveWorkspaceArea(toWorkspaceFeature(district({ east: 40000, half: 300 })));
+
+    const payload = await fetchHouses();
+
+    expect(payload.coverage.isCovered).toBe(false);
+    expect(payload.coverage.source).toBe('snapshot');
   });
 });

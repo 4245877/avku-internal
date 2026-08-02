@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   boxesOverlap,
+  clipRingToBox,
   isPointInPolygon,
   isPointInRing,
   isRingInsideRing,
@@ -185,5 +186,33 @@ describe('isRingSelfIntersecting', () => {
     ];
 
     expect(isRingSelfIntersecting(bowtie)).toBe(true);
+  });
+});
+
+describe('clipRingToBox', () => {
+  it('leaves a ring the box contains untouched', () => {
+    expect(clipRingToBox(square({ size: 1 }), ringBox(OUTER))).toEqual(square({ size: 1 }));
+  });
+
+  it('cuts a ring down to the part inside the box', () => {
+    // A square from lon 0 to 20, clipped to everything west of lon 10.
+    const clipped = clipRingToBox(square({ lon: 10, size: 10 }), {
+      minLat: -100,
+      maxLat: 100,
+      minLon: -100,
+      maxLon: 10,
+    });
+
+    expect(ringBox(clipped)).toEqual({ minLat: -10, maxLat: 10, minLon: 0, maxLon: 10 });
+  });
+
+  it('returns nothing for a ring the box misses entirely', () => {
+    expect(clipRingToBox(square({ lon: 50, size: 1 }), ringBox(OUTER))).toEqual([]);
+  });
+
+  it('keeps the corner where the ring overhangs two edges at once', () => {
+    const clipped = clipRingToBox(square({ lat: 8, lon: 8, size: 4 }), ringBox(OUTER));
+
+    expect(ringBox(clipped)).toEqual({ minLat: 4, maxLat: 10, minLon: 4, maxLon: 10 });
   });
 });

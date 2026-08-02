@@ -75,6 +75,24 @@ export function boxCoversBox(outer, inner) {
   );
 }
 
+/**
+ * How far `inner` reaches past `outer` on its worst side, in metres — zero when
+ * `outer` covers it.
+ *
+ * `boxCoversBox` answers yes or no; a banner that says "the dataset does not
+ * reach your territory" has to be able to say by how much, because thirty
+ * metres of hand-traced slack and two missing streets are not the same problem
+ * and must not read the same way.
+ */
+export function boxShortfallMeters(outer, inner) {
+  const midLatitude = (inner.minLat + inner.maxLat) / 2;
+  const scale = Math.max(Math.cos(midLatitude * DEGREES_TO_RADIANS), 1e-6);
+  const latitudeGap = Math.max(0, outer.minLat - inner.minLat, inner.maxLat - outer.maxLat);
+  const longitudeGap = Math.max(0, outer.minLon - inner.minLon, inner.maxLon - outer.maxLon);
+
+  return Math.max(latitudeGap, longitudeGap * scale) / DEGREES_PER_METER;
+}
+
 /** True when a point falls inside a lat/lon box, borders included. */
 export function isPointInBox(point, box) {
   return (

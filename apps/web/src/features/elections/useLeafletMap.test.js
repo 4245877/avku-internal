@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { TILE_ERROR_THRESHOLD, foldTileStatus } from './useLeafletMap.js';
+import { TILE_ERROR_THRESHOLD, foldTileStatus, fogGradientStops } from './useLeafletMap.js';
 
 const layer = (pending = 0, failed = 0) => ({ pending, failed });
 
@@ -35,5 +35,46 @@ describe('tile health', () => {
 
     expect(foldTileStatus([imagery, labels])).toBe('error');
     expect(foldTileStatus([labels, imagery])).toBe('error');
+  });
+});
+
+describe('area fog', () => {
+  /* The regression this shape exists for: the mask used to end in a flat
+   * rectangle, which at the widest zoom read as a dark square drawn around the
+   * district. Nothing of it may survive to its own boundary. */
+  it('has run out by the edge of the mask', () => {
+    const stops = fogGradientStops();
+    const last = stops.at(-1);
+
+    expect(last.opacity).toBe(0);
+    expect(last.offset).toBeCloseTo(1, 10);
+  });
+
+  /* The other half of the same rule: dimming that faded early would wash over
+   * houses that are inside the territory and make them read as excluded. The
+   * polygon is inscribed in its bounds, so the fade may not start before the
+   * corner of those bounds. */
+  it('is still at full strength past the furthest corner of the working area', () => {
+    for (const padRatio of [0.3, 0.6, 1.2]) {
+      const [first] = fogGradientStops(padRatio);
+      const boundsCorner = Math.SQRT2 / (1 + 2 * padRatio);
+
+      expect(first.opacity).toBe(1);
+      expect(first.offset).toBeGreaterThanOrEqual(boundsCorner);
+    }
+  });
+
+  it('never rises again once it starts falling', () => {
+    const stops = fogGradientStops();
+
+    for (const [index, stop] of stops.slice(1).entries()) {
+      expect(stop.opacity).toBeLessThan(stops[index].opacity);
+      expect(stop.offset).toBeGreaterThan(stops[index].offset);
+    }
+  });
+
+  /* A ramp the eye can count steps in is a worse artefact than the square. */
+  it('describes the falloff in enough steps to read as smooth', () => {
+    expect(fogGradientStops().length).toBeGreaterThanOrEqual(5);
   });
 });
