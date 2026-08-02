@@ -10,8 +10,11 @@
   --map-bg-end: #e4eff8;
   --map-area-fill: rgba(255, 255, 255, 0.72);
   --map-area-ring: rgba(44, 95, 138, 0.55);
-  /* Ground outside the working-area polygon — dimmed and out of play. */
-  --map-outside-fill: rgba(28, 46, 64, 0.42);
+  /* Ground outside the working-area polygon — fogged out and out of play.
+     Both tones are opaque: none of that ground is shown at all. `near` hugs the
+     border, `far` is the flat field the fog settles into further off. */
+  --map-fog-near: #a3b7c9;
+  --map-fog-far: #d5e3f0;
 
   --map-road-casing: rgba(44, 95, 138, 0.16);
   --map-road-surface: #ffffff;
@@ -82,7 +85,8 @@
   --map-bg-end: #0d1826;
   --map-area-fill: rgba(22, 40, 60, 0.55);
   --map-area-ring: rgba(168, 221, 247, 0.5);
-  --map-outside-fill: rgba(4, 10, 18, 0.55);
+  --map-fog-near: #16283a;
+  --map-fog-far: #0a1320;
 
   --map-road-casing: rgba(0, 0, 0, 0.4);
   --map-road-surface: #22384f;
@@ -984,29 +988,39 @@
 }
 
 /*
- * Everything outside the polygon. One path with the working area punched out
- * of it as a hole, so the dimming stops exactly at the border.
- *
- * Its own outer edge is the opposite problem — a rectangle nobody drew, which
- * at the widest zoom sat in view as a hard-cornered square around the district.
- * So the path is painted with the fog gradient (see `useLeafletMap.js`) instead
- * of a flat colour: full strength everywhere the working area reaches, then
- * fading to nothing before it ever arrives at its own border. `fill` itself is
- * set on the element, not here, and must stay that way — a fragment url in a
- * stylesheet resolves against the stylesheet, not the page.
+ * Everything outside the polygon, hidden rather than dimmed. One path with the
+ * working area punched out of it as a hole, so the veil stops exactly at the
+ * border — and opaque, because the ground beyond the border is out of play and
+ * none of it is shown. It is cut from a ring that spans the world and lives in
+ * a pane above every layer the map draws, so there is nothing left for a wide
+ * view, a hard pan or a building that straddles the border to show through it.
  */
-:global(.elections-area-mask) {
+:global(.elections-area-veil) {
+  fill: var(--map-fog-far);
+  fill-opacity: 1;
+  stroke: none;
+}
+
+/*
+ * The fog, laid over the veil: the near tone, at full strength everywhere the
+ * working area reaches and then giving out into the veil's own colour before it
+ * arrives at its own border — which is the whole reason it is a gradient and
+ * not a flat rectangle. It uncovers nothing; the veil below it is opaque.
+ * `fill` itself is set on the element, not here, and must stay that way — a
+ * fragment url in a stylesheet resolves against the stylesheet, not the page.
+ */
+:global(.elections-area-fog) {
   fill-opacity: 1;
   stroke: none;
 }
 
 /* The falloff is the gradient's; the colour is the theme's. */
-.mapCanvas :global(.elections-area-fog) stop {
-  stop-color: var(--map-outside-fill);
+.mapCanvas :global(.elections-area-fog-defs) stop {
+  stop-color: var(--map-fog-near);
 }
 
 /* Definitions only — nothing to lay out, nothing to paint, nothing to hit. */
-.mapCanvas :global(.elections-area-fog) {
+.mapCanvas :global(.elections-area-fog-defs) {
   position: absolute;
   width: 0;
   height: 0;

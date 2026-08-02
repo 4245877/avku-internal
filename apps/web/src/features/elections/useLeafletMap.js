@@ -9,12 +9,13 @@
  *
  * The working area is the polygon the workspace store holds: the initial view
  * is fitted to it, its outline is drawn on top of the tiles, and everything
- * outside is covered by a dimming mask that dissolves into fog well before its
- * own edge, so the widest view never shows the rectangle it is cut from. While
- * the boundary is being re-traced (`isAreaEditing`) both overlays and the pan
- * limits step aside, so the new outline can be drawn beyond the old one — and
- * when a re-traced boundary is saved, the overlays, the pan limits and the home
- * view all follow it.
+ * outside it is *hidden* — not dimmed. Only the ground inside the boundary is
+ * ever shown, so the veil that covers the rest is opaque, is cut from a ring
+ * that spans the world, and lives in a pane above every layer the map draws.
+ * While the boundary is being re-traced (`isAreaEditing`) both overlays and the
+ * pan limits step aside, so the new outline can be drawn beyond the old one —
+ * and when a re-traced boundary is saved, the overlays, the pan limits and the
+ * home view all follow it.
  *
  * Switching «Карта» ⇄ «Супутник» replaces the base layer set and nothing else.
  * The map instance, the view, the pan limits, the traced boundary, the mask,
@@ -35,18 +36,30 @@ import { LABELS_PANE, MAP_MAX_ZOOM, getMapMode, layersOf } from './basemaps.js';
 const FIT_PADDING_PIXELS = 24;
 /** How far outside the working area panning is still allowed. */
 const PAN_MARGIN_RATIO = 0.3;
-/** How far the dimming mask reaches past the working area, as a share of it. */
+/** How far the fog reaches past the working area, as a share of it. */
 const MASK_PAD_RATIO = PAN_MARGIN_RATIO * 2;
 /**
  * How far below the fitted view zooming out may still go, in zoom levels.
  *
- * Zero would pin the widest view to the district exactly. A whole level — what
- * this used to be — pulls back to four times the district's area, far enough
- * that the mask stops covering the viewport and the ground beyond it reads as a
- * plain rectangle of dimming. Half a step keeps a band of surrounding city for
- * orientation and stays inside the fog.
+ * Zero would pin the widest view to the district exactly; half a step keeps a
+ * band of fog around it, which is what makes the district read as cut out of
+ * something rather than as the whole map.
  */
 const MIN_ZOOM_SLACK = 0.5;
+/**
+ * The pane the working-area overlays live in.
+ *
+ * They cannot share the overlay pane with the building polygons, which is where
+ * Leaflet puts paths by default. The house canvas is added to that pane *after*
+ * the veil — its effect runs later — so it painted straight over it, and the
+ * house-number markers sit in the marker pane, which is above the overlay pane
+ * at every moment. Both showed on ground the veil is supposed to hide.
+ */
+const AREA_PANE = 'elections-area';
+/** Above the marker pane (600), below Leaflet's own tooltips (650). */
+const AREA_PANE_Z_INDEX = 620;
+/** How far past the viewport the working area's overlays are drawn. */
+const AREA_RENDERER_PADDING = 0.5;
 /** Closest zoom a single-house focus is allowed to reach. */
 const FOCUS_MAX_ZOOM = 19;
 /**
@@ -95,12 +108,71 @@ function whenSized(container, callback) {
 }
 
 /**
- * The dimming mask is one polygon with the working area punched out of it as a
- * hole (Leaflet fills paths with the even-odd rule). Its outer ring is the pan
- * limit rather than the whole world: the map cannot be moved past that anyway,
- * and a world-sized SVG path turns into millions of pixels at street zoom.
+ * An SVG renderer that keeps up with a movement instead of waiting it out.
+ *
+ * A renderer draws a band of ground a little wider than the viewport and then
+ * holds still until Leaflet tells it to redraw — which for panning is `moveend`,
+ * the *end* of the gesture. Tiles do not work that way: `GridLayer` loads on
+ * `move`, which is why a flick brings fresh cartography in as it travels. So
+ * the veil was the one thing on the map standing still while everything under
+ * it moved, and a flick — a drag is followed by inertia that carries the map
+ * thousands of pixels further — slid whole neighbourhoods out from under it and
+ * left them on screen, uncovered, until the map came to rest.
+ *
+ * No padding fixes that; the distance is unbounded. Redrawing on `move` is what
+ * fixes it, and it costs a viewBox and three simple paths per frame. Zoom is
+ * left alone: `L.SVG` refuses to redraw mid-zoom on purpose, because the
+ * animation is a transform on the whole container and a redraw would fight it.
  */
-function maskRings(bounds, rings) {
+const AreaRenderer = L.SVG.extend({
+  getEvents() {
+    return { ...L.SVG.prototype.getEvents.call(this), move: this._update };
+  },
+});
+
+/** Where Mercator runs out — Leaflet projects nothing past this latitude. */
+const MAX_LATITUDE = 85.0511287798;
+
+/**
+ * The whole projectable world, as one ring.
+ *
+ * The veil used to be cut from the pan limit instead, on the grounds that the
+ * map cannot be moved past it. That was wrong in the one direction nobody
+ * checks: the limit is a *box around the district*, and a district that is
+ * taller than it is wide leaves the viewport wider than the box at every zoom
+ * that fits it — so the city went on being drawn down both sides of the map.
+ * A ring this size cannot be reached past at any zoom or pan, and it costs
+ * nothing to draw: Leaflet clips a polygon's rings to its renderer's bounds
+ * before building the path, so what reaches the SVG is viewport-sized however
+ * large the ring it was cut from.
+ */
+const WORLD_RING = [
+  [-MAX_LATITUDE, -180],
+  [-MAX_LATITUDE, 180],
+  [MAX_LATITUDE, 180],
+  [MAX_LATITUDE, -180],
+];
+
+/**
+ * The veil: one polygon covering everything outside the working area, which is
+ * punched out of it as a hole (Leaflet fills paths with the even-odd rule).
+ *
+ * Exported for the property the whole feature rests on — that there is no view
+ * of the map in which some corner of the ground escapes it.
+ */
+export function veilRings(rings) {
+  return [WORLD_RING, ...toLeafletLatLngs(rings)];
+}
+
+/**
+ * The fog: the same hole, cut from a box a little larger than the district.
+ *
+ * It is painted over the veil rather than over the map, so it tints the veil
+ * near the border and gives out into the veil's own tone further off. That is
+ * the whole of its job — the veil below it is opaque everywhere, so nothing the
+ * fog does can uncover ground.
+ */
+function fogRings(bounds, rings) {
   const outside = bounds.pad(MASK_PAD_RATIO);
   const north = outside.getNorth();
   const south = outside.getSouth();
@@ -125,24 +197,25 @@ const FOG_GRADIENT_ID = 'elections-area-fog';
 const FOG_FADE_STEPS = 5;
 
 /**
- * The fog: how the dimming outside the working area gives out.
+ * How the fog gives out into the veil below it.
  *
- * The mask has an outer edge nobody drew — the rectangle it is cut from — and
- * at the widest zoom that edge used to sit in plain view as a hard-cornered
- * dark square around the district. So the mask is painted with a radial
- * gradient rather than a flat colour, and simply stops existing before it
- * reaches its own boundary.
+ * The fog is one tone laid over the veil, so a stop's opacity is how much of
+ * that tone survives at that distance — never how much of the *map* does. It
+ * has an outer edge nobody drew — the box it is cut from — and a flat edge
+ * there would read as a hard-cornered square around the district, so it is
+ * painted with a radial gradient and has run out entirely by the time it
+ * arrives at its own boundary.
  *
- * The gradient is mapped onto the mask's own bounding box, which is what makes
+ * The gradient is mapped onto the path's own bounding box, which is what makes
  * this hold at every zoom and for any shape of territory: it stretches with the
  * box and needs no recomputing when the map moves. Offsets are fractions of the
  * gradient's radius, and that radius is half the box — so `1` lands on the
- * middle of the box's edge, and the corners lie beyond it, left transparent by
+ * middle of the box's edge, and the corners lie beyond it, left to the veil by
  * the final stop.
  *
  * Exported for the one thing here that is easy to get quietly wrong: the fade
- * must not start until past everything the working area can reach, or houses
- * just inside the border would sit in half-lit ground and read as excluded.
+ * must not start until past everything the working area can reach, or the
+ * ground immediately outside the border would be tinted unevenly around it.
  * The polygon is inscribed in `bounds`, whose furthest point from the centre is
  * a corner — so that corner's radius is the earliest the fade may begin.
  */
@@ -181,7 +254,7 @@ function addFogGradient(container) {
   host.setAttribute('height', '0');
   host.setAttribute('aria-hidden', 'true');
   host.setAttribute('focusable', 'false');
-  host.setAttribute('class', 'elections-area-fog');
+  host.setAttribute('class', 'elections-area-fog-defs');
 
   const defs = document.createElementNS(SVG_NAMESPACE, 'defs');
   const gradient = document.createElementNS(SVG_NAMESPACE, 'radialGradient');
@@ -252,12 +325,24 @@ export function useLeafletMap({ center = AREA_CENTER, mapModeId, isAreaEditing =
         // Owned by the map, not by the layer set: every mode reaches the same
         // depth, so switching to imagery can never clamp the current zoom.
         maxZoom: MAP_MAX_ZOOM,
+        // The pan limit is a wall, not a rubber band. Left at Leaflet's default
+        // a drag can carry the map right off the district and only spring back
+        // once it is let go — and for the whole of that flight the map is
+        // showing ground the working area does not cover.
+        maxBoundsViscosity: 1,
       });
 
       // Hybrid labels ride between the imagery and the buildings: above the
       // photo they annotate, below the polygons a canvasser clicks.
       instance.createPane(LABELS_PANE).style.zIndex = 250;
       instance.getPane(LABELS_PANE).style.pointerEvents = 'none';
+
+      // The working area's own pane, above every layer the map draws — tiles,
+      // hybrid labels, building polygons and house-number markers alike. Deaf
+      // to the pointer, because it covers the whole viewport: a veil that took
+      // clicks would take panning and every building underneath it with it.
+      instance.createPane(AREA_PANE).style.zIndex = AREA_PANE_Z_INDEX;
+      instance.getPane(AREA_PANE).style.pointerEvents = 'none';
 
       // The starting view is whatever fits the traced boundary — the polygon is
       // the only thing that decides how far out the district opens.
@@ -491,25 +576,43 @@ export function useLeafletMap({ center = AREA_CENTER, mapModeId, isAreaEditing =
    * definition that never varies along with it would be pure churn. */
   useEffect(() => (map ? addFogGradient(map.getContainer()) : undefined), [map]);
 
-  /* The working area: dimmed surroundings, outlined border, campaign anchor. */
+  /* The working area: hidden surroundings, outlined border, campaign anchor.
+   *
+   * Three paths through one renderer, and the order they are added in is the
+   * order they are painted in: the veil hides the ground, the fog tints it, the
+   * border draws the line between that and the district. */
   useEffect(() => {
     if (!map || isAreaEditing) {
       return undefined;
     }
 
-    const renderer = L.svg({ padding: 1 });
+    const renderer = new AreaRenderer({
+      padding: AREA_RENDERER_PADDING,
+      pane: AREA_PANE,
+    });
 
-    // Non-interactive on purpose: the mask covers the whole viewport, and a
-    // path that swallowed clicks would also swallow panning. Nothing outside
-    // the polygon is clickable anyway — those houses are never added to the map.
-    //
+    // What actually hides everything outside the district. Opaque, and cut from
+    // a ring no view can reach past — see `veilRings`.
+    const veil = L.polygon(veilRings(area.rings), {
+      interactive: false,
+      className: 'elections-area-veil',
+      renderer,
+    }).addTo(map);
+
     // The fill is named here rather than in CSS so the reference resolves
     // against the document: a fragment url in a stylesheet is resolved against
     // the stylesheet's own address, which in a built bundle is not this page.
-    const mask = L.polygon(maskRings(L.latLngBounds(area.bounds), area.rings), {
+    //
+    // `noClip` because the gradient is mapped onto this path's bounding box:
+    // let Leaflet trim the path to the viewport, as it does every other one,
+    // and the box the fog is measured against would be trimmed with it, so the
+    // fog would slide about with every pan and zoom. The path is a rectangle
+    // and a ring, and it is the veil below that has to cover the viewport.
+    const fog = L.polygon(fogRings(L.latLngBounds(area.bounds), area.rings), {
       interactive: false,
-      className: 'elections-area-mask',
+      className: 'elections-area-fog',
       fillColor: `url(#${FOG_GRADIENT_ID})`,
+      noClip: true,
       renderer,
     }).addTo(map);
 
@@ -532,7 +635,8 @@ export function useLeafletMap({ center = AREA_CENTER, mapModeId, isAreaEditing =
     }).addTo(map);
 
     return () => {
-      mask.remove();
+      veil.remove();
+      fog.remove();
       border.remove();
       anchor.remove();
     };

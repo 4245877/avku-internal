@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { TILE_ERROR_THRESHOLD, foldTileStatus, fogGradientStops } from './useLeafletMap.js';
+import {
+  TILE_ERROR_THRESHOLD,
+  foldTileStatus,
+  fogGradientStops,
+  veilRings,
+} from './useLeafletMap.js';
 
 const layer = (pending = 0, failed = 0) => ({ pending, failed });
 
@@ -38,8 +43,44 @@ describe('tile health', () => {
   });
 });
 
+describe('area veil', () => {
+  /* A district in Kyiv, roughly the shape of the real one: much taller than it
+   * is wide, which is what the old mask got wrong. */
+  const district = [
+    [
+      { lat: 50.42, lon: 30.35 },
+      { lat: 50.42, lon: 30.38 },
+      { lat: 50.48, lon: 30.38 },
+      { lat: 50.48, lon: 30.35 },
+    ],
+  ];
+
+  /* The regression this exists for: the veil used to be cut from a box around
+   * the district, so the ground down both sides of a tall, narrow territory was
+   * never covered at any zoom that fitted it, and the city went on showing
+   * there. Nothing on the map may fall outside the ring it is cut from. */
+  it('is cut from a ring no view of the map can reach past', () => {
+    const [outer] = veilRings(district);
+    const lats = outer.map(([lat]) => lat);
+    const lons = outer.map(([, lon]) => lon);
+
+    expect(Math.min(...lats)).toBeLessThan(-85);
+    expect(Math.max(...lats)).toBeGreaterThan(85);
+    expect(Math.min(...lons)).toBe(-180);
+    expect(Math.max(...lons)).toBe(180);
+  });
+
+  /* The hole. Everything after the outer ring is the working area itself, which
+   * is the only ground the veil leaves uncovered. */
+  it('punches the working area out of it, ring for ring', () => {
+    const [, ...holes] = veilRings(district);
+
+    expect(holes).toEqual([district[0].map((point) => [point.lat, point.lon])]);
+  });
+});
+
 describe('area fog', () => {
-  /* The regression this shape exists for: the mask used to end in a flat
+  /* The regression this shape exists for: the fog used to end in a flat
    * rectangle, which at the widest zoom read as a dark square drawn around the
    * district. Nothing of it may survive to its own boundary. */
   it('has run out by the edge of the mask', () => {
