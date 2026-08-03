@@ -33,6 +33,7 @@ import BulkAssignDialog from './components/BulkAssignDialog.jsx';
 import ElectionsHeader from './components/ElectionsHeader.jsx';
 import ElectionsToolbar from './components/ElectionsToolbar.jsx';
 import HouseDetailsPanel from './components/HouseDetailsPanel.jsx';
+import HouseEditor from './components/HouseEditor/HouseEditor.jsx';
 import HouseMap from './components/HouseMap.jsx';
 import HouseResultsList from './components/HouseResultsList.jsx';
 import ImportPanel from './components/ImportPanel.jsx';
@@ -60,7 +61,14 @@ function ElectionsPage() {
 
   const [filters, setFilters] = useState(DEFAULT_HOUSE_FILTERS);
   const [selectedHouseId, setSelectedHouseId] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
+  /**
+   * Whether the full-screen editor is open over the page.
+   *
+   * A flag rather than a route, and the map underneath is never unmounted —
+   * that is what makes closing the editor land on the same house, the same
+   * zoom, the same filters and the same campaign without restoring anything.
+   */
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('house');
   const [saveNotice, setSaveNotice] = useState('');
   const [overlay, setOverlay] = useState(null);
@@ -82,6 +90,18 @@ function ElectionsPage() {
 
   const matchedIds = useMemo(
     () => new Set(filteredHouses.map((house) => house.id)),
+    [filteredHouses],
+  );
+
+  /**
+   * The current selection, in list order.
+   *
+   * The editor walks it with its «попередній / наступний будинок» arrows, which
+   * is what turns "edit the six houses this filter found" into six clicks
+   * instead of six round trips through the map.
+   */
+  const filteredHouseIds = useMemo(
+    () => filteredHouses.map((house) => house.id),
     [filteredHouses],
   );
 
@@ -178,7 +198,7 @@ function ElectionsPage() {
   /** Opens the editor and brings the map — the drawing surface — into view. */
   function enterAreaEditing() {
     areaEdit.enter();
-    setIsEditing(false);
+    setIsEditorOpen(false);
     workspaceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
@@ -202,12 +222,14 @@ function ElectionsPage() {
   /** Selection from the map: no camera move, the user is already looking there. */
   function selectHouse(houseId) {
     setSelectedHouseId(houseId);
-    setIsEditing(false);
     setSaveNotice('');
     data.dismissSaveError();
 
     if (houseId) {
       setActiveTab('house');
+    } else {
+      // Nothing selected is nothing to edit.
+      setIsEditorOpen(false);
     }
   }
 
@@ -232,24 +254,22 @@ function ElectionsPage() {
     return saved;
   }
 
-  async function handleSaveAttributes(patch) {
-    const saved = await data.saveAttributes(selectedHouseId, patch);
-
+  /**
+   * The editor saved something.
+   *
+   * `saved` is the server's own copy of the house when a form section wrote it,
+   * and `null` when an independent record did (a task, a photo) — in which case
+   * only the derived counters moved and the house is re-read. Either way the
+   * card and the map pick the change up without a page reload.
+   */
+  function handleEditorSaved(saved) {
     if (saved) {
-      setIsEditing(false);
+      data.replaceHouse(saved);
+    } else {
+      data.refreshHouse(selectedHouseId);
     }
 
-    return afterWrite(saved, 'Характеристики будинку збережено.');
-  }
-
-  async function handleSaveState(patch) {
-    const saved = await data.saveState(selectedHouseId, patch);
-
-    if (saved) {
-      setIsEditing(false);
-    }
-
-    return afterWrite(saved, 'Стан у кампанії збережено.');
+    setRefreshToken((current) => current + 1);
   }
 
   async function handleCompleteTask(taskId) {
@@ -408,7 +428,6 @@ function ElectionsPage() {
               hasError={data.hasError}
               house={selectedHouse}
               isDetailsLoading={details.isLoading}
-              isEditing={isEditing}
               isLoading={data.isLoading}
               isSaving={
                 Boolean(selectedHouseId) && data.savingHouseId === selectedHouseId
@@ -438,17 +457,11 @@ function ElectionsPage() {
                   .addTask(selectedHouseId, payload)
                   .then((saved) => afterWrite(saved, 'Задачу створено.'))
               }
-              onCancelEditing={() => {
-                setIsEditing(false);
-                data.dismissSaveError();
-              }}
               onClose={() => selectHouse(null)}
               onCompleteTask={handleCompleteTask}
               onResolveIssue={handleResolveIssue}
-              onSaveAttributes={handleSaveAttributes}
-              onSaveState={handleSaveState}
               onStartEditing={() => {
-                setIsEditing(true);
+                setIsEditorOpen(true);
                 setSaveNotice('');
               }}
               refreshToken={refreshToken}
@@ -485,6 +498,28 @@ function ElectionsPage() {
           </div>
         </aside>
       </div>
+
+      {/*
+        The editor covers the page but does not replace it: the map keeps its
+        camera, its layers and its selection underneath, so closing lands
+        exactly where the user left off — with this house still highlighted.
+      */}
+      {isEditorOpen && selectedHouse && (
+        <HouseEditor
+          campaign={data.campaign}
+          campaignId={data.campaignId}
+          detailsError={details.error}
+          house={selectedHouse}
+          isDetailsLoading={details.isLoading}
+          knownAssignees={assignees}
+          neighbours={filteredHouseIds}
+          onClose={() => setIsEditorOpen(false)}
+          onSaved={handleEditorSaved}
+          onSelectHouse={selectAndFocusHouse}
+          precincts={precincts}
+          viewer={data.viewer}
+        />
+      )}
     </main>
   );
 }

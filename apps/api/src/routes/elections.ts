@@ -55,6 +55,7 @@ import {
   bulkAssignHouses,
   createAssignment,
   createPerson,
+  deletePerson,
   deletePersonLink,
   endAssignment,
   linkPersonToHouse,
@@ -64,6 +65,7 @@ import {
   mergePeople,
   searchPeople,
   updatePerson,
+  updatePersonLink,
 } from "../modules/elections/people-records";
 import {
   createAction,
@@ -86,6 +88,7 @@ import {
   listIssues,
   listMaterialIssues,
   listTasks,
+  updateAction,
   updateIssue,
   updateTask,
 } from "../modules/elections/activity-records";
@@ -643,6 +646,29 @@ async function handleHouses(
     return true;
   }
 
+  if (action === "events" && request.method === "GET") {
+    // Events are campaign-wide records that may sit at a house; the editor's
+    // «Події» section wants only the ones that do. `getHouse` first, so the
+    // house's own visibility rules decide whether this list exists at all.
+    getHouse(
+      database,
+      houseId,
+      listOptions,
+    );
+    sendJson(
+      response,
+      200,
+      listEvents(
+        database,
+        listOptions.campaignId,
+        {
+          houseId,
+        },
+      ),
+    );
+    return true;
+  }
+
   if (action === "attachments" && request.method === "GET") {
     getHouse(
       database,
@@ -673,7 +699,13 @@ async function handleHouses(
       readChangeLog(
         database,
         {
-          entityId: houseId,
+          // The building's own id *and* the composite key its campaign state is
+          // journalled under, so "who moved this house to «Завершено»" is in
+          // the history a person opens rather than only in the global journal.
+          entityIds: [
+            houseId,
+            `${listOptions.campaignId}:${houseId}`,
+          ],
           limit: readLimit(
             url,
             100,
@@ -809,6 +841,34 @@ async function handleActivity(
         201,
         {
           id,
+        },
+      );
+      return true;
+    }
+
+    if (request.method === "PATCH" && recordId) {
+      // An agitator may correct the visit they logged; `assertActivityVisible`
+      // is what stops them correcting somebody else's.
+      requireRole(
+        viewer,
+        "agitator",
+      );
+
+      const body = await readJsonBody(request);
+
+      await repository.withTransaction((db) =>
+        updateAction(
+          db,
+          recordId,
+          body,
+          context,
+          viewer,
+        ));
+      sendJson(
+        response,
+        200,
+        {
+          ok: true,
         },
       );
       return true;
@@ -1858,6 +1918,53 @@ export async function handleElectionsRequest(
     const [, personId] = segments;
 
     /*
+     * Deleting the person, not the link.
+     *
+     * A manager, because it is the one write in the module that destroys a
+     * phone number rather than moving it: an agitator who meant "this person
+     * moved out" wants `DELETE /person-links/:id`, which is a coordinator
+     * action and reversible by re-linking. The record is soft-deleted, so the
+     * journal still says who did it.
+     */
+    if (personId && !segments[2] && request.method === "DELETE") {
+      requireRole(
+        viewer,
+        "manager",
+      );
+
+      const deleteCampaignId = requireCampaign(await resolveCampaignId(
+        repository,
+        url,
+      ));
+
+      await assertCampaignWritable(
+        repository,
+        deleteCampaignId,
+      );
+      await repository.withTransaction((db) =>
+        deletePerson(
+          db,
+          personId,
+          {
+            actor: viewer.email,
+            campaignId: deleteCampaignId,
+          },
+          {
+            campaignId: deleteCampaignId,
+            viewer,
+          },
+        ));
+      sendJson(
+        response,
+        200,
+        {
+          ok: true,
+        },
+      );
+      return;
+    }
+
+    /*
      * People are not campaign-scoped rows, but reaching one is: a person is
      * only visible through a building, and which buildings the caller holds is
      * a fact about a campaign. So these writes resolve a campaign for two
@@ -1942,7 +2049,7 @@ export async function handleElectionsRequest(
   }
 
   if (segments[0] === "person-links" && segments[1] &&
-    request.method === "DELETE") {
+    (request.method === "DELETE" || request.method === "PATCH")) {
     requireRole(
       viewer,
       "coordinator",
@@ -1957,18 +2064,48 @@ export async function handleElectionsRequest(
       repository,
       linkCampaignId,
     );
+
+    const linkContext = {
+      actor: viewer.email,
+      campaignId: linkCampaignId,
+    };
+    const linkOptions = {
+      campaignId: linkCampaignId,
+      viewer,
+    };
+
+    if (request.method === "PATCH") {
+      const body = await readJsonBody(request);
+
+      await repository.withTransaction((db) =>
+        updatePersonLink(
+          db,
+          segments[1],
+          {
+            entrance: body.entrance,
+            apartment: body.apartment,
+            roleInHouse: body.roleInHouse,
+            note: body.note,
+          },
+          linkContext,
+          linkOptions,
+        ));
+      sendJson(
+        response,
+        200,
+        {
+          ok: true,
+        },
+      );
+      return;
+    }
+
     await repository.withTransaction((db) =>
       deletePersonLink(
         db,
         segments[1],
-        {
-          actor: viewer.email,
-          campaignId: linkCampaignId,
-        },
-        {
-          campaignId: linkCampaignId,
-          viewer,
-        },
+        linkContext,
+        linkOptions,
       ));
     sendJson(
       response,
@@ -2318,6 +2455,9 @@ export async function handleElectionsRequest(
         listEvents(
           database,
           campaignId,
+          {
+            houseId: url.searchParams.get("houseId") ?? undefined,
+          },
         ),
       );
       return;

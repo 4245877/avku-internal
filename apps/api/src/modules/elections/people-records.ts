@@ -110,6 +110,9 @@ export interface PersonContact {
   value: string;
   label: string;
   isPrimary: boolean;
+  /** When this channel was last confirmed to still reach the person. */
+  verifiedAt: string | null;
+  verifiedBy: string | null;
   /** True when `value` has been masked because the viewer may not see it. */
   isMasked: boolean;
 }
@@ -157,6 +160,8 @@ function rowToContact(
       ),
     label: String(row.label ?? ""),
     isPrimary: Number(row.is_primary ?? 0) === 1,
+    verifiedAt: row.verified_at == null ? null : String(row.verified_at),
+    verifiedBy: row.verified_by == null ? null : String(row.verified_by),
     isMasked: !reveal,
   };
 }
@@ -174,7 +179,8 @@ function readContacts(
 
   const placeholders = personIds.map(() => "?").join(", ");
   const rows = database.prepare(`
-    SELECT id, person_id, type, value, label, is_primary
+    SELECT id, person_id, type, value, label, is_primary,
+           verified_at, verified_by
     FROM person_contacts
     WHERE person_id IN (${placeholders}) AND deleted_at IS NULL
     ORDER BY is_primary DESC, created_at
@@ -423,10 +429,14 @@ export interface PersonInput {
 }
 
 interface ContactInput {
+  /** The id of the row this entry came from, when it is an existing one. */
+  id: string;
   type: ContactType;
   value: string;
   label: string;
   isPrimary: boolean;
+  /** The caller says they have just confirmed this channel works. */
+  verified: boolean;
 }
 
 function readContactInputs(value: unknown): ContactInput[] {
@@ -451,6 +461,11 @@ function readContactInputs(value: unknown): ContactInput[] {
     );
 
     return {
+      id: optionalText(
+        record.id,
+        `contacts[${index}].id`,
+        200,
+      ),
       type,
       value: requireText(
         record.value,
@@ -463,8 +478,17 @@ function readContactInputs(value: unknown): ContactInput[] {
         200,
       ),
       isPrimary: record.isPrimary === true,
+      // Never a date from the client: the point of the field is that somebody
+      // actually checked, so the clock and the identity are the server's.
+      verified: record.verified === true,
     };
   });
+}
+
+/** What a contact carried before this write — see {@link updatePerson}. */
+interface ContactStamp {
+  verifiedAt: string | null;
+  verifiedBy: string | null;
 }
 
 function insertContacts(
@@ -472,15 +496,23 @@ function insertContacts(
   personId: string,
   contacts: ContactInput[],
   source: string,
+  context: ChangeContext,
+  carried: Map<string, ContactStamp> = new Map(),
 ): void {
   const now = new Date().toISOString();
 
   for (const contact of contacts) {
+    const previous = carried.get(contact.id);
+    const verifiedAt = contact.verified ? now : (previous?.verifiedAt ?? null);
+    const verifiedBy = contact.verified
+      ? context.actor
+      : (previous?.verifiedBy ?? null);
+
     database.prepare(`
       INSERT INTO person_contacts (
         id, person_id, type, value, value_normalized, label, is_primary,
-        source, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        verified_at, verified_by, source, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       randomUUID(),
       personId,
@@ -492,6 +524,8 @@ function insertContacts(
       ),
       contact.label,
       contact.isPrimary ? 1 : 0,
+      verifiedAt,
+      verifiedBy,
       source,
       now,
       now,
@@ -554,6 +588,7 @@ export function createPerson(
     id,
     contacts,
     source,
+    context,
   );
 
   const houseId = optionalText(
@@ -818,8 +853,28 @@ export function updatePerson(
     const contacts = readContactInputs(input.contacts);
     const now = new Date().toISOString();
 
-    // Contacts are replaced wholesale, but by soft delete — a number that was
-    // removed by mistake is still recoverable and still in the history.
+    /*
+     * Contacts are replaced wholesale, so the "checked on" stamp has to be
+     * carried across by hand or editing a person's *name* would silently reset
+     * every phone number to "never verified". The stamp follows the row's id,
+     * which the client echoes back — a value it cannot forge into anything but
+     * a row that already exists on this person.
+     */
+    const carried = new Map<string, ContactStamp>(
+      (database.prepare(`
+        SELECT id, verified_at, verified_by FROM person_contacts
+        WHERE person_id = ? AND deleted_at IS NULL
+      `).all(personId) as Record<string, unknown>[]).map((row) => [
+        String(row.id),
+        {
+          verifiedAt: row.verified_at == null ? null : String(row.verified_at),
+          verifiedBy: row.verified_by == null ? null : String(row.verified_by),
+        },
+      ]),
+    );
+
+    // Soft delete — a number that was removed by mistake is still recoverable
+    // and still in the history.
     database.prepare(`
       UPDATE person_contacts SET deleted_at = ?, updated_at = ?
       WHERE person_id = ? AND deleted_at IS NULL
@@ -834,6 +889,8 @@ export function updatePerson(
       personId,
       contacts,
       "manual",
+      context,
+      carried,
     );
 
     logOperation(
@@ -847,6 +904,176 @@ export function updatePerson(
       },
     );
   }
+}
+
+/**
+ * Corrects where in the building a contact actually is.
+ *
+ * Deliberately not delete-and-recreate: the link carries `valid_from`, so
+ * re-making it to fix a typo in a flat number would claim the person moved in
+ * today. The row is amended in place and the change is journalled.
+ */
+export function updatePersonLink(
+  database: DatabaseSync,
+  linkId: string,
+  input: Omit<PersonLinkInput, "personId" | "houseId">,
+  context: ChangeContext,
+  options: ListHousesOptions,
+): void {
+  const row = database.prepare(`
+    SELECT id, house_id, person_id, entrance, apartment, role_in_house,
+           valid_to, note
+    FROM house_people WHERE id = ? AND deleted_at IS NULL
+  `).get(linkId) as Record<string, unknown> | undefined;
+
+  if (!row) {
+    throw new HttpError(
+      404,
+      "Звʼязок не знайдено.",
+    );
+  }
+
+  // Same reasoning as `deletePersonLink`: the link is addressed by its own id,
+  // so the building it belongs to is only known here.
+  assertHouseVisible(
+    database,
+    String(row.house_id),
+    options,
+  );
+
+  const before = {
+    entrance: String(row.entrance ?? ""),
+    apartment: String(row.apartment ?? ""),
+    roleInHouse: String(row.role_in_house ?? "other"),
+    note: String(row.note ?? ""),
+  };
+
+  const next = {
+    entrance: input.entrance === undefined
+      ? before.entrance
+      : optionalText(
+        input.entrance,
+        "entrance",
+        20,
+      ),
+    apartment: input.apartment === undefined
+      ? before.apartment
+      : optionalText(
+        input.apartment,
+        "apartment",
+        20,
+      ),
+    roleInHouse: input.roleInHouse === undefined
+      ? before.roleInHouse
+      : optionalOneOf(
+        input.roleInHouse,
+        PERSON_ROLES,
+        "roleInHouse",
+        before.roleInHouse as never,
+      ),
+    note: input.note === undefined
+      ? before.note
+      : optionalText(
+        input.note,
+        "note",
+        1000,
+      ),
+  };
+
+  database.prepare(`
+    UPDATE house_people
+    SET entrance = ?, apartment = ?, role_in_house = ?, note = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    next.entrance,
+    next.apartment,
+    next.roleInHouse,
+    next.note,
+    new Date().toISOString(),
+    linkId,
+  );
+
+  logUpdate(
+    database,
+    context,
+    "housePerson",
+    linkId,
+    before,
+    next,
+    [
+      "entrance",
+      "apartment",
+      "roleInHouse",
+      "note",
+    ],
+  );
+}
+
+/**
+ * Removes a contact person entirely, everywhere.
+ *
+ * Distinct from {@link deletePersonLink}, and the difference matters in the
+ * field: a person who has moved out of one building loses the *link*, a person
+ * recorded by mistake — or who asked to be removed — has to lose the record
+ * itself, phone numbers included. Soft delete, so the journal still shows who
+ * did it, and every house link goes with them or the contact count would keep
+ * counting a person no query can reach.
+ */
+export function deletePerson(
+  database: DatabaseSync,
+  personId: string,
+  context: ChangeContext,
+  options: ListHousesOptions,
+): void {
+  assertPersonVisible(
+    database,
+    personId,
+    options,
+  );
+
+  const row = database.prepare(`
+    SELECT id FROM people WHERE id = ? AND deleted_at IS NULL
+  `).get(personId) as Record<string, unknown> | undefined;
+
+  if (!row) {
+    throw new HttpError(
+      404,
+      "Особу не знайдено.",
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  for (const table of [
+    "house_people",
+    "person_contacts",
+  ]) {
+    database.prepare(`
+      UPDATE ${table} SET deleted_at = ?, updated_at = ?
+      WHERE person_id = ? AND deleted_at IS NULL
+    `).run(
+      now,
+      now,
+      personId,
+    );
+  }
+
+  database.prepare(`
+    UPDATE people SET deleted_at = ?, updated_at = ? WHERE id = ?
+  `).run(
+    now,
+    now,
+    personId,
+  );
+
+  logOperation(
+    database,
+    context,
+    "person",
+    personId,
+    "delete",
+    {},
+  );
 }
 
 export function deletePersonLink(

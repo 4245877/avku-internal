@@ -1,0 +1,1669 @@
+/* ============================================================
+   ВИБОРИ — full-screen house editor
+   Same design language as the page it covers: glacial surfaces,
+   ice-blue authority, one warm accent for anything destructive.
+
+   Its own stylesheet rather than another thousand lines in
+   ElectionsPage.module.css, because this is a separate surface with
+   its own layout rules and its own breakpoints.
+   ============================================================ */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+
+  padding: var(--space-4);
+
+  background: rgba(11, 17, 28, 0.55);
+  backdrop-filter: blur(3px);
+
+  animation: overlayIn var(--duration-fast, 160ms) var(--ease-out, ease-out) both;
+}
+
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.surface {
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+  max-width: 1500px;
+  /* Fills the viewport minus the overlay padding. `dvh` so the iOS URL bar
+     hiding does not leave a strip of the page showing underneath. */
+  max-height: 100%;
+
+  overflow: hidden;
+
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl, 0 24px 64px rgba(11, 17, 28, 0.28));
+}
+
+.surface:focus {
+  outline: none;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  /* Never gives up its height to the scrolling body below it. */
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: flex-start;
+  justify-content: space-between;
+
+  padding: var(--space-5) var(--space-6);
+
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.headerMain {
+  display: flex;
+  flex: 1 1 420px;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.headerTitleRow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.headerTitleBlock {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.headerTitle {
+  margin: 0;
+
+  overflow: hidden;
+
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerSubtitle {
+  margin: var(--space-1) 0 0;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.navArrow {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+
+  width: 36px;
+  height: 36px;
+
+  color: var(--color-text-accent);
+
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-full);
+
+  cursor: pointer;
+
+  transition: background var(--duration-fast, 160ms) ease;
+}
+
+.navArrow svg {
+  transform: rotate(180deg);
+}
+
+.navArrowNext svg {
+  transform: none;
+}
+
+.navArrow:not(:disabled):hover {
+  background: var(--color-bg-tertiary);
+}
+
+.navArrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.headerFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+}
+
+.headerFacts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.headerFacts dt {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.headerFacts dd {
+  margin: 0;
+
+  overflow: hidden;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  text-overflow: ellipsis;
+}
+
+.headerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.dirtyMark {
+  padding: 4px var(--space-2);
+
+  font-size: var(--text-xs);
+  color: var(--color-warning-strong);
+
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-full);
+}
+
+.closeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 40px;
+  height: 40px;
+
+  color: var(--color-text-secondary);
+
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+
+  cursor: pointer;
+}
+
+.closeButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+}
+
+/* ── Banners ────────────────────────────────────────────── */
+
+.readOnlyBanner,
+.errorBanner,
+.successBanner {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  margin: 0;
+  padding: var(--space-3) var(--space-6);
+
+  font-size: var(--text-sm);
+}
+
+.readOnlyBanner {
+  color: var(--color-info);
+  background: var(--color-info-bg);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.errorBanner {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.successBanner {
+  color: var(--color-success-strong);
+  background: var(--color-success-bg);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.conflictBanner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+
+  padding: var(--space-4) var(--space-6);
+
+  color: var(--color-warning-strong);
+
+  background: var(--color-warning-bg);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.conflictBanner strong {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--text-base);
+}
+
+.conflictBanner p {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+}
+
+.conflictActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── Layout: nav + body ─────────────────────────────────── */
+
+.layout {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 232px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.sectionNav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  padding: var(--space-4) var(--space-3);
+  overflow-y: auto;
+
+  background: var(--color-bg-secondary);
+  border-right: 1px solid var(--color-border-light);
+}
+
+.sectionTab {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  padding: var(--space-3);
+
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  text-align: left;
+
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+
+  cursor: pointer;
+
+  transition: background var(--duration-fast, 160ms) ease,
+    color var(--duration-fast, 160ms) ease;
+}
+
+.sectionTab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+}
+
+.sectionTab span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sectionTabActive {
+  font-weight: var(--weight-medium);
+  color: var(--color-text-inverse);
+  background: var(--color-accent-primary);
+}
+
+.sectionTabActive:hover {
+  color: var(--color-text-inverse);
+  background: var(--color-accent-hover);
+}
+
+.tabDot {
+  flex-shrink: 0;
+
+  width: 8px;
+  height: 8px;
+
+  background: var(--color-warning);
+  border-radius: var(--radius-full);
+}
+
+.sectionTabActive .tabDot {
+  background: var(--color-text-inverse);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+
+  min-height: 0;
+  padding: var(--space-5) var(--space-6) var(--space-8);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.body:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: -2px;
+}
+
+/* ── Cards ──────────────────────────────────────────────── */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+
+  padding: var(--space-5);
+
+  background: var(--panel-surface-solid, #fff);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+}
+
+.cardHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.cardHeading {
+  min-width: 0;
+}
+
+.cardTitle {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  margin: 0;
+
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.cardTitle svg {
+  color: var(--color-text-accent);
+}
+
+.cardHint {
+  margin: var(--space-1) 0 0;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.cardActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── Fields ─────────────────────────────────────────────── */
+
+.fieldGrid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+
+.fieldGrid[data-columns='3'] {
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fieldWide {
+  grid-column: 1 / -1;
+}
+
+.fieldLabel {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.fieldRequired {
+  color: var(--color-danger);
+}
+
+.input {
+  width: 100%;
+  min-height: var(--input-height, 40px);
+  padding: var(--space-2) var(--space-3);
+
+  font-family: inherit;
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
+
+  transition: border-color var(--duration-fast, 160ms) ease;
+}
+
+.input:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.input:focus {
+  border-color: var(--color-accent-primary);
+  outline: 2px solid var(--color-accent-light);
+  outline-offset: -1px;
+}
+
+.input:disabled {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  cursor: not-allowed;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--color-danger);
+}
+
+.textarea {
+  min-height: 76px;
+  line-height: var(--leading-snug);
+  resize: vertical;
+}
+
+.fieldHint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.fieldError {
+  font-size: var(--text-xs);
+  font-style: normal;
+  color: var(--color-danger);
+}
+
+.readOnlyValue {
+  margin: 0;
+  padding: var(--space-2) 0;
+
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+}
+
+.checkbox {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+
+  cursor: pointer;
+}
+
+.checkbox input {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  accent-color: var(--color-accent-primary);
+}
+
+.checkbox span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.checkbox small {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.addressPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  margin: 0;
+  padding: var(--space-3);
+
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.addressPreview span {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.addressPreview strong {
+  font-size: var(--text-md);
+  color: var(--color-text-primary);
+}
+
+/* ── Buttons ────────────────────────────────────────────── */
+
+.primaryButton,
+.ghostButton,
+.dangerButton,
+.quietButton {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: center;
+
+  min-height: var(--btn-height-md, 40px);
+  padding: 0 var(--space-4);
+
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+
+  cursor: pointer;
+
+  transition: background var(--duration-fast, 160ms) ease,
+    border-color var(--duration-fast, 160ms) ease;
+}
+
+.primaryButton {
+  color: var(--color-text-inverse);
+  background: var(--color-accent-primary);
+}
+
+.primaryButton:not(:disabled):hover {
+  background: var(--color-accent-hover);
+}
+
+.ghostButton {
+  color: var(--color-text-accent);
+  background: var(--color-bg-primary);
+  border-color: var(--color-border-medium);
+}
+
+.ghostButton:not(:disabled):hover {
+  background: var(--color-bg-tertiary);
+}
+
+.dangerButton {
+  color: var(--color-text-inverse);
+  background: var(--color-danger);
+}
+
+.dangerButton:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+.quietButton {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+
+  background: transparent;
+  border-color: var(--color-border-light);
+}
+
+.quietButton:not(:disabled):hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+}
+
+.primaryButton:disabled,
+.ghostButton:disabled,
+.dangerButton:disabled,
+.quietButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+
+  border: 2px solid currentcolor;
+  border-top-color: transparent;
+  border-radius: var(--radius-full);
+
+  animation: editorSpin 700ms linear infinite;
+}
+
+@keyframes editorSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.confirmRow {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+
+  padding: var(--space-2);
+
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-md);
+}
+
+.confirmQuestion {
+  font-size: var(--text-xs);
+  color: var(--color-warning-strong);
+}
+
+/* ── Badges and tones ───────────────────────────────────── */
+
+.badge,
+.pill {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+
+  padding: 3px var(--space-2);
+
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+
+  border-radius: var(--radius-full);
+}
+
+.pill {
+  padding: 4px var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.toneSuccess {
+  color: var(--color-success-strong);
+  background: var(--color-success-bg);
+}
+
+.toneWarning {
+  color: var(--color-warning-strong);
+  background: var(--color-warning-bg);
+}
+
+.toneDanger {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.toneInfo {
+  color: var(--color-info);
+  background: var(--color-info-bg);
+}
+
+.toneAccent {
+  color: #5c4b9e;
+  background: #efeafa;
+}
+
+.toneNeutral,
+.toneMuted {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+}
+
+/* ── Lists and records ──────────────────────────────────── */
+
+.listToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.toolbarSelect {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toolbarSelect span {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.toolbarSelect select {
+  min-height: 34px;
+  padding: 0 var(--space-2);
+
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-sm);
+}
+
+.recordList,
+.personList,
+.chipList,
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+
+  margin: 0;
+  padding: 0;
+
+  list-style: none;
+}
+
+.recordRow,
+.personCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  padding: var(--space-4);
+
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.recordRowOverdue {
+  border-left: 3px solid var(--color-danger);
+}
+
+.recordTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.recordTop strong {
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+}
+
+.recordMeta {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.recordText {
+  margin: 0;
+
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+}
+
+.recordNext {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  margin: 0;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-accent);
+}
+
+.recordActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+
+  margin-top: var(--space-1);
+}
+
+.chipRow {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+
+  padding: var(--space-2) var(--space-3);
+
+  font-size: var(--text-sm);
+
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.chipRow small {
+  color: var(--color-text-secondary);
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+
+  margin: 0;
+  padding: 0;
+
+  list-style: none;
+}
+
+.timelineRow {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+.timelineIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 28px;
+  height: 28px;
+
+  color: var(--color-text-accent);
+
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+.timelineBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.historyEntity {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+.historyOld {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.historyNew {
+  font-weight: var(--weight-medium);
+  color: var(--color-text-primary);
+}
+
+/* ── People ─────────────────────────────────────────────── */
+
+.personTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.personTop strong {
+  font-size: var(--text-base);
+}
+
+.personPlace {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.personNote {
+  margin: 0;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}
+
+.personActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.contactList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  margin: 0;
+  padding: 0;
+
+  list-style: none;
+}
+
+.contactLine {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.contactIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 28px;
+  height: 28px;
+
+  color: var(--color-text-accent);
+
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-full);
+}
+
+.contactBody {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.contactBody small {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* A phone number is a link on every device — tapping it dials. */
+.contactValue {
+  font-size: var(--text-base);
+  color: var(--color-text-accent);
+  text-decoration: none;
+}
+
+a.contactValue:hover {
+  text-decoration: underline;
+}
+
+.contactRows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.contactRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  padding: var(--space-3);
+
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.contactRowFooter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.duplicateWarning {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  padding: var(--space-3);
+
+  color: var(--color-warning-strong);
+
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-md);
+}
+
+.duplicateWarning strong {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--text-sm);
+}
+
+.duplicateWarning ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  margin: 0;
+  padding: 0;
+
+  list-style: none;
+}
+
+.duplicateWarning li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+
+  font-size: var(--text-sm);
+}
+
+/* ── Sub-forms ──────────────────────────────────────────── */
+
+.subForm,
+.inlineForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+
+  padding: var(--space-4);
+
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
+}
+
+.inlineForm {
+  background: transparent;
+  border-style: dashed;
+}
+
+.inlineFormAction {
+  display: flex;
+  align-items: flex-end;
+}
+
+.subFormActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+/* ── States ─────────────────────────────────────────────── */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+
+  padding: var(--space-8) var(--space-4);
+
+  text-align: center;
+
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-border-medium);
+  border-radius: var(--radius-md);
+}
+
+.emptyIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 44px;
+  height: 44px;
+
+  color: var(--color-text-accent);
+
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+.empty strong {
+  font-size: var(--text-md);
+  color: var(--color-text-primary);
+}
+
+.empty p {
+  max-width: 46ch;
+  margin: 0;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.loading,
+.mutedLine {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  margin: 0;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.inlineError,
+.inlineNotice {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+
+  font-size: var(--text-sm);
+
+  border-radius: var(--radius-md);
+}
+
+.inlineError {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.inlineNotice {
+  color: var(--color-success-strong);
+  background: var(--color-success-bg);
+}
+
+.warningLine {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+
+  margin: 0;
+  padding: var(--space-3);
+
+  font-size: var(--text-sm);
+  color: var(--color-warning-strong);
+
+  background: var(--color-warning-bg);
+  border-radius: var(--radius-md);
+}
+
+.warningLine svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.findings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.findingsLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.geometryUnlocked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+
+  padding: var(--space-3);
+
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.geometryUnlocked p {
+  margin: 0;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.externalLink {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-accent);
+}
+
+/* ── Files ──────────────────────────────────────────────── */
+
+.uploadRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fileRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+
+  padding: var(--space-3);
+
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.fileLink {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  font-size: var(--text-sm);
+  color: var(--color-text-accent);
+  text-decoration: none;
+}
+
+.fileLink:hover {
+  text-decoration: underline;
+}
+
+.fileRow small {
+  flex: 1 1 auto;
+
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* ── Mobile action bar ──────────────────────────────────── */
+
+.mobileBar {
+  display: none;
+  flex-shrink: 0;
+  gap: var(--space-3);
+
+  padding: var(--space-3) var(--space-4)
+    max(var(--space-3), env(safe-area-inset-bottom));
+
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.mobileBar > * {
+  flex: 1 1 0;
+}
+
+/* ── Unsaved-changes confirmation ───────────────────────── */
+
+.confirmOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: var(--space-4);
+
+  background: rgba(11, 17, 28, 0.5);
+}
+
+.confirmDialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+
+  width: min(460px, 100%);
+  padding: var(--space-6);
+
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl, 0 24px 64px rgba(11, 17, 28, 0.3));
+}
+
+.confirmDialog h3 {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+
+  margin: 0;
+
+  font-size: var(--text-lg);
+  color: var(--color-text-primary);
+}
+
+.confirmDialog h3 svg {
+  color: var(--color-warning);
+}
+
+.confirmDialog p {
+  margin: 0;
+
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--color-text-secondary);
+}
+
+.confirmActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+/* ============================================================
+   Dark theme
+   ============================================================ */
+
+:global([data-theme='dark']) .surface {
+  background: var(--color-bg-dark);
+  border-color: var(--color-border-dark);
+}
+
+:global([data-theme='dark']) .header,
+:global([data-theme='dark']) .sectionNav,
+:global([data-theme='dark']) .recordRow,
+:global([data-theme='dark']) .personCard,
+:global([data-theme='dark']) .chipRow,
+:global([data-theme='dark']) .subForm,
+:global([data-theme='dark']) .fileRow,
+:global([data-theme='dark']) .empty,
+:global([data-theme='dark']) .addressPreview,
+:global([data-theme='dark']) .mobileBar,
+:global([data-theme='dark']) .geometryUnlocked {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--color-border-dark);
+}
+
+:global([data-theme='dark']) .card,
+:global([data-theme='dark']) .confirmDialog {
+  background: var(--color-bg-darkest);
+  border-color: var(--color-border-dark);
+}
+
+:global([data-theme='dark']) .input,
+:global([data-theme='dark']) .contactRow,
+:global([data-theme='dark']) .contactIcon,
+:global([data-theme='dark']) .toolbarSelect select {
+  color: var(--color-text-inverse);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--color-border-dark);
+}
+
+:global([data-theme='dark']) .headerTitle,
+:global([data-theme='dark']) .cardTitle,
+:global([data-theme='dark']) .recordTop strong,
+:global([data-theme='dark']) .empty strong,
+:global([data-theme='dark']) .addressPreview strong,
+:global([data-theme='dark']) .readOnlyValue,
+:global([data-theme='dark']) .recordText,
+:global([data-theme='dark']) .headerFacts dd,
+:global([data-theme='dark']) .confirmDialog h3 {
+  color: var(--color-text-inverse);
+}
+
+:global([data-theme='dark']) .navArrow {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--color-border-dark);
+}
+
+/* ============================================================
+   Responsive
+
+   Checked at 1920×1080, 1366×768, 768×1024, 430×932 and 390×844.
+   The two rules that matter: the side navigation becomes a scrolling
+   strip well before it could eat half a phone screen, and saving is
+   always reachable without scrolling back to the header.
+   ============================================================ */
+
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: 188px minmax(0, 1fr);
+  }
+
+  .body {
+    padding: var(--space-4) var(--space-4) var(--space-6);
+  }
+}
+
+@media (max-width: 900px) {
+  .overlay {
+    padding: 0;
+  }
+
+  .surface {
+    max-width: none;
+    border: none;
+    border-radius: 0;
+  }
+
+  .header {
+    padding: var(--space-4);
+  }
+
+  .headerTitle {
+    font-size: var(--text-xl);
+  }
+
+  /*
+   * The section list stops being a column here. A 190px sidebar on a 768px
+   * tablet is a quarter of the width for navigation nobody is looking at, and
+   * on a phone it would be half the screen — which the brief rules out
+   * explicitly. One horizontal strip that scrolls, and the fields get the rest.
+   */
+  .layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sectionNav {
+    flex-direction: row;
+    /*
+     * Without this the strip is the flex item that gives: the body below it is
+     * `flex: 1 1 auto` with content taller than the screen, so the browser
+     * shrank the navigation to a few pixels and the section tabs disappeared
+     * under the first card.
+     */
+    flex-shrink: 0;
+    gap: var(--space-1);
+
+    padding: var(--space-2) var(--space-3);
+    overflow-x: auto;
+    overflow-y: hidden;
+
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-light);
+
+    scrollbar-width: none;
+  }
+
+  .sectionNav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sectionTab {
+    flex-shrink: 0;
+    /* 44px on touch — the whole strip is a row of tap targets. */
+    min-height: 44px;
+    padding: var(--space-2) var(--space-3);
+    white-space: nowrap;
+  }
+
+  .body {
+    /* The mobile bar is a sibling, not an overlay, so the body simply ends
+       above it and no field can hide underneath. */
+    flex: 1 1 auto;
+  }
+
+  .mobileBar {
+    display: flex;
+  }
+
+  /* Saving lives in the bar at the bottom on this size; keeping it in the
+     header too would be two buttons doing one job. */
+  .headerActions .primaryButton {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .header {
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .headerTitle {
+    font-size: var(--text-lg);
+  }
+
+  .headerFacts {
+    gap: var(--space-2) var(--space-4);
+  }
+
+  /* Two facts fit a 390px row; four do not, and a wrapped list of four is
+     taller than the address it describes. */
+  .headerFacts > div:nth-child(n + 3) {
+    display: none;
+  }
+
+  /*
+   * The header is 20% of an 844px screen if the action row wraps onto its own
+   * line. It does not need to: saving and closing live in the bar at the
+   * bottom, so all that is left up here is «Скасувати» and the ✕, and both fit
+   * beside the address.
+   */
+  .headerMain {
+    flex: 1 1 auto;
+  }
+
+  .headerActions {
+    gap: var(--space-1);
+    align-self: center;
+  }
+
+  .headerActions .ghostButton {
+    min-height: 36px;
+    padding: 0 var(--space-3);
+    font-size: var(--text-xs);
+  }
+
+  .body {
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-3) var(--space-5);
+  }
+
+  .card {
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-3);
+  }
+
+  /* One column. Two 240px tracks cannot both fit 390px, and `auto-fit` would
+     otherwise leave a 130px "Квартир" field beside a 130px "Поверхів". */
+  .fieldGrid,
+  .fieldGrid[data-columns='3'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* iOS zooms the page when a focused input is under 16px. Bumping the font
+     to exactly 16px is the documented way to stop it; nothing else works. */
+  .input {
+    min-height: 48px;
+    font-size: 16px;
+  }
+
+  .primaryButton,
+  .ghostButton,
+  .dangerButton {
+    min-height: 44px;
+    flex: 1 1 auto;
+  }
+
+  .quietButton {
+    min-height: 40px;
+  }
+
+  .subFormActions,
+  .recordActions,
+  .personActions,
+  .conflictActions,
+  .confirmActions {
+    /* Full-width stacked buttons rather than a row that wraps mid-label. */
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .contactRowFooter {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+
+  .navArrow {
+    width: 44px;
+    height: 44px;
+  }
+
+  .closeButton {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/*
+ * Landscape phone: the viewport is short, not narrow. The header's fact list is
+ * what gives, because the fields are the reason the editor is open.
+ */
+@media (max-height: 520px) and (orientation: landscape) {
+  .headerFacts {
+    display: none;
+  }
+
+  .header {
+    padding: var(--space-2) var(--space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay {
+    animation: none;
+  }
+
+  .spinner {
+    animation-duration: 2s;
+  }
+}

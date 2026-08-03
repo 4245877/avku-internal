@@ -50,6 +50,8 @@ export interface HouseCampaignState {
   priority: string;
   priorityReason: string;
   summary: string;
+  /** What is planned here next, in words. `nextActionAt` is only its date. */
+  nextStep: string;
   nextActionAt: string | null;
   updatedAt: string | null;
   updatedBy: string | null;
@@ -92,6 +94,8 @@ export interface HouseRecord {
   street: string;
   streetShort: string;
   number: string;
+  /** Corpus or letter — "корпус 2", "літера А". Not part of `number`. */
+  block: string;
   address: string;
   fullAddress: string;
   addressNormalized: string;
@@ -244,7 +248,8 @@ function buildHouseSelect(
         WHERE d.address_normalized = h.address_normalized
           AND d.deleted_at IS NULL
       ) AS duplicate_address_count,
-      s.stage, s.priority, s.priority_reason, s.summary, s.next_action_at,
+      s.stage, s.priority, s.priority_reason, s.summary, s.next_step,
+      s.next_action_at,
       s.updated_at AS state_updated_at, s.updated_by AS state_updated_by,
       (
         SELECT a.id FROM actions a
@@ -472,6 +477,7 @@ function rowToHouse(
     priority: String(row.priority ?? "medium"),
     priorityReason: String(row.priority_reason ?? ""),
     summary: String(row.summary ?? ""),
+    nextStep: String(row.next_step ?? ""),
     nextActionAt: row.next_action_at == null
       ? null
       : String(row.next_action_at),
@@ -511,6 +517,7 @@ function rowToHouse(
     street: String(row.street ?? ""),
     streetShort: String(row.street_short ?? ""),
     number: String(row.number ?? ""),
+    block: String(row.block ?? ""),
     address: String(row.address ?? ""),
     fullAddress: String(row.full_address ?? ""),
     addressNormalized: String(row.address_normalized ?? ""),
@@ -768,6 +775,7 @@ export function assertHouseExists(
 export interface HouseAttributesInput {
   street?: unknown;
   number?: unknown;
+  block?: unknown;
   streetShort?: unknown;
   address?: unknown;
   fullAddress?: unknown;
@@ -789,11 +797,14 @@ export interface HouseAttributesInput {
   source?: unknown;
   geocodeStatus?: unknown;
   verified?: unknown;
+  /** The `updatedAt` the editor loaded. See {@link assertNotStale}. */
+  expectedUpdatedAt?: unknown;
 }
 
 const HOUSE_ATTRIBUTE_FIELDS = [
   "street",
   "number",
+  "block",
   "streetShort",
   "address",
   "fullAddress",
@@ -811,8 +822,40 @@ const HOUSE_ATTRIBUTE_FIELDS = [
   "residentsCount",
   "managingOrg",
   "accessNote",
+  "source",
   "name",
 ] as const;
+
+/**
+ * Refuses a write built on a copy somebody else has already replaced.
+ *
+ * Without it the module is last-write-wins on a form that holds twenty fields:
+ * two coordinators open the same house, the second one saves, and every field
+ * the first one did not touch is silently rolled back to what it was when their
+ * screen was drawn. The client sends the `updatedAt` it loaded; a mismatch is a
+ * 409 the editor turns into "this record has changed, reload it" rather than a
+ * save that quietly destroys somebody's work.
+ *
+ * Optional on purpose. Scripts, the importer and the quick actions in the card
+ * write single fields and have no stale copy to be wrong about; only the
+ * full-record editor sends it.
+ */
+function assertNotStale(
+  expected: unknown,
+  actual: string | null,
+): void {
+  if (expected === undefined || expected === null || expected === "") {
+    return;
+  }
+
+  if (String(expected) !== String(actual ?? "")) {
+    throw new HttpError(
+      409,
+      "Запис змінив інший користувач, поки ця форма була відкрита. " +
+        "Оновіть картку, щоб побачити актуальні дані, і повторіть зміни.",
+    );
+  }
+}
 
 /**
  * Updates the permanent attributes of a building.
@@ -834,6 +877,11 @@ export function updateHouseAttributes(
     options,
   );
 
+  assertNotStale(
+    input.expectedUpdatedAt,
+    before.updatedAt,
+  );
+
   const next = {
     street: input.street === undefined
       ? before.street
@@ -847,6 +895,13 @@ export function updateHouseAttributes(
       : optionalText(
         input.number,
         "number",
+        40,
+      ),
+    block: input.block === undefined
+      ? before.block
+      : optionalText(
+        input.block,
+        "block",
         40,
       ),
     streetShort: input.streetShort === undefined
@@ -954,6 +1009,16 @@ export function updateHouseAttributes(
         "name",
         300,
       ),
+    // Where the record came from — "osm", "обхід 12.05", an ОСББ list. It was
+    // in the input type and in the change-log field list, but no statement ever
+    // wrote it, so the form silently discarded whatever was typed.
+    source: input.source === undefined
+      ? before.source
+      : optionalText(
+        input.source,
+        "source",
+        120,
+      ),
   };
 
   if (
@@ -970,8 +1035,15 @@ export function updateHouseAttributes(
     next.street,
     next.number,
   );
+  // The block joins the *displayed* address and stays out of
+  // `address_normalized`: the normalised key is the duplicate-detection key,
+  // and "58" with a block and "58" without one are genuinely the same number.
+  const numberLabel = [
+    next.number,
+    next.block,
+  ].filter(Boolean).join(", ");
   const address = input.address === undefined
-    ? (next.street ? `${next.streetShort || next.street}, ${next.number}` : before.address)
+    ? (next.street ? `${next.streetShort || next.street}, ${numberLabel}` : before.address)
     : optionalText(
       input.address,
       "address",
@@ -979,7 +1051,7 @@ export function updateHouseAttributes(
     );
   const fullAddress = input.fullAddress === undefined
     ? [
-      next.street ? `${next.street}, ${next.number}` : address,
+      next.street ? `${next.street}, ${numberLabel}` : address,
       next.city,
       next.postalCode,
     ].filter(Boolean).join(", ")
@@ -991,17 +1063,19 @@ export function updateHouseAttributes(
 
   database.prepare(`
     UPDATE houses SET
-      street = ?, number = ?, street_short = ?, address = ?, full_address = ?,
+      street = ?, number = ?, block = ?, street_short = ?, address = ?,
+      full_address = ?,
       address_normalized = ?, city = ?, postal_code = ?, lat = ?, lon = ?,
       type = ?, building = ?, floors = ?, built_year = ?, entrances = ?,
       apartments = ?, households = ?, residents_count = ?, managing_org = ?,
-      access_note = ?, name = ?, geocode_status = ?, updated_at = ?,
+      access_note = ?, name = ?, source = ?, geocode_status = ?, updated_at = ?,
       verified_at = CASE WHEN ? = 1 THEN ? ELSE verified_at END,
       verified_by = CASE WHEN ? = 1 THEN ? ELSE verified_by END
     WHERE id = ?
   `).run(
     next.street,
     next.number,
+    next.block,
     next.streetShort || next.street,
     address,
     fullAddress,
@@ -1021,6 +1095,7 @@ export function updateHouseAttributes(
     next.managingOrg,
     next.accessNote,
     next.name,
+    next.source,
     input.geocodeStatus === undefined
       ? before.geocodeStatus
       : optionalOneOf(
@@ -1081,7 +1156,10 @@ export interface HouseStateInput {
   priority?: unknown;
   priorityReason?: unknown;
   summary?: unknown;
+  nextStep?: unknown;
   nextActionAt?: unknown;
+  /** The state's own `updatedAt`, as the editor loaded it. */
+  expectedUpdatedAt?: unknown;
 }
 
 /**
@@ -1104,6 +1182,12 @@ export function updateHouseCampaignState(
     houseId,
     options,
   );
+
+  assertNotStale(
+    input.expectedUpdatedAt,
+    before.campaign.updatedAt,
+  );
+
   const now = new Date().toISOString();
 
   const next = {
@@ -1137,6 +1221,13 @@ export function updateHouseCampaignState(
         "summary",
         1000,
       ),
+    nextStep: input.nextStep === undefined
+      ? before.campaign.nextStep
+      : optionalText(
+        input.nextStep,
+        "nextStep",
+        500,
+      ),
     nextActionAt: input.nextActionAt === undefined
       ? before.campaign.nextActionAt
       : optionalTimestamp(
@@ -1148,13 +1239,14 @@ export function updateHouseCampaignState(
   database.prepare(`
     INSERT INTO house_campaign_state (
       campaign_id, house_id, stage, priority, priority_reason, summary,
-      next_action_at, created_at, updated_at, updated_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      next_step, next_action_at, created_at, updated_at, updated_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(campaign_id, house_id) DO UPDATE SET
       stage = excluded.stage,
       priority = excluded.priority,
       priority_reason = excluded.priority_reason,
       summary = excluded.summary,
+      next_step = excluded.next_step,
       next_action_at = excluded.next_action_at,
       updated_at = excluded.updated_at,
       updated_by = excluded.updated_by
@@ -1165,6 +1257,7 @@ export function updateHouseCampaignState(
     next.priority,
     next.priorityReason,
     next.summary,
+    next.nextStep,
     next.nextActionAt,
     now,
     now,
@@ -1186,6 +1279,7 @@ export function updateHouseCampaignState(
       "priority",
       "priorityReason",
       "summary",
+      "nextStep",
       "nextActionAt",
     ],
   );

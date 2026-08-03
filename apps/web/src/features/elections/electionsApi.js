@@ -740,12 +740,47 @@ export function createHousePerson(houseId, payload, { campaignId, signal } = {})
   );
 }
 
-export function updatePerson(personId, payload, { signal } = {}) {
-  return request(`/people/${encodeURIComponent(personId)}`, {
-    method: 'PATCH',
-    body: payload,
-    signal,
-  });
+export function updatePerson(personId, payload, { campaignId, signal } = {}) {
+  return request(
+    `/people/${encodeURIComponent(personId)}${campaignQuery(campaignId)}`,
+    { method: 'PATCH', body: payload, signal },
+  );
+}
+
+/**
+ * Removes the contact person outright — the record and every phone number on
+ * it. Manager-only server-side; {@link deletePersonLink} is the one a
+ * coordinator reaches for when somebody has simply moved out.
+ */
+export function deletePerson(personId, { campaignId, signal } = {}) {
+  return request(
+    `/people/${encodeURIComponent(personId)}${campaignQuery(campaignId)}`,
+    { method: 'DELETE', signal },
+  );
+}
+
+/** Attaches a person who already exists to this building. */
+export function linkPersonToHouse(personId, payload, { campaignId, signal } = {}) {
+  return request(
+    `/people/${encodeURIComponent(personId)}/links${campaignQuery(campaignId)}`,
+    { method: 'POST', body: payload, signal },
+  );
+}
+
+/** Corrects the entrance, flat, role or note on an existing link. */
+export function updatePersonLink(linkId, payload, { campaignId, signal } = {}) {
+  return request(
+    `/person-links/${encodeURIComponent(linkId)}${campaignQuery(campaignId)}`,
+    { method: 'PATCH', body: payload, signal },
+  );
+}
+
+/** Detaches a person from this building. The person's record survives. */
+export function deletePersonLink(linkId, { campaignId, signal } = {}) {
+  return request(
+    `/person-links/${encodeURIComponent(linkId)}${campaignQuery(campaignId)}`,
+    { method: 'DELETE', signal },
+  );
 }
 
 export function fetchHouseActions(houseId, { campaignId, signal } = {}) {
@@ -783,6 +818,29 @@ export function fetchHouseHistory(houseId, { campaignId, signal } = {}) {
   );
 }
 
+/** Meetings, clean-ups and tents recorded at this address. */
+export function fetchHouseEvents(houseId, { campaignId, signal } = {}) {
+  return request(
+    `/houses/${encodeURIComponent(houseId)}/events${campaignQuery(campaignId)}`,
+    { signal },
+  );
+}
+
+/** `POST /houses/:id/precincts` — files the building under a polling station. */
+export function linkHousePrecinct(houseId, payload, { campaignId, signal } = {}) {
+  return request(
+    `/houses/${encodeURIComponent(houseId)}/precincts${campaignQuery(campaignId)}`,
+    { method: 'POST', body: payload, signal },
+  );
+}
+
+export function unlinkHousePrecinct(linkId, { campaignId, signal } = {}) {
+  return request(
+    `/house-precincts/${encodeURIComponent(linkId)}${campaignQuery(campaignId)}`,
+    { method: 'DELETE', signal },
+  );
+}
+
 /* ------------------------------------------------------------------ *
  * Work records
  * ------------------------------------------------------------------ */
@@ -791,6 +849,22 @@ export function createAction(payload, { campaignId, signal } = {}) {
   return request(`/actions${campaignQuery(campaignId)}`, {
     method: 'POST',
     body: payload,
+    signal,
+  });
+}
+
+/** Corrects a logged action — the result, the comment, when it happened. */
+export function updateAction(actionId, payload, { campaignId, signal } = {}) {
+  return request(`/actions/${encodeURIComponent(actionId)}${campaignQuery(campaignId)}`, {
+    method: 'PATCH',
+    body: payload,
+    signal,
+  });
+}
+
+export function deleteAction(actionId, { campaignId, signal } = {}) {
+  return request(`/actions/${encodeURIComponent(actionId)}${campaignQuery(campaignId)}`, {
+    method: 'DELETE',
     signal,
   });
 }
@@ -848,6 +922,20 @@ export function createEvent(payload, { campaignId, signal } = {}) {
     body: payload,
     signal,
   });
+}
+
+export function deleteEvent(eventId, { campaignId, signal } = {}) {
+  return request(`/events/${encodeURIComponent(eventId)}${campaignQuery(campaignId)}`, {
+    method: 'DELETE',
+    signal,
+  });
+}
+
+export function deleteAttachment(attachmentId, { campaignId, signal } = {}) {
+  return request(
+    `/attachments/${encodeURIComponent(attachmentId)}${campaignQuery(campaignId)}`,
+    { method: 'DELETE', signal },
+  );
 }
 
 export function createShift(payload, { campaignId, signal } = {}) {

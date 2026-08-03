@@ -349,6 +349,133 @@ export function createAction(
   return id;
 }
 
+const ACTION_UPDATABLE = [
+  "type",
+  "result",
+  "happenedAt",
+  "comment",
+  "nextStep",
+  "nextActionAt",
+] as const;
+
+/**
+ * Corrects a logged action.
+ *
+ * The log used to be append-or-delete, which meant a mistyped comment or the
+ * wrong result had to be deleted and re-entered — losing the original author
+ * and timestamp, and putting a gap in the history where a correction belongs.
+ * `author_email` is never in the input here either: an edit does not change who
+ * did the work, and the journal records who edited it separately.
+ */
+export function updateAction(
+  database: DatabaseSync,
+  actionId: string,
+  input: ActionInput,
+  context: ChangeContext,
+  viewer?: ElectionsViewer,
+): void {
+  const row = database.prepare(`
+    SELECT * FROM actions WHERE id = ? AND deleted_at IS NULL
+  `).get(actionId) as Record<string, unknown> | undefined;
+
+  if (!row) {
+    throw new HttpError(
+      404,
+      "Дію не знайдено.",
+    );
+  }
+
+  assertRowInCampaign(
+    row,
+    context.campaignId,
+    "Дію не знайдено.",
+  );
+
+  if (viewer && context.campaignId) {
+    assertActivityVisible(
+      database,
+      row,
+      context.campaignId,
+      viewer,
+      "Дію не знайдено.",
+      ["author_email"],
+    );
+  }
+
+  const before = rowToAction(row);
+  const next = {
+    type: input.type === undefined
+      ? before.type
+      : requireOneOf(
+        input.type,
+        ACTION_TYPES,
+        "type",
+      ),
+    result: input.result === undefined
+      ? before.result
+      : requireOneOf(
+        input.result,
+        ACTION_RESULTS,
+        "result",
+      ),
+    happenedAt: input.happenedAt === undefined
+      ? before.happenedAt
+      : (optionalTimestamp(
+        input.happenedAt,
+        "happenedAt",
+      ) ?? before.happenedAt),
+    comment: input.comment === undefined
+      ? before.comment
+      : optionalText(
+        input.comment,
+        "comment",
+        4000,
+      ),
+    nextStep: input.nextStep === undefined
+      ? before.nextStep
+      : optionalText(
+        input.nextStep,
+        "nextStep",
+        500,
+      ),
+    nextActionAt: input.nextActionAt === undefined
+      ? before.nextActionAt
+      : optionalTimestamp(
+        input.nextActionAt,
+        "nextActionAt",
+      ),
+  };
+
+  database.prepare(`
+    UPDATE actions SET
+      type = ?, result = ?, happened_at = ?, comment = ?, next_step = ?,
+      next_action_at = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    next.type,
+    next.result,
+    next.happenedAt,
+    next.comment,
+    next.nextStep,
+    next.nextActionAt,
+    new Date().toISOString(),
+    actionId,
+  );
+
+  logUpdate(
+    database,
+    {
+      ...context,
+      campaignId: before.campaignId,
+    },
+    "action",
+    actionId,
+    before as unknown as Record<string, unknown>,
+    next as unknown as Record<string, unknown>,
+    ACTION_UPDATABLE,
+  );
+}
+
 export function deleteAction(
   database: DatabaseSync,
   actionId: string,
@@ -1295,12 +1422,21 @@ function rowToEvent(row: Record<string, unknown>): EventRecord {
 export function listEvents(
   database: DatabaseSync,
   campaignId: string,
+  filters: { houseId?: string } = {},
 ): EventRecord[] {
+  // The house filter is what makes an events *section* possible on the house
+  // editor: without it the only way to show "meetings at this address" is to
+  // download every event in the campaign and drop most of them in the browser.
   const rows = database.prepare(`
     SELECT * FROM events
     WHERE campaign_id = ? AND deleted_at IS NULL
+      AND (? IS NULL OR house_id = ?)
     ORDER BY starts_at DESC
-  `).all(campaignId) as Record<string, unknown>[];
+  `).all(
+    campaignId,
+    filters.houseId ?? null,
+    filters.houseId ?? null,
+  ) as Record<string, unknown>[];
 
   const events = rows.map(rowToEvent);
   const shifts = listShifts(

@@ -155,7 +155,7 @@ function metricHint(resolved) {
   return resolved.isKnown ? undefined : 'даних немає — заповніть картку';
 }
 
-function OverviewTab({ house, onStartEditing, canEdit }) {
+function OverviewTab({ house }) {
   const state = campaignStateOf(house);
   const stage = getStage(house);
   const priority = getPriority(house);
@@ -332,16 +332,12 @@ function OverviewTab({ house, onStartEditing, canEdit }) {
         </section>
       )}
 
-      {canEdit && (
-        <footer className={styles.summaryFooter}>
-          <small>Оновлено: {formatUpdatedAt(house.updatedAt)}</small>
-
-          <button className={styles.primaryButton} onClick={onStartEditing} type="button">
-            <ElectionsIcon name="edit" size={17} />
-            Редагувати характеристики
-          </button>
-        </footer>
-      )}
+      {/* «Редагувати» lives in the card header, where it is visible from every
+          tab rather than only from this one. Here we just say how fresh the
+          record is. */}
+      <footer className={styles.summaryFooter}>
+        <small>Оновлено: {formatUpdatedAt(house.updatedAt)}</small>
+      </footer>
     </div>
   );
 }
@@ -623,8 +619,6 @@ function HouseTabs({
   campaignId,
   refreshToken,
   canWrite,
-  canEdit,
-  onStartEditing,
   onCompleteTask,
   onResolveIssue,
 }) {
@@ -689,7 +683,7 @@ function HouseTabs({
         tabIndex={0}
       >
         {activeTab === 'overview' && (
-          <OverviewTab canEdit={canEdit} house={house} onStartEditing={onStartEditing} />
+          <OverviewTab house={house} />
         )}
         {activeTab === 'people' && (
           <PeopleTab canSeeContacts={house.canSeeContacts} state={related} />

@@ -48,7 +48,7 @@ import {
  * everything ever recorded against it.
  */
 
-export const ELECTIONS_SCHEMA_VERSION = 2;
+export const ELECTIONS_SCHEMA_VERSION = 3;
 
 /** `'a','b','c'` — a CHECK list built from the shared vocabulary. */
 function sqlList(values: readonly string[]): string {
@@ -736,6 +736,51 @@ function migrateToVersion2(database: DatabaseSync): void {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Step 3 — the three fields the full-screen house editor needs and the
+ * schema had nowhere to put.
+ * ------------------------------------------------------------------ */
+
+function migrateToVersion3(database: DatabaseSync): void {
+  // A block or letter is not part of the house number. Kyiv addresses write it
+  // both ways ("58А" and "58, корпус 2"), and folding the second form into
+  // `number` breaks `address_normalized` — two buildings on one number stop
+  // being distinguishable, and the duplicate-address finding fires on them
+  // forever. `building` could not be reused: it holds the OSM `building=*` tag.
+  addColumnIfMissing(
+    database,
+    "houses",
+    "block",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+
+  // "What we do here next", in words. `next_action_at` says *when* and nothing
+  // else, so the plan itself had to be written into `summary` — which is the
+  // field describing the current state, not the next step.
+  addColumnIfMissing(
+    database,
+    "house_campaign_state",
+    "next_step",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+
+  // When a phone was last confirmed to still work, and by whom. A number that
+  // was right two years ago and a number checked last week are not the same
+  // datum, and a canvasser about to dial one deserves to know which it is.
+  addColumnIfMissing(
+    database,
+    "person_contacts",
+    "verified_at",
+    "TEXT",
+  );
+  addColumnIfMissing(
+    database,
+    "person_contacts",
+    "verified_by",
+    "TEXT",
+  );
+}
+
 /**
  * Brings a connection up to {@link ELECTIONS_SCHEMA_VERSION}.
  *
@@ -776,6 +821,10 @@ export function migrateElectionsDatabase(database: DatabaseSync): void {
 
       if (version < 2) {
         migrateToVersion2(database);
+      }
+
+      if (version < 3) {
+        migrateToVersion3(database);
       }
 
       database.exec(`PRAGMA user_version = ${ELECTIONS_SCHEMA_VERSION}`);

@@ -9,7 +9,10 @@ import type { AddressInfo } from "node:net";
 import { createCertificateApiServer } from "../server";
 import { createElectionsRepository } from "../config";
 import { importOsmSnapshot } from "../modules/elections/osm-snapshot-import";
-import { migrateElectionsDatabase } from "../modules/elections/elections-schema";
+import {
+  ELECTIONS_SCHEMA_VERSION,
+  migrateElectionsDatabase,
+} from "../modules/elections/elections-schema";
 import { normalizeAddress } from "../modules/elections/elections.types";
 import type { AccessAuthenticator } from "../http/access-auth";
 
@@ -1246,6 +1249,9 @@ describe("schema migration", () => {
       Number(after.n),
       Number(before.n),
     );
+    // Against the constant, not a literal: this test is about a second run
+    // being a no-op, and pinning the number here turns every future migration
+    // into a spurious failure in a test that has nothing to say about it.
     assert.equal(
       Number(
         (database.prepare("PRAGMA user_version").get() as Record<
@@ -1253,7 +1259,7 @@ describe("schema migration", () => {
           unknown
         >).user_version,
       ),
-      2,
+      ELECTIONS_SCHEMA_VERSION,
     );
     assert.equal(
       database.prepare("PRAGMA foreign_key_check").all().length,

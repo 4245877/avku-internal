@@ -405,6 +405,49 @@ Residents' political positions and age bands from the old data are **not**
 imported. They are dropped while the rows are being built, so they never reach
 storage; the report says how many values were removed and never what they were.
 
+#### Editing a house
+
+Clicking a building opens its card beside the map; **Редагувати** opens the
+full-screen editor over the page. The map underneath is never unmounted, so
+closing the editor returns to the same house, the same zoom and the same
+filters — nothing is restored, because nothing was thrown away.
+
+Ten sections, each loading its own records the first time it is opened:
+Основне, Характеристики будинку, Контактні особи, Відповідальні, Дії,
+Звернення, Завдання, Події, Файли, Історія. Switching house cancels whatever is
+still in flight, so clicking down a street cannot leave one building's actions
+under another building's address.
+
+The two form sections accumulate a draft and are written by **Зберегти**; the
+rest are independent records that save themselves. Every exit — the close
+button, `Esc`, the browser's back gesture, the next/previous house arrows —
+goes through the same guard and asks before discarding unsaved work.
+
+Concurrency is explicit. Both `PATCH /houses/:id` and `PATCH /houses/:id/state`
+accept `expectedUpdatedAt`, the `updatedAt` the editor loaded, and answer **409**
+when somebody else has written since; the editor then offers *Оновити дані* or
+*Зберегти мою версію* rather than silently rolling the other person's edit back.
+The field is optional, so scripts and the importer are unaffected.
+
+Fields and routes added for it (schema version 3, migrated in place):
+
+| Addition | Why |
+| --- | --- |
+| `houses.block` | Corpus or letter. Folding it into `number` breaks `address_normalized`, which is the duplicate-detection key; `building` already holds the OSM `building=*` tag. |
+| `house_campaign_state.next_step` | What is planned here next, in words. `next_action_at` only says *when*. |
+| `person_contacts.verified_at` / `verified_by` | When a phone was last confirmed to work, stamped by the server. Carried across a person edit by contact id, or a rename would reset every number to "never verified". |
+| `houses.source` on write | It was in the input type and the change-log field list, but no statement ever wrote it. |
+| `GET /houses/:id/events` | The campaign's events narrowed to one building. |
+| `PATCH /actions/:id` | Correct a logged action instead of deleting and re-entering it, which lost the original author and timestamp. |
+| `PATCH /person-links/:id` | Fix an entrance or flat number without re-making the link, which would claim the person moved in today. |
+| `DELETE /people/:id` | Remove a contact person and their phone numbers (manager only). Distinct from `DELETE /person-links/:id`, which only detaches them from this building. |
+| `GET /houses/:id/history` | Now returns the building's own edits **and** its campaign-state changes, which are journalled under `<campaignId>:<houseId>`. |
+
+Coordinates and the building outline are deliberately not editable through the
+form: they decide where the building is on everybody's map, and the outline is
+OpenStreetMap's. The section explains what to do instead and links to the OSM
+object.
+
 #### Roles
 
 Writing requires a role, held in the `employees` table

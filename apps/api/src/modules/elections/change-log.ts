@@ -191,6 +191,14 @@ export function logOperation(
 export interface ChangeLogQuery {
   entity?: string;
   entityId?: string;
+  /**
+   * Any of these ids, rather than one. A house's own history is not all under
+   * its id: campaign state is journalled as `<campaignId>:<houseId>`, because
+   * that pair is the row's identity. Asking for the house id alone returned a
+   * journal with every stage change missing from it — which is most of what
+   * anybody opens the history to see.
+   */
+  entityIds?: string[];
   batchId?: string;
   campaignId?: string;
   limit?: number;
@@ -249,6 +257,12 @@ export function readChangeLog(
 
   if (query.entityId) {
     conditions.push(`entity_id = ${bind(query.entityId)}`);
+  }
+
+  if (query.entityIds && query.entityIds.length > 0) {
+    conditions.push(
+      `entity_id IN (${query.entityIds.map((id) => bind(id)).join(", ")})`,
+    );
   }
 
   if (query.batchId) {

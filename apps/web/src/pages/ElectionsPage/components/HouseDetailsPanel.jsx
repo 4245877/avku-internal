@@ -5,6 +5,11 @@
  * where, which precinct, what stage, how urgent, who owns it, when we were last
  * here, what is next, what is wrong — without opening a tab. Under it sit the
  * quick actions, and under those the seven tabs.
+ *
+ * The card **shows**; it no longer edits. Filling a record in means forty
+ * fields, ten collections and half a dozen sub-forms, and none of that fits a
+ * column beside a map — «Редагувати» opens the full-screen editor instead, and
+ * closes back onto this card with the same house still selected.
  */
 
 import {
@@ -19,7 +24,6 @@ import {
 } from '../../../features/elections/houseUtils.js';
 import { actionTypesById } from '../../../features/elections/electionsTypes.js';
 import ElectionsIcon from '../../../features/elections/ElectionsIcon.jsx';
-import HouseEditForm from './HouseEditForm.jsx';
 import HouseTabs from './HouseTabs.jsx';
 import QuickActions from './QuickActions.jsx';
 import styles from '../ElectionsPage.module.css';
@@ -99,16 +103,12 @@ function HouseDetailsPanel({
   isDetailsLoading,
   detailsError,
   hasError,
-  isEditing,
   isSaving,
   saveError,
   saveNotice,
   refreshToken,
   viewer,
   onStartEditing,
-  onCancelEditing,
-  onSaveAttributes,
-  onSaveState,
   onAddAction,
   onAddIssue,
   onAddTask,
@@ -194,7 +194,6 @@ function HouseDetailsPanel({
   const warnings = headerWarnings(house);
   const role = viewer?.role ?? null;
   const canWrite = Boolean(role);
-  const canEdit = role === 'coordinator' || role === 'manager' || role === 'admin';
 
   return (
     <PanelShell className={styles.detailsPanelFilled}>
@@ -289,15 +288,19 @@ function HouseDetailsPanel({
           </ul>
         )}
 
-        {isEditing && (
-          <p className={styles.panelEditingHint}>
-            <ElectionsIcon name="edit" size={15} />
-            Режим редагування — зміни застосуються після збереження
-          </p>
-        )}
+        {/* The one way into the full record. Prominent rather than buried at
+            the bottom of a tab: it is the button daily work starts with. */}
+        <button
+          className={`${styles.primaryButton} ${styles.panelEditButton}`}
+          onClick={onStartEditing}
+          type="button"
+        >
+          <ElectionsIcon name="edit" size={17} />
+          Редагувати
+        </button>
       </header>
 
-      {saveNotice && !isEditing && (
+      {saveNotice && (
         <p className={styles.panelNotice} role="status">
           <ElectionsIcon name="check" size={16} />
           {saveNotice}
@@ -312,41 +315,25 @@ function HouseDetailsPanel({
       )}
 
       <div className={styles.panelBody}>
-        {isEditing ? (
-          <HouseEditForm
-            house={house}
-            isSaving={isSaving}
-            key={house.id}
-            onCancel={onCancelEditing}
-            onSubmitAttributes={onSaveAttributes}
-            onSubmitState={onSaveState}
-            saveError={saveError}
-          />
-        ) : (
-          <>
-            <QuickActions
-              canWrite={canWrite}
-              house={house}
-              isSaving={isSaving}
-              onAction={onAddAction}
-              onIssue={onAddIssue}
-              onPerson={onAddPerson}
-              onPhoto={onAddPhoto}
-              onTask={onAddTask}
-            />
+        <QuickActions
+          canWrite={canWrite}
+          house={house}
+          isSaving={isSaving}
+          onAction={onAddAction}
+          onIssue={onAddIssue}
+          onPerson={onAddPerson}
+          onPhoto={onAddPhoto}
+          onTask={onAddTask}
+        />
 
-            <HouseTabs
-              campaignId={campaignId}
-              canEdit={canEdit}
-              canWrite={canWrite}
-              house={house}
-              onCompleteTask={onCompleteTask}
-              onResolveIssue={onResolveIssue}
-              onStartEditing={onStartEditing}
-              refreshToken={refreshToken}
-            />
-          </>
-        )}
+        <HouseTabs
+          campaignId={campaignId}
+          canWrite={canWrite}
+          house={house}
+          onCompleteTask={onCompleteTask}
+          onResolveIssue={onResolveIssue}
+          refreshToken={refreshToken}
+        />
       </div>
     </PanelShell>
   );

@@ -50,6 +50,7 @@
  * @property {string} priority   One of {@link PRIORITIES}.
  * @property {string} priorityReason
  * @property {string} summary
+ * @property {string} nextStep     What is planned here next, in words.
  * @property {string|null} nextActionAt
  * @property {string|null} lastActionAt
  * @property {number} openIssuesCount
@@ -292,6 +293,7 @@ export function createEmptyCampaignState() {
     priority: 'medium',
     priorityReason: '',
     summary: '',
+    nextStep: '',
     nextActionAt: null,
     updatedAt: null,
     updatedBy: null,
