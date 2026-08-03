@@ -30,7 +30,64 @@ import {
   maskContactValue,
   maskPersonName,
 } from "./elections-access";
-import { assertHouseExists } from "./house-records";
+import {
+  assertHouseExists,
+  assertHouseVisible,
+  type ListHousesOptions,
+} from "./house-records";
+
+/**
+ * Refuses to go on unless the viewer may work with this person.
+ *
+ * A person is reachable through the buildings they are linked to, so "may I
+ * touch this person" is "do I hold any building they live or work in". A person
+ * with no link at all is reachable by nobody below manager: an unlinked record
+ * carries a name and a phone number and no territory to justify them, so the
+ * safe answer is the same one an unknown id gets.
+ *
+ * The route layer cannot do this instead — it is handed a person id, and the
+ * houses behind it are exactly what this query has to find.
+ */
+export function assertPersonVisible(
+  database: DatabaseSync,
+  personId: string,
+  options: ListHousesOptions,
+): void {
+  if (hasAtLeast(
+    options.viewer,
+    "manager",
+  )) {
+    return;
+  }
+
+  const visibility = houseVisibilitySql(
+    options.viewer,
+    options.campaignId,
+    "h",
+  );
+  const row = database.prepare(`
+    SELECT 1 AS ok
+    FROM house_people hp
+    JOIN houses h ON h.id = hp.house_id
+    WHERE hp.person_id = :personId
+      AND hp.deleted_at IS NULL
+      AND h.deleted_at IS NULL
+      AND (${visibility.sql})
+    LIMIT 1
+  `).get({
+    ...visibility.parameters,
+    personId,
+  } as never) as Record<string, unknown> | undefined;
+
+  if (!row) {
+    // Same answer as a missing id: whether a person exists at all is itself
+    // information about somebody else's territory.
+    throw new HttpError(
+      404,
+      "Особу не знайдено.",
+    );
+  }
+}
 
 /**
  * People, their contact channels, their link to a building, and who is
@@ -510,7 +567,7 @@ export function createPerson(
       database,
       houseId,
     );
-    linkPersonToHouse(
+    insertPersonLink(
       database,
       {
         personId: id,
@@ -554,16 +611,56 @@ export interface PersonLinkInput {
   source?: string;
 }
 
+/**
+ * Attaches an existing resident to an existing building.
+ *
+ * Both ends are checked, and both matter. An unchecked target house lets a
+ * resident be filed into somebody else's building; an unchecked person lets a
+ * stranger's record be pulled into a building the caller does hold, which hands
+ * over their phone number on the next read.
+ */
 export function linkPersonToHouse(
   database: DatabaseSync,
   input: PersonLinkInput,
   context: ChangeContext,
+  options: ListHousesOptions,
 ): string {
   assertHouseExists(
     database,
     input.houseId,
   );
+  assertHouseVisible(
+    database,
+    input.houseId,
+    options,
+  );
+  assertPersonVisible(
+    database,
+    input.personId,
+    options,
+  );
 
+  return insertPersonLink(
+    database,
+    input,
+    context,
+  );
+}
+
+/**
+ * The insert itself, with no permission check of its own.
+ *
+ * Split out for {@link createPerson}, which links a resident it has just
+ * created: that person has no building yet, so `assertPersonVisible` would
+ * refuse the very row being created. Its caller checks the house instead, which
+ * is the half that is actually in question there. Not exported — every route
+ * reaches this through `linkPersonToHouse`.
+ */
+function insertPersonLink(
+  database: DatabaseSync,
+  input: PersonLinkInput,
+  context: ChangeContext,
+): string {
   const person = database.prepare(`
     SELECT id FROM people WHERE id = ? AND deleted_at IS NULL
   `).get(input.personId);
@@ -643,7 +740,14 @@ export function updatePerson(
   personId: string,
   input: PersonInput,
   context: ChangeContext,
+  options: ListHousesOptions,
 ): void {
+  assertPersonVisible(
+    database,
+    personId,
+    options,
+  );
+
   const before = database.prepare(`
     SELECT id, full_name, role, note FROM people
     WHERE id = ? AND deleted_at IS NULL
@@ -749,6 +853,7 @@ export function deletePersonLink(
   database: DatabaseSync,
   linkId: string,
   context: ChangeContext,
+  options: ListHousesOptions,
 ): void {
   const row = database.prepare(`
     SELECT id, house_id, person_id FROM house_people
@@ -761,6 +866,15 @@ export function deletePersonLink(
       "Звʼязок не знайдено.",
     );
   }
+
+  // The link is identified by its own id, so the building it belongs to is only
+  // known here — without this the caller could unpick a resident from any
+  // building in the district by guessing nothing more than a link id.
+  assertHouseVisible(
+    database,
+    String(row.house_id),
+    options,
+  );
 
   const now = new Date().toISOString();
 

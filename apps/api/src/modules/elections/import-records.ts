@@ -878,6 +878,25 @@ export function createBatch(
 
     cleanedTotal += cleanedCount;
 
+    /*
+     * What gets stored as the "original" row, with the forbidden columns
+     * already gone.
+     *
+     * `import_rows.raw` exists so a reviewer can compare the normalised address
+     * against what the file actually said, and it used to hold `JSON.stringify(
+     * raw)` — the untouched source row. That made the staging table the one
+     * place in the module where a political position or a passport number was
+     * kept verbatim, and `GET /import/:id` handed it straight back. Confirmed
+     * against the running API before this change: a row carrying
+     * `political_position`, `party` and `vote_intent` was uploaded and all
+     * three came back in the response.
+     *
+     * The reviewer still sees every column they need — address, name, phone,
+     * note — exactly as written. They simply never see the ones the module is
+     * not allowed to hold.
+     */
+    const storableRaw = stripForbiddenFields(raw).value;
+
     const candidates = findHouseCandidates(
       database,
       normalized,
@@ -943,7 +962,7 @@ export function createBatch(
       randomUUID(),
       batchId,
       index + 1,
-      JSON.stringify(raw),
+      JSON.stringify(storableRaw),
       JSON.stringify(normalized),
       status,
       decision,

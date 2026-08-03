@@ -286,4 +286,44 @@ if [ "$BACKED_UP" -eq 0 ]; then
   fail "no runtime data was found under DATA_ROOT=$DATA_ROOT"
 fi
 
+# Encryption is opt-in and happens last, after every snapshot has already passed
+# its integrity check: a corrupt backup must be caught as a corrupt backup, not
+# as a decryption failure months later. With BACKUP_ENCRYPTION_KEY_FILE unset
+# this whole block is skipped and the script behaves exactly as before, so
+# turning it on cannot break an existing deployment.
+if [ -n "${BACKUP_ENCRYPTION_KEY_FILE:-}" ]; then
+  command -v node >/dev/null 2>&1 ||
+    fail "BACKUP_ENCRYPTION_KEY_FILE is set but node is not available to encrypt with."
+
+  CRYPTO_SCRIPT=$(dirname "$0")/backup-crypto.mjs
+
+  [ -f "$CRYPTO_SCRIPT" ] ||
+    fail "missing encryption helper: $CRYPTO_SCRIPT"
+
+  # Validate the key before touching anything, so a bad key fails the run rather
+  # than leaving half the directory encrypted.
+  BACKUP_ROOT="$BACKUP_ROOT" DATA_ROOT="$DATA_ROOT" node "$CRYPTO_SCRIPT" check-key ||
+    fail "the backup encryption key was rejected"
+
+  find "$DESTINATION" -type f ! -name '*.enc' -print | while IFS= read -r plaintext; do
+    BACKUP_ROOT="$BACKUP_ROOT" DATA_ROOT="$DATA_ROOT" \
+      node "$CRYPTO_SCRIPT" encrypt "$plaintext" "$plaintext.enc" ||
+      fail "failed to encrypt $plaintext"
+    rm -f "$plaintext" || fail "failed to remove plaintext $plaintext"
+    echo "Encrypted $(basename "$plaintext")"
+  done
+
+  # `find | while` runs the loop in a subshell, so a failure inside it cannot be
+  # seen through $?. Check the result instead: any surviving plaintext means the
+  # loop did not finish, and a backup that is half in the clear must not be
+  # reported as a success.
+  REMAINING=$(find "$DESTINATION" -type f ! -name '*.enc' | wc -l)
+
+  [ "$REMAINING" -eq 0 ] ||
+    fail "encryption did not complete: $REMAINING file(s) are still unencrypted in $DESTINATION"
+
+  echo "Backup written to $DESTINATION (encrypted; restore with restore-db.sh)"
+  exit 0
+fi
+
 echo "Backup written to $DESTINATION"

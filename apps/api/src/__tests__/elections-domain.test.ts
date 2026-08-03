@@ -425,9 +425,12 @@ describe("authorization", () => {
       },
     );
 
+    // Refused as 403: the caller is identified, so the missing piece is a
+    // grant, not a login. 401 here sent them back to a sign-in that would
+    // change nothing.
     assert.equal(
       created.status,
-      401,
+      403,
       "no role is not a role: the request must not be treated as authorized",
     );
   });

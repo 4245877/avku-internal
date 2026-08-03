@@ -670,6 +670,47 @@ export function findHouse(
   );
 }
 
+/**
+ * Refuses to go on unless the viewer may work with this house.
+ *
+ * The same answer as {@link getHouse} gives, without assembling the record:
+ * this exists for the write paths that take an id of something *attached* to a
+ * house — a resident link, a precinct link, an attachment — where the house
+ * itself is never loaded and the check would otherwise be skipped entirely.
+ *
+ * Cheap on purpose. `getHouse` reads a wide row plus assignees and precinct
+ * links to build a `HouseRecord`; a guard that throws away everything it built
+ * would put that cost on every such write for nothing.
+ */
+export function assertHouseVisible(
+  database: DatabaseSync,
+  houseId: string,
+  options: ListHousesOptions,
+): void {
+  const visibility = houseVisibilitySql(
+    options.viewer,
+    options.campaignId,
+    "h",
+  );
+  const row = database.prepare(`
+    SELECT 1 AS ok FROM houses h
+    WHERE h.id = :houseId
+      AND h.deleted_at IS NULL
+      AND (${visibility.sql})
+  `).get({
+    ...visibility.parameters,
+    houseId,
+  } as never) as Record<string, unknown> | undefined;
+
+  if (!row) {
+    // Same answer as an unknown id, for the same reason as `getHouse`.
+    throw new HttpError(
+      404,
+      "Будинок не знайдено.",
+    );
+  }
+}
+
 export function getHouse(
   database: DatabaseSync,
   houseId: string,
@@ -1169,15 +1210,31 @@ export interface HousePrecinctInput {
   source?: unknown;
 }
 
+/**
+ * Files a building under a polling station.
+ *
+ * The visibility check is not bookkeeping — it closes a privilege escalation.
+ * `houseVisibilitySql` grants a viewer every house linked to a precinct they
+ * are assigned to, so a coordinator who may write this link freely can attach
+ * any building in the district to their own precinct and thereby grant
+ * themselves the building *and its residents' phone numbers*. Verified before
+ * the fix: a coordinator holding two houses issued one request and read three.
+ */
 export function linkHouseToPrecinct(
   database: DatabaseSync,
   houseId: string,
   input: HousePrecinctInput,
   context: ChangeContext,
+  options: ListHousesOptions,
 ): string {
   assertHouseExists(
     database,
     houseId,
+  );
+  assertHouseVisible(
+    database,
+    houseId,
+    options,
   );
 
   const precinctId = requireText(
@@ -1277,6 +1334,7 @@ export function unlinkHouseFromPrecinct(
   database: DatabaseSync,
   linkId: string,
   context: ChangeContext,
+  options: ListHousesOptions,
 ): void {
   const row = database.prepare(`
     SELECT id, house_id, precinct_id FROM house_polling_stations WHERE id = ?
@@ -1288,6 +1346,15 @@ export function unlinkHouseFromPrecinct(
       "Звʼязок не знайдено.",
     );
   }
+
+  // The mirror of `linkHouseToPrecinct`: this row decides who reaches the
+  // building, and it is addressed by its own id, so without the check any
+  // coordinator could cut a building out of a colleague's precinct.
+  assertHouseVisible(
+    database,
+    String(row.house_id),
+    options,
+  );
 
   database.prepare("DELETE FROM house_polling_stations WHERE id = ?")
     .run(linkId);

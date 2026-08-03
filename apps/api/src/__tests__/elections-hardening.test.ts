@@ -474,9 +474,11 @@ describe("the work log is not public", () => {
         },
       );
 
+      // 403, not 401: this caller is signed in, they simply hold no role yet.
+      // Answering 401 told them to log in again, which cannot fix it.
       assert.equal(
         roleless.status,
-        401,
+        403,
         `${collection} answered a roleless employee: ${roleless.text}`,
       );
     });

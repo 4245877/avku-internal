@@ -194,6 +194,35 @@ export interface ChangeLogQuery {
   batchId?: string;
   campaignId?: string;
   limit?: number;
+  /**
+   * Limits the answer to the log of buildings the caller holds, plus whatever
+   * they did themselves. Omitted by callers that have already established the
+   * right to the rows they are asking for — `GET /houses/:id/history` resolves
+   * the house through `getHouse` first, so re-filtering there would be a second
+   * check of the same fact.
+   */
+  visibility?: ChangeLogVisibility;
+}
+
+/**
+ * Who may read a journal row when the caller is below `manager`.
+ *
+ * The cross-cutting journal is addressed by entity id, not by house, so an
+ * unrestricted read of it hands over edits made to buildings, residents and
+ * imports anywhere in the district — names and old field values included. It
+ * answered any coordinator before this.
+ *
+ * Two things are legitimately theirs: the history of a building they hold, and
+ * the record of their own actions. Everything else is refused. Rows about a
+ * person, a task or an import batch are not attributed to a building at all, so
+ * they are reachable only through the "I did this" half — deliberately strict,
+ * because guessing wrong here leaks the row itself.
+ */
+export interface ChangeLogVisibility {
+  /** SQL predicate selecting visible houses, with `chlh` as the house alias. */
+  houseSql: string;
+  parameters: Record<string, unknown>;
+  actorEmail: string;
 }
 
 const MAX_HISTORY_ROWS = 500;
@@ -203,26 +232,49 @@ export function readChangeLog(
   query: ChangeLogQuery,
 ): ChangeLogEntry[] {
   const conditions: string[] = [];
-  const parameters: (string | number)[] = [];
+  const parameters: Record<string, unknown> = {};
+  let index = 0;
+  const bind = (value: unknown): string => {
+    index += 1;
+    const name = `p${index}`;
+
+    parameters[name] = value;
+
+    return `:${name}`;
+  };
 
   if (query.entity) {
-    conditions.push("entity = ?");
-    parameters.push(query.entity);
+    conditions.push(`entity = ${bind(query.entity)}`);
   }
 
   if (query.entityId) {
-    conditions.push("entity_id = ?");
-    parameters.push(query.entityId);
+    conditions.push(`entity_id = ${bind(query.entityId)}`);
   }
 
   if (query.batchId) {
-    conditions.push("batch_id = ?");
-    parameters.push(query.batchId);
+    conditions.push(`batch_id = ${bind(query.batchId)}`);
   }
 
   if (query.campaignId) {
-    conditions.push("campaign_id = ?");
-    parameters.push(query.campaignId);
+    conditions.push(`campaign_id = ${bind(query.campaignId)}`);
+  }
+
+  if (query.visibility) {
+    const { houseSql, actorEmail } = query.visibility;
+
+    Object.assign(
+      parameters,
+      query.visibility.parameters,
+    );
+    conditions.push(`(
+      (entity = 'house' AND EXISTS (
+        SELECT 1 FROM houses chlh
+        WHERE chlh.id = change_log.entity_id
+          AND chlh.deleted_at IS NULL
+          AND (${houseSql})
+      ))
+      OR LOWER(changed_by) = ${bind(actorEmail.toLowerCase())}
+    )`);
   }
 
   const limit = Math.min(
@@ -230,14 +282,19 @@ export function readChangeLog(
     MAX_HISTORY_ROWS,
   );
 
-  const rows = database.prepare(`
+  const statement = database.prepare(`
     SELECT id, entity, entity_id, operation, field, old_value, new_value,
            changed_by, changed_at, origin, batch_id, campaign_id
     FROM change_log
     ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
     ORDER BY id DESC
     LIMIT ${limit}
-  `).all(...parameters) as Record<string, unknown>[];
+  `);
+  // An unfiltered read binds nothing, and node:sqlite rejects an anonymous
+  // object against a statement that declares no parameters.
+  const rows = (Object.keys(parameters).length > 0
+    ? statement.all(parameters as never)
+    : statement.all()) as Record<string, unknown>[];
 
   return rows.map((row) => ({
     id: Number(row.id),

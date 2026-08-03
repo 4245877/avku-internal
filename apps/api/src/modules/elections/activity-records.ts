@@ -2017,11 +2017,41 @@ export function insertAttachment(
   return id;
 }
 
+/**
+ * Removes an attachment, but only one the caller could have read.
+ *
+ * Reading an attachment goes through {@link canReadAttachment}; deleting one
+ * used to go through nothing at all, so a coordinator could destroy a photo
+ * belonging to a building in somebody else's territory by id alone. The same
+ * predicate now guards both, and an attachment the caller cannot read answers
+ * as if it did not exist.
+ */
 export function deleteAttachment(
   database: DatabaseSync,
   attachmentId: string,
   context: ChangeContext,
+  viewer: ElectionsViewer,
+  campaignId: string | null,
 ): void {
+  const attachment = findAttachment(
+    database,
+    attachmentId,
+  );
+
+  if (
+    !attachment || !canReadAttachment(
+      database,
+      attachment,
+      campaignId,
+      viewer,
+    )
+  ) {
+    throw new HttpError(
+      404,
+      "Запис не знайдено.",
+    );
+  }
+
   softDelete(
     database,
     "attachments",

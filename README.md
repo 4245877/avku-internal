@@ -452,10 +452,57 @@ before the backup is considered successful. This means a restored
 nor `node` is available the script fails loudly instead of writing a fragile
 raw copy.
 
-There is no dedicated restore script yet. To restore manually:
+### Encrypting a backup
+
+A backup holds every resident's name and phone number, the full change log and
+the field photographs, and it exists to be copied elsewhere. Encryption is
+**opt-in**: set `BACKUP_ENCRYPTION_KEY_FILE` and every artifact is written as
+`<name>.enc`; leave it unset and the script behaves exactly as before, so
+turning it on does not change an existing deployment until you choose to.
+
+```bash
+# once, outside DATA_ROOT and BACKUP_ROOT
+sudo install -d -o 0 -g 0 -m 0700 /etc/avku
+head -c 48 /dev/urandom | base64 | sudo tee /etc/avku/backup.key >/dev/null
+sudo chmod 600 /etc/avku/backup.key
+
+BACKUP_ENCRYPTION_KEY_FILE=/etc/avku/backup.key ./infra/scripts/backup-db.sh
+```
+
+AES-256-GCM with a per-file random salt and scrypt key derivation. Because the
+tag is authenticated, a modified archive fails to decrypt rather than restoring
+altered data. Encryption runs *after* each snapshot has passed its integrity
+check, so a corrupt database is still reported as a corrupt database.
+
+The key is never written into the archive and never stored in this repository.
+The helper refuses to run if the key file sits inside `BACKUP_ROOT` or
+`DATA_ROOT` (it would be copied along with the backup it protects), if it is
+readable by other users, or if it is shorter than 16 characters.
+
+**Keep the key somewhere the backup is not.** An encrypted backup whose key is
+lost is not a backup.
+
+### Restoring
+
+```bash
+BACKUP_DIR=/var/backups/avku-internal/20260803T074028Z \
+RESTORE_ROOT=/var/lib/avku-internal/data \
+BACKUP_ENCRYPTION_KEY_FILE=/etc/avku/backup.key \
+  ./infra/scripts/restore-db.sh
+```
+
+Stop the API first. The script decrypts into a temporary staging directory,
+verifies every database with `PRAGMA integrity_check`, and only then writes into
+`RESTORE_ROOT` — so a wrong key or a damaged archive leaves the existing data
+untouched instead of half-replacing it. `.tar.gz` archives (certificate photos,
+elections attachments) are extracted in place, and any stale `-wal`/`-shm`
+sidecars beside a restored database are removed so they cannot shadow it.
+Omit `BACKUP_ENCRYPTION_KEY_FILE` for an unencrypted backup.
+
+To restore by hand instead:
 
 1. Stop the API process or container.
-2. Copy each backed-up `*.sqlite` file back to its matching storage root under `/var/lib/avku-internal/data` (a single file per database — no sidecars).
+2. Copy each backed-up `*.sqlite` file back to its matching storage root under `/var/lib/avku-internal/data` (a single file per database — no sidecars), removing any `-wal`/`-shm` left beside it.
 3. If the backup contains `certificates/photos.tar.gz` or `certificates/generated.tar.gz`, extract them into `/var/lib/avku-internal/data/certificates`; likewise extract `elections/attachments.tar.gz` into `/var/lib/avku-internal/data/elections` and copy `elections/workspace-area.geo.json` back beside it.
 4. Start the API again and run `pnpm check` from `apps/api`, or check `/api/health`.
 

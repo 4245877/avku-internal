@@ -15,6 +15,7 @@ import {
   type ElectionsRole,
   type ElectionsViewer,
   hasAtLeast,
+  houseVisibilitySql,
   requireRole,
   resolveViewer,
 } from "../modules/elections/elections-access";
@@ -699,6 +700,7 @@ async function handleHouses(
           actor: viewer.email,
           campaignId: listOptions.campaignId,
         },
+        listOptions,
       ));
 
     sendJson(
@@ -1442,13 +1444,26 @@ async function handleAttachments(
       viewer,
       "coordinator",
     );
+
+    const attachmentCampaignId = await resolveCampaignId(
+      repository,
+      url,
+    );
+
+    await assertCampaignWritable(
+      repository,
+      attachmentCampaignId,
+    );
     await repository.withTransaction((db) =>
       deleteAttachment(
         db,
         attachmentId,
         {
           actor: viewer.email,
+          campaignId: attachmentCampaignId,
         },
+        viewer,
+        attachmentCampaignId,
       ));
     sendJson(
       response,
@@ -1789,12 +1804,27 @@ export async function handleElectionsRequest(
       viewer,
       "coordinator",
     );
+
+    const linkCampaignId = requireCampaign(await resolveCampaignId(
+      repository,
+      url,
+    ));
+
+    await assertCampaignWritable(
+      repository,
+      linkCampaignId,
+    );
     await repository.withTransaction((db) =>
       unlinkHouseFromPrecinct(
         db,
         segments[1],
         {
           actor: viewer.email,
+          campaignId: linkCampaignId,
+        },
+        {
+          campaignId: linkCampaignId,
+          viewer,
         },
       ));
     sendJson(
@@ -1827,40 +1857,60 @@ export async function handleElectionsRequest(
   if (segments[0] === "people") {
     const [, personId] = segments;
 
-    if (personId && request.method === "PATCH") {
+    /*
+     * People are not campaign-scoped rows, but reaching one is: a person is
+     * only visible through a building, and which buildings the caller holds is
+     * a fact about a campaign. So these writes resolve a campaign for two
+     * reasons — to refuse an archived one, and to answer "whose territory".
+     */
+    if (
+      personId &&
+      (request.method === "PATCH" ||
+        (segments[2] === "links" && request.method === "POST"))
+    ) {
       requireRole(
         viewer,
         "coordinator",
       );
 
+      const peopleCampaignId = requireCampaign(await resolveCampaignId(
+        repository,
+        url,
+      ));
+
+      await assertCampaignWritable(
+        repository,
+        peopleCampaignId,
+      );
+
+      const peopleOptions = {
+        campaignId: peopleCampaignId,
+        viewer,
+      };
       const body = await readJsonBody(request);
 
-      await repository.withTransaction((db) =>
-        updatePerson(
-          db,
-          personId,
-          body,
+      if (request.method === "PATCH") {
+        await repository.withTransaction((db) =>
+          updatePerson(
+            db,
+            personId,
+            body,
+            {
+              actor: viewer.email,
+              campaignId: peopleCampaignId,
+            },
+            peopleOptions,
+          ));
+        sendJson(
+          response,
+          200,
           {
-            actor: viewer.email,
+            ok: true,
           },
-        ));
-      sendJson(
-        response,
-        200,
-        {
-          ok: true,
-        },
-      );
-      return;
-    }
+        );
+        return;
+      }
 
-    if (personId && segments[2] === "links" && request.method === "POST") {
-      requireRole(
-        viewer,
-        "coordinator",
-      );
-
-      const body = await readJsonBody(request);
       const id = await repository.withTransaction((db) =>
         linkPersonToHouse(
           db,
@@ -1875,7 +1925,9 @@ export async function handleElectionsRequest(
           },
           {
             actor: viewer.email,
+            campaignId: peopleCampaignId,
           },
+          peopleOptions,
         ));
 
       sendJson(
@@ -1895,12 +1947,27 @@ export async function handleElectionsRequest(
       viewer,
       "coordinator",
     );
+
+    const linkCampaignId = requireCampaign(await resolveCampaignId(
+      repository,
+      url,
+    ));
+
+    await assertCampaignWritable(
+      repository,
+      linkCampaignId,
+    );
     await repository.withTransaction((db) =>
       deletePersonLink(
         db,
         segments[1],
         {
           actor: viewer.email,
+          campaignId: linkCampaignId,
+        },
+        {
+          campaignId: linkCampaignId,
+          viewer,
         },
       ));
     sendJson(
@@ -2148,6 +2215,17 @@ export async function handleElectionsRequest(
     requireRole(
       viewer,
       "manager",
+    );
+
+    // Merging folds one record into another across every campaign that
+    // references it, so it is the least reversible write in the module and the
+    // last one that should still work against a closed campaign.
+    await assertCampaignWritable(
+      repository,
+      await resolveCampaignId(
+        repository,
+        url,
+      ),
     );
 
     const body = await readJsonBody(request);
@@ -2545,6 +2623,32 @@ export async function handleElectionsRequest(
       viewer,
       "coordinator",
     );
+
+    const historyCampaignId = await resolveCampaignId(
+      repository,
+      url,
+    );
+    /*
+     * A manager reads the journal whole; below that it is narrowed to the
+     * caller's own buildings and their own edits. The narrowing needs a
+     * campaign to know what "own building" means, so a coordinator asking
+     * before any campaign exists is answered with nothing rather than with
+     * everything.
+     */
+    const visibility = hasAtLeast(
+      viewer,
+      "manager",
+    )
+      ? undefined
+      : {
+        ...houseVisibilitySql(
+          viewer,
+          historyCampaignId ?? "",
+          "chlh",
+        ),
+        actorEmail: viewer.email ?? "",
+      };
+
     sendJson(
       response,
       200,
@@ -2559,6 +2663,11 @@ export async function handleElectionsRequest(
             url,
             200,
           ),
+          visibility: visibility && {
+            houseSql: visibility.sql,
+            parameters: visibility.parameters,
+            actorEmail: visibility.actorEmail,
+          },
         },
       ),
     );

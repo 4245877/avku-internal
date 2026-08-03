@@ -260,13 +260,101 @@ export const FORBIDDEN_IMPORT_FIELDS: readonly string[] = [
 
 const FORBIDDEN_LOOKUP = new Set(FORBIDDEN_IMPORT_FIELDS);
 
+/**
+ * Word stems that make a column forbidden wherever they appear inside its name.
+ *
+ * Exact-name matching alone was not enough, and the gap was not theoretical: a
+ * column literally called `political_position` — the example this module's own
+ * comments use — normalised to `political_position`, matched neither
+ * `political` nor `politicalposition`, and was imported. So were `age_band`,
+ * `vote_intent` and `loyalty`. A real file names these columns whatever the
+ * person who exported it felt like, so the test has to be on the stem.
+ *
+ * Stems only, and only unambiguous ones: `age` is deliberately absent here
+ * because it is a substring of `average`, `usage` and `language`. It is caught
+ * as a whole token instead (see below), which those three do not produce.
+ */
+const FORBIDDEN_STEMS: readonly string[] = [
+  "politic",
+  "party",
+  "passport",
+  "criminal",
+  "conviction",
+  "birthdate",
+  "birthday",
+  "dateofbirth",
+  "ageband",
+  "agegroup",
+  "agerange",
+  "voteintent",
+  "votingintent",
+  "voteprefer",
+  "candidatepref",
+  "loyal",
+  "ethnic",
+  "religio",
+  "nationalit",
+  // Cyrillic spellings, because the files this module imports are Ukrainian.
+  "партія",
+  "партии",
+  "партій",
+  "політи",
+  "судим",
+  "паспорт",
+  "зарплат",
+  "лояльн",
+  "етніч",
+  "релігі",
+  "національн",
+  "голосув",
+];
+
+/**
+ * Whole words that make a column forbidden when they stand on their own.
+ *
+ * Separate from the stems so that a short word cannot match by accident inside
+ * a longer, innocent one.
+ */
+const FORBIDDEN_TOKENS: readonly string[] = [
+  "age",
+  "stance",
+  "vote",
+  "votes",
+  "voting",
+  "income",
+  "salary",
+  "payment",
+  "payout",
+  "dob",
+  "вік",
+  "дохід",
+  "стать",
+  "гроші",
+];
+
 /** True when a source column must never reach a working table. */
 export function isForbiddenField(name: string): boolean {
   const key = name.trim().toLowerCase().replace(/[\s-]+/g, "_");
 
-  return (
-    FORBIDDEN_LOOKUP.has(key) || FORBIDDEN_LOOKUP.has(key.replace(/_/g, ""))
-  );
+  if (FORBIDDEN_LOOKUP.has(key) || FORBIDDEN_LOOKUP.has(key.replace(/_/g, ""))) {
+    return true;
+  }
+
+  const squashed = key.replace(/_/g, "");
+
+  if (FORBIDDEN_STEMS.some((stem) => squashed.includes(stem))) {
+    return true;
+  }
+
+  // `camelCase` and `snake_case` both split into the same tokens, so a column
+  // arrives as one or the other without changing the answer.
+  const tokens = key
+    .replace(/([a-zа-яїієґ])([A-ZА-ЯЇІЄҐ])/g, "$1_$2")
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean);
+
+  return tokens.some((token) => FORBIDDEN_TOKENS.includes(token));
 }
 
 /**
