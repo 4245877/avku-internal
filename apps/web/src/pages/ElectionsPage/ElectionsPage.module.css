@@ -826,7 +826,7 @@
   height: 11px;
 
   border: 1.5px solid;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 /* Driven by `data-stage`, so the list, the search suggestions and the legend
@@ -959,7 +959,7 @@
 .mapCanvas :global(.leaflet-control-attribution) {
   padding: 2px var(--space-2);
 
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--color-text-secondary);
 
   background: var(--panel-surface);
@@ -1085,9 +1085,9 @@
 
 /* The outline as it is being traced. */
 :global(.elections-area-draft) {
-  fill: var(--ice-deep, #2c5f8a);
+  fill: var(--ice-deep);
   fill-opacity: 0.1;
-  stroke: var(--ice-deep, #2c5f8a);
+  stroke: var(--ice-deep);
   stroke-width: 2px;
   stroke-linejoin: round;
 }
@@ -1104,7 +1104,7 @@
 
   display: block;
 
-  border: 2px solid var(--ice-deep, #2c5f8a);
+  border: 2px solid var(--ice-deep);
   border-radius: 50%;
   box-shadow: var(--shadow-sm);
 
@@ -1113,7 +1113,7 @@
 
 :global(.elections-area-vertex) span {
   inset: 0;
-  background: var(--panel-surface-solid, #fff);
+  background: var(--panel-surface-solid);
 }
 
 /* Hollow, and half the weight: an invitation rather than a real vertex. */
@@ -1127,7 +1127,7 @@
 :global(.elections-area-midpoint):hover span {
   inset: 0;
   opacity: 1;
-  background: var(--ice-whisper, #a8ddf7);
+  background: var(--ice-whisper);
 }
 
 /* Campaign anchor — вулиця Якуба Коласа, 6. */
@@ -1141,7 +1141,7 @@
 
   display: block;
 
-  background: var(--blood-crest, #a63e4c);
+  background: var(--blood-crest);
   border: 2.5px solid rgba(255, 255, 255, 0.92);
   border-radius: 50%;
   box-shadow:
@@ -1229,7 +1229,7 @@
 
 .mapTooltip strong {
   font-size: var(--text-xs);
-  color: #ffffff;
+  color: var(--frost-surface);
 }
 
 .mapTooltipStatus {
@@ -1404,7 +1404,7 @@
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
 
-  color: var(--blood-crest, #a63e4c);
+  color: var(--blood-crest);
 }
 
 .areaEditorClose {
@@ -2204,7 +2204,7 @@
   gap: var(--space-1);
   align-items: center;
 
-  padding: 3px 10px;
+  padding: var(--badge-padding);
 
   font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
@@ -3360,7 +3360,7 @@ a.contactValue:hover {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .page {
     /*
      * `svh`, not `vh`: on iOS `vh` is the *largest* viewport, so a 62vh map ran
@@ -3897,9 +3897,9 @@ a.contactValue:hover {
 .mapSignalList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
   padding: 0;
 
   list-style: none;
@@ -3911,7 +3911,7 @@ a.contactValue:hover {
 .mapSignalList li {
   display: grid;
   grid-template-columns: 14px 1fr;
-  gap: 2px 6px;
+  gap: 2px var(--space-2);
   align-items: start;
 
   font-size: var(--text-2xs);
@@ -3940,7 +3940,7 @@ a.contactValue:hover {
   height: 12px;
 
   border: 1.5px solid var(--color-text-muted);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .signalMark[data-signal='urgent'] {
@@ -3968,19 +3968,21 @@ a.contactValue:hover {
    it never lands under the finger that summoned it. */
 .mapPreviewSheet {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
-  left: 12px;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  left: var(--space-3);
   z-index: 620;
 
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: flex-start;
 
-  padding: 10px 12px;
+  padding: var(--space-3);
 
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
+  /* Opaque on purpose: this sheet sits over the map, so a translucent
+     surface would let buildings and labels bleed through the text. */
+  background: var(--panel-surface-solid);
+  border: 1px solid var(--panel-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
 }
@@ -4026,18 +4028,18 @@ a.contactValue:hover {
 .campaignBar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
 
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-3);
 }
 
 .viewerBadge {
   display: inline-flex;
-  gap: 5px;
+  gap: var(--space-1);
   align-items: center;
 
-  padding: 3px 9px;
+  padding: 3px var(--space-2);
 
   font-size: var(--text-2xs);
   color: var(--color-text-secondary);
@@ -4051,9 +4053,9 @@ a.contactValue:hover {
 .panelFacts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 6px 12px;
+  gap: var(--space-2) var(--space-3);
 
-  margin: 10px 0 0;
+  margin: var(--space-3) 0 0;
 }
 
 .panelFacts div {
@@ -4075,9 +4077,9 @@ a.contactValue:hover {
 .panelWarnings {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: var(--space-1);
 
-  margin: 10px 0 0;
+  margin: var(--space-3) 0 0;
   padding: 0;
 
   list-style: none;
@@ -4085,11 +4087,13 @@ a.contactValue:hover {
 
 .panelError {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 
   margin: 0;
-  padding: 8px 14px;
+  /* Same inset as .panelNotice and .panelHeader: these stack as direct
+     children of the panel, so their text must share one left edge. */
+  padding: var(--space-3) var(--space-5);
 
   font-size: var(--text-xs);
   color: var(--color-danger);
@@ -4101,14 +4105,14 @@ a.contactValue:hover {
    The field path: one row of large targets, each opening a two-field
    form. Sized for a thumb from the start, not only under a media query. */
 .quickActions {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--color-border-subtle);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .quickActionRow {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .quickActionButton {
@@ -4119,7 +4123,7 @@ a.contactValue:hover {
   justify-content: center;
 
   min-height: 52px;
-  padding: 6px 4px;
+  padding: var(--space-2) var(--space-1);
 
   font-size: var(--text-2xs);
   color: var(--color-text-secondary);
@@ -4133,7 +4137,7 @@ a.contactValue:hover {
 
 .quickActionButton:hover {
   color: var(--color-text-primary);
-  border-color: var(--color-border);
+  border-color: var(--color-border-medium);
 }
 
 .quickActionButtonActive {
@@ -4144,23 +4148,23 @@ a.contactValue:hover {
 
 .quickActionsLocked {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 
   margin: 0;
-  padding: 10px 14px;
+  padding: var(--space-3) var(--space-4);
 
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  border-bottom: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .quickForm {
-  margin-top: 10px;
-  padding: 10px;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
 
   background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-subtle);
+  border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);
 }
 
@@ -4173,17 +4177,17 @@ a.contactValue:hover {
   align-items: center;
   justify-content: space-between;
 
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 
   font-size: var(--text-sm);
 }
 
 .quickFormActions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   justify-content: flex-end;
 
-  margin-top: 10px;
+  margin-top: var(--space-3);
 }
 
 /* The four doorstep outcomes, one tap each — this is what makes a visit
@@ -4191,20 +4195,20 @@ a.contactValue:hover {
 .quickResultRow {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
+  gap: var(--space-2);
 
-  margin-bottom: 10px;
+  margin-bottom: var(--space-3);
 }
 
 .quickResultButton {
   min-height: 46px;
-  padding: 8px;
+  padding: var(--space-2);
 
   font-size: var(--text-xs);
   color: var(--color-text-primary);
 
   background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-md);
 }
 
@@ -4226,9 +4230,9 @@ a.contactValue:hover {
   gap: 2px;
   overflow-x: auto;
 
-  padding: 8px 14px 0;
+  padding: var(--space-2) var(--space-4) 0;
 
-  border-bottom: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-light);
   scrollbar-width: none;
 }
 
@@ -4238,11 +4242,11 @@ a.contactValue:hover {
 
 .houseTab {
   display: inline-flex;
-  gap: 5px;
+  gap: var(--space-1);
   align-items: center;
 
   min-height: 40px;
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
 
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -4259,7 +4263,7 @@ a.contactValue:hover {
 }
 
 .houseTabCount {
-  padding: 0 5px;
+  padding: 0 var(--space-1);
 
   font-size: var(--text-2xs);
   color: var(--color-text-secondary);
@@ -4270,23 +4274,23 @@ a.contactValue:hover {
 
 .houseTabPanel {
   min-height: 0;
-  padding: 12px 14px 16px;
+  padding: var(--space-3) var(--space-4) var(--space-4);
 }
 
 .tabBody {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 .tabNotice,
 .tabError {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 
   margin: 0;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-3);
 
   font-size: var(--text-xs);
 
@@ -4309,7 +4313,7 @@ a.contactValue:hover {
 .personList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 
   margin: 0;
   padding: 0;
@@ -4318,25 +4322,25 @@ a.contactValue:hover {
 }
 
 .personCard {
-  padding: 10px;
+  padding: var(--space-3);
 
   background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-subtle);
+  border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md);
 }
 
 .personTop {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .personMeta,
 .personNote {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   font-size: var(--text-2xs);
   color: var(--color-text-muted);
 }
@@ -4345,7 +4349,7 @@ a.contactValue:hover {
 .timeline {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-3);
 
   margin: 0;
   padding: 0;
@@ -4355,7 +4359,7 @@ a.contactValue:hover {
 
 .timelineRow {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .timelineIcon {
@@ -4380,7 +4384,7 @@ a.contactValue:hover {
 .timelineTop {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 }
 
@@ -4392,7 +4396,7 @@ a.contactValue:hover {
 
 .timelineText,
 .timelineNext {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   overflow-wrap: anywhere;
@@ -4417,7 +4421,7 @@ a.contactValue:hover {
 .qualityList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 
   margin: 0;
   padding: 0;
@@ -4428,14 +4432,14 @@ a.contactValue:hover {
 .qualityList {
   flex-direction: row;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: var(--space-1);
 }
 
 .recordRow {
-  padding: 10px;
+  padding: var(--space-3);
 
   background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-subtle);
+  border: 1px solid var(--color-border-light);
   border-left: 3px solid transparent;
   border-radius: var(--radius-md);
 }
@@ -4447,7 +4451,7 @@ a.contactValue:hover {
 .recordTop {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
   justify-content: space-between;
 }
@@ -4461,7 +4465,7 @@ a.contactValue:hover {
 }
 
 .recordText {
-  margin: 6px 0 0;
+  margin: var(--space-2) 0 0;
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }
@@ -4471,7 +4475,7 @@ a.contactValue:hover {
   flex-direction: column;
   gap: 2px;
 
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-3);
 
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
@@ -4479,7 +4483,7 @@ a.contactValue:hover {
 
 .fileRow a {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 
   font-size: var(--text-xs);
@@ -4492,7 +4496,7 @@ a.contactValue:hover {
 }
 
 .linkButton {
-  margin-top: 6px;
+  margin-top: var(--space-2);
   padding: 0;
 
   font-size: var(--text-2xs);
@@ -4504,14 +4508,14 @@ a.contactValue:hover {
 
 .dangerButton {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 
   min-height: 40px;
-  padding: 8px 14px;
+  padding: var(--space-2) var(--space-4);
 
   font-size: var(--text-xs);
-  color: #fff;
+  color: var(--color-text-inverse);
 
   background: var(--color-danger);
   border: 0;
@@ -4524,17 +4528,17 @@ a.contactValue:hover {
 }
 
 .formSectionHint {
-  margin: -4px 0 8px;
+  margin: -var(--space-1) 0 var(--space-2);
   font-size: var(--text-2xs);
   color: var(--color-text-muted);
 }
 
 .checkboxField {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: flex-start;
 
-  margin-top: 10px;
+  margin-top: var(--space-3);
 
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
@@ -4550,12 +4554,12 @@ a.contactValue:hover {
 .legacyNotice {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: var(--space-4);
   align-items: flex-start;
   justify-content: space-between;
 
   margin-bottom: var(--space-4);
-  padding: 14px 16px;
+  padding: var(--space-4) var(--space-4);
 
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning);
@@ -4568,16 +4572,16 @@ a.contactValue:hover {
 
 .legacyNoticeMain h2 {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   align-items: center;
 
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
 
   font-size: var(--text-sm);
 }
 
 .legacyNoticeMain p {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }
@@ -4599,7 +4603,7 @@ a.contactValue:hover {
 .legacyNoticeActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
 }
 
@@ -4607,10 +4611,10 @@ a.contactValue:hover {
 .importPanel,
 .bulkDialog {
   margin-bottom: var(--space-4);
-  padding: 16px;
+  padding: var(--space-4);
 
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
+  background: var(--card-bg);
+  border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-lg);
 }
 
@@ -4619,12 +4623,12 @@ a.contactValue:hover {
   align-items: center;
   justify-content: space-between;
 
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .importHeader h2 {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
 
   margin: 0;
@@ -4635,19 +4639,19 @@ a.contactValue:hover {
 .importUpload {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: center;
 
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .importSummary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px;
+  gap: var(--space-2);
 
-  margin: 0 0 12px;
-  padding: 10px;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
 
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
@@ -4664,31 +4668,31 @@ a.contactValue:hover {
 }
 
 .importUnmatched {
-  margin-bottom: 12px;
-  padding: 10px;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
 
   background: var(--color-warning-bg);
   border-radius: var(--radius-md);
 }
 
 .importUnmatched h3 {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
   font-size: var(--text-xs);
 }
 
 .importUnmatched ul {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-5);
   font-size: var(--text-2xs);
 }
 
 .importActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   justify-content: flex-end;
 
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .importRows {
@@ -4705,11 +4709,11 @@ a.contactValue:hover {
 
 .importRows th,
 .importRows td {
-  padding: 6px 8px;
+  padding: var(--space-2) var(--space-2);
   text-align: left;
   vertical-align: top;
 
-  border-bottom: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .importRows td strong {
@@ -4727,35 +4731,35 @@ a.contactValue:hover {
 
 .importNotes {
   margin: 0;
-  padding-left: 14px;
+  padding-left: var(--space-4);
   color: var(--color-text-muted);
 }
 
 .bulkSummary {
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }
 
 .bulkPreview {
   max-height: 220px;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
   overflow-y: auto;
 
-  padding: 10px;
+  padding: var(--space-3);
 
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
 }
 
 .bulkPreview h3 {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
   font-size: var(--text-xs);
 }
 
 .bulkPreview ul {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-5);
   font-size: var(--text-2xs);
 }
 
@@ -4763,7 +4767,7 @@ a.contactValue:hover {
    The target is a visit result in ~30 seconds without a keyboard, so the
    quick actions get bigger rather than smaller on a narrow screen, and
    the preview sheet keeps clear of the on-screen keyboard. */
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .quickActionRow {
     grid-template-columns: repeat(4, 1fr);
   }
@@ -4783,12 +4787,12 @@ a.contactValue:hover {
   }
 
   .houseTabList {
-    padding: 6px 10px 0;
+    padding: var(--space-2) var(--space-3) 0;
   }
 
   .houseTab {
     min-height: 44px;
-    padding: 6px 8px;
+    padding: var(--space-2) var(--space-2);
   }
 
   .panelFacts {
@@ -4798,7 +4802,7 @@ a.contactValue:hover {
   .legacyNotice,
   .importPanel,
   .bulkDialog {
-    padding: 12px;
+    padding: var(--space-3);
   }
 
   .importRows {
@@ -4827,6 +4831,6 @@ a.contactValue:hover {
 /* The sheet sits above the on-screen keyboard rather than under it. */
 @supports (bottom: env(safe-area-inset-bottom)) {
   .mapPreviewSheet {
-    bottom: calc(12px + env(safe-area-inset-bottom));
+    bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
   }
 }
