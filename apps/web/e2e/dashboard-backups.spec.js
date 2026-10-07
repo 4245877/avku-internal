@@ -16,7 +16,7 @@ const slots = [1, 2].map(number => ({
 }));
 const completed = { activeJob: null, jobs: [succeeded], lastSuccessful: succeeded, slots, checkedAt: '2026-10-06T12:01:00Z' };
 
-async function mockApi(page, initial = completed) {
+async function mockApi(page, initial = completed, certificates = []) {
   let data = initial;
   const requests = [];
   const unexpected = [];
@@ -37,7 +37,7 @@ async function mockApi(page, initial = completed) {
       return;
     }
     if (request.method() === 'GET' && ['/api/certificates', '/api/warehouse', '/api/logistics'].includes(pathname)) {
-      await route.fulfill({ json: [] });
+      await route.fulfill({ json: pathname === '/api/certificates' ? certificates : [] });
     } else if (request.method() === 'GET' && pathname === '/api/certificates/templates') {
       // The existing local template fallback keeps this check self-contained.
       await route.fulfill({ status: 503, json: { error: 'Test template fallback' } });
@@ -106,6 +106,28 @@ test('backup card is last, prominent, responsive, and absent from certificates',
   await expect(page.getByRole('heading', { name: 'Посвідчення', exact: true })).toBeVisible();
   expect(api.requests).toHaveLength(backupRequestsBeforeReload);
   expect(api.unexpected).toEqual([]);
+});
+
+test('Dashboard counts and operational rows respect draft lifecycle even with future expiry dates', async ({ page }) => {
+  const certificates = Array.from({ length: 169 }, (_, index) => ({
+    id: `fixture-${index}`, certificateNumber: `fixture-${index}`,
+    fullName: `Тестове посвідчення ${index}`, status: index < 116 ? 'active' : 'draft',
+    validUntil: '2099-01-01',
+    updatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+  }));
+  const api = await mockApi(page, completed, certificates);
+  await page.goto('/');
+  const summary = page.getByRole('region', { name: 'Оперативна статистика' });
+  const value = label => summary.locator('article').filter({ has: page.getByText(label, { exact: true }) }).locator('strong');
+  await expect(value('Посвідчення')).toHaveText('169');
+  await expect(value('Дійсні посвідчення')).toHaveText('116');
+  await expect(value('Чернетки посвідчень')).toHaveText('53');
+  await expect(value('Спливають')).toHaveText('0');
+  await page.getByRole('searchbox', { name: 'Пошук записів' }).fill('fixture-168');
+  const draftRow = page.getByRole('row', { name: /fixture-168/ });
+  await expect(draftRow.getByText('Чернетка', { exact: true })).toBeVisible();
+  await expect(draftRow.getByText('Дійсне', { exact: true })).toHaveCount(0);
+  expect(api.requests.every(request => request.method() === 'GET')).toBe(true);
 });
 
 test('manual action calls the existing endpoint once and remains blocked through reload until success', async ({ page }) => {

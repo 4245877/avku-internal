@@ -74,6 +74,7 @@ apps/web/certificates-screenshot.png
 # Playwright E2E artifacts: traces, HAR/network logs, HTML report.
 apps/web/e2e-results/
 apps/web/e2e-report/
+apps/web/draft-e2e-results/
 # Cloudflare Access session state. Never commit — it is a bearer credential.
 **/*.storageState.json
 apps/web/.auth/

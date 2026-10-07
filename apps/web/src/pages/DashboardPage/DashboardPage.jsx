@@ -31,6 +31,7 @@ const CERTIFICATE_STATUS_TONES = {
   soon: 'ready',
   expired: 'draft',
   muted: 'draft',
+  draft: 'draft',
 };
 
 const WAREHOUSE_STATUS_TONES = {
@@ -121,7 +122,7 @@ function isLowStockItem(item) {
 }
 
 function createCertificateRecord(certificate, index) {
-  const status = getCertificateStatus(certificate.validUntil);
+  const status = getCertificateStatus(certificate.validUntil, certificate.status);
   const recordId =
     certificate.certificateNumber ||
     certificate.id ||
@@ -250,7 +251,7 @@ function DashboardPage() {
 
   const metrics = useMemo(() => {
     const certificateStatuses = certificates.map((certificate) =>
-      getCertificateStatus(certificate.validUntil),
+      getCertificateStatus(certificate.validUntil, certificate.status),
     );
     const transferStatusCounts = transfers.reduce((counts, transfer) => {
       const status = getTransferStatusValue(transfer);
@@ -264,6 +265,9 @@ function DashboardPage() {
 
     return {
       totalCertificates: certificates.length,
+      draftCertificates: certificateStatuses.filter((status) =>
+        status.tone === 'draft',
+      ).length,
       activeCertificates: certificateStatuses.filter((status) =>
         status.tone === 'active',
       ).length,
@@ -287,6 +291,11 @@ function DashboardPage() {
       label: 'Дійсні посвідчення',
       value: metrics.activeCertificates,
       hint: 'Не прострочені та не входять до групи найближчого спливу',
+    },
+    {
+      label: 'Чернетки посвідчень',
+      value: metrics.draftCertificates,
+      hint: 'Збережені записи, які ще не оформлені як посвідчення',
     },
     {
       label: 'Спливають',

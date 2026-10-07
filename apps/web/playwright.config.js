@@ -25,6 +25,11 @@ const storageState = process.env.AVKU_E2E_STORAGE_STATE || undefined;
 
 export default defineConfig({
   testDir: './e2e',
+  // Draft writes and mocked backup checks require their dedicated configs.
+  testMatch: [
+    'certificates-photo-switching.spec.js',
+    'certificates-photo-switching.cloudflare.spec.js',
+  ],
   outputDir: './e2e-results',
   // The diagnostics runs switch through 20 records several times over a tunnel.
   timeout: 180_000,
@@ -43,6 +48,8 @@ export default defineConfig({
   use: {
     baseURL,
     storageState,
+    launchOptions: process.env.AVKU_CHROMIUM_PATH
+      ? { executablePath: process.env.AVKU_CHROMIUM_PATH } : {},
     // Trace and HAR for every failing run — the network evidence the
     // investigation is built on.
     trace: 'retain-on-failure',
