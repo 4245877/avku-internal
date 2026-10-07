@@ -289,9 +289,13 @@ function CertificatePreview({
       <div className={styles.paneHeader}>
         <div>
           <p className={styles.paneEyebrow}>Попередній перегляд</p>
-          <h2 className={styles.paneTitle}>Готовий макет</h2>
+          <h2 className={styles.paneTitle}>{form.status === 'draft' ? 'Макет чернетки' : 'Готовий макет'}</h2>
         </div>
       </div>
+
+      {form.status === 'draft' ? (
+        <p className={styles.draftHint}>Чернетка — посвідчення ще не оформлено. Друк та експорт недоступні.</p>
+      ) : null}
 
       <div className={styles.previewFrame}>
         {layout && assets ? (

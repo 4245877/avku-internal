@@ -38,13 +38,14 @@ export const LEGACY_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1';
 /**
  * @typedef {Object} CertificateRecord
  * @property {string} id
+ * @property {'draft'|'active'} status
  * @property {string} fullName
  * @property {string} firstNameEn
  * @property {string} lastNameEn
  * @property {string} fullNameEn
  * @property {string} certificateNumber
- * @property {string} issuedAt
- * @property {string} validUntil
+ * @property {string|null} issuedAt
+ * @property {string|null} validUntil
  * @property {string} templateId
  * @property {string} photoUrl
  * @property {CertificatePhotoCrop} photoCrop
@@ -55,6 +56,7 @@ export const LEGACY_CERTIFICATE_TEMPLATE_ID = 'volunteer-card-v1';
 /**
  * @typedef {Object} CertificateFormValue
  * @property {string} id
+ * @property {'draft'|'active'} status
  * @property {string} fullName
  * @property {string} firstNameEn
  * @property {string} lastNameEn

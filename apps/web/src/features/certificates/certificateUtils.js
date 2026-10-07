@@ -72,12 +72,13 @@ export function getDefaultValidUntil() {
 export function getEmptyCertificateForm(templateId = DEFAULT_CERTIFICATE_TEMPLATE_ID) {
   return {
     id: '',
+    status: 'draft',
     fullName: '',
     firstNameEn: '',
     lastNameEn: '',
     certificateNumber: '',
-    issuedAt: getTodayInputDate(),
-    validUntil: getDefaultValidUntil(),
+    issuedAt: '',
+    validUntil: '',
     templateId: normalizeTemplateId(templateId),
     photoUrl: '',
     photoDataUrl: '',
@@ -93,14 +94,15 @@ export function getEmptyCertificateForm(templateId = DEFAULT_CERTIFICATE_TEMPLAT
 export function createFormFromRecord(record) {
   return {
     id: record.id,
+    status: record.status || 'active',
     fullName: record.fullName,
     firstNameEn: record.firstNameEn || '',
     lastNameEn: record.lastNameEn || '',
     certificateNumber: record.certificateNumber,
-    issuedAt: record.issuedAt,
-    validUntil: record.validUntil,
+    issuedAt: record.issuedAt || '',
+    validUntil: record.validUntil || '',
     templateId: normalizeTemplateId(record.templateId),
-    photoUrl: record.photoUrl,
+    photoUrl: record.photoUrl || '',
     photoDataUrl: '',
     photoFile: null,
     photoCrop: {
@@ -201,7 +203,11 @@ export function addOneYear(value) {
   return toInputDate(nextDate);
 }
 
-export function getCertificateStatus(value) {
+export function getCertificateStatus(value, status = 'active') {
+  if (status === 'draft') {
+    return { label: 'Чернетка', tone: 'draft' };
+  }
+
   const date = parseInputDate(value);
 
   if (!date) {
@@ -233,8 +239,9 @@ export function getCertificateStatus(value) {
   };
 }
 
-export function validateCertificateForm(form) {
+export function validateCertificateForm(form, { forActivation = false } = {}) {
   const errors = {};
+  const isDraft = form.status === 'draft' && !forActivation;
   const issuedAtDate = parseInputDate(form.issuedAt);
   const validUntilDate = parseInputDate(form.validUntil);
 
@@ -242,7 +249,7 @@ export function validateCertificateForm(form) {
     errors.fullName = 'Вкажіть ПІБ.';
   }
 
-  if (normalizeTemplateId(form.templateId).endsWith('-en')) {
+  if (!isDraft && normalizeTemplateId(form.templateId).endsWith('-en')) {
     if (!normalizeWhitespace(form.firstNameEn)) {
       errors.firstNameEn = "Вкажіть ім'я англійською.";
     }
@@ -256,13 +263,13 @@ export function validateCertificateForm(form) {
     errors.certificateNumber = 'Вкажіть номер посвідчення.';
   }
 
-  if (!issuedAtDate) {
+  if (!issuedAtDate && (!isDraft || form.issuedAt)) {
     errors.issuedAt = 'Вкажіть дату видачі.';
   }
 
-  if (!validUntilDate) {
+  if (!validUntilDate && (!isDraft || form.validUntil)) {
     errors.validUntil = 'Вкажіть дату завершення дії.';
-  } else if (issuedAtDate && validUntilDate < issuedAtDate) {
+  } else if (issuedAtDate && validUntilDate && validUntilDate < issuedAtDate) {
     errors.validUntil = 'Дата завершення дії має бути не раніше дати видачі.';
   }
 
@@ -270,7 +277,7 @@ export function validateCertificateForm(form) {
     errors.templateId = 'Вкажіть шаблон посвідчення.';
   }
 
-  if (!form.photoUrl && !form.photoDataUrl && !form.photoFile) {
+  if (!isDraft && !form.photoUrl && !form.photoDataUrl && !form.photoFile) {
     errors.photo = 'Завантажте фотографію.';
   }
 
@@ -283,12 +290,13 @@ export function hasValidationErrors(errors) {
 
 export function buildCertificatePayload(form) {
   return {
+    status: form.status || 'active',
     fullName: normalizeWhitespace(form.fullName),
     firstNameEn: normalizeWhitespace(form.firstNameEn),
     lastNameEn: normalizeWhitespace(form.lastNameEn),
     certificateNumber: normalizeWhitespace(form.certificateNumber),
-    issuedAt: form.issuedAt,
-    validUntil: form.validUntil,
+    issuedAt: form.issuedAt || null,
+    validUntil: form.validUntil || null,
     templateId: normalizeTemplateId(form.templateId),
     photoDataUrl: form.photoFile ? undefined : form.photoDataUrl || undefined,
     photoFile: form.photoFile || undefined,

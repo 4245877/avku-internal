@@ -933,6 +933,22 @@
   border-color: var(--color-border-medium);
 }
 
+.status-draft {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-strong);
+  border-color: rgba(201, 134, 42, 0.25);
+}
+
+.draftHint {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--card-radius);
+  color: var(--color-text-primary);
+  background: var(--color-warning-bg);
+  line-height: 1.5;
+}
+
 /* ──────────────────────────────────────────────────────────
    FORM (editor)
    ────────────────────────────────────────────────────────── */

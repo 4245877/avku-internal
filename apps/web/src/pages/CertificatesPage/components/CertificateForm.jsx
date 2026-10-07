@@ -11,6 +11,7 @@ function CertificateForm({
   onChange,
   onRenew,
   onSave,
+  onActivate,
   onReset,
 }) {
   return (
@@ -19,10 +20,13 @@ function CertificateForm({
         <div>
           <p className={styles.paneEyebrow}>Редактор</p>
           <h2 className={styles.paneTitle}>{form.id ? 'Редагування запису' : 'Новий запис'}</h2>
+          {form.status === 'draft' ? (
+            <span className={`${styles.statusBadge} ${styles['status-draft']}`}>Чернетка</span>
+          ) : null}
         </div>
 
         <div className={styles.inlineActions}>
-          <button className={styles.secondaryButtonCompact} type="button" onClick={onRenew}>
+          <button className={styles.secondaryButtonCompact} type="button" onClick={onRenew} disabled={form.status === 'draft'}>
             +1 рік
           </button>
           <button className={styles.secondaryButtonCompact} type="button" onClick={onReset}>
@@ -30,6 +34,13 @@ function CertificateForm({
           </button>
         </div>
       </div>
+
+      {form.status === 'draft' ? (
+        <p className={styles.draftHint}>
+          Чернетка не є оформленим посвідченням. Фото та дату видачі можна додати пізніше.
+          Для оформлення заповніть обов'язкові дані, збережіть зміни та натисніть «Оформити посвідчення».
+        </p>
+      ) : null}
 
       <div className={styles.formGrid}>
         <label className={styles.field}>
@@ -123,8 +134,20 @@ function CertificateForm({
 
       <div className={styles.formActions}>
         <button className={styles.primaryButton} type="button" onClick={onSave} disabled={isSaving}>
-          {isSaving ? 'Збереження…' : form.id ? 'Зберегти зміни' : 'Зберегти посвідчення'}
+          {isSaving ? 'Збереження…' : form.status === 'draft' ? 'Зберегти чернетку' : 'Зберегти зміни'}
         </button>
+
+        {form.status === 'draft' && form.id ? (
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            onClick={onActivate}
+            disabled={isSaving || isDirty}
+            title={isDirty ? 'Спочатку збережіть зміни' : undefined}
+          >
+            Оформити посвідчення
+          </button>
+        ) : null}
 
         {isDirty ? <span className={styles.unsavedState}>Є незбережені зміни</span> : null}
       </div>

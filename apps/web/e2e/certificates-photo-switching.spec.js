@@ -41,13 +41,13 @@ async function throttle(page, bytesPerSecond) {
 }
 
 async function loadRecords(request, baseURL) {
-  const response = await request.get(`${baseURL}/api/certificates?limit=25`);
+  const response = await request.get(`${baseURL}/api/certificates`);
 
   expect(response.ok(), 'registry API must answer before the UI test starts').toBeTruthy();
 
   const records = await response.json();
 
-  return records.filter((record) => record.photoUrl);
+  return records.filter((record) => record.status !== 'draft' && record.photoUrl);
 }
 
 function cropperFrame(page) {

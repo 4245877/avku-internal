@@ -13,6 +13,7 @@ import {
   validateCertificateForm,
 } from '../../features/certificates/certificateUtils.js';
 import {
+  activateCertificate,
   createCertificate,
   deleteCertificate,
   downloadBlob,
@@ -29,7 +30,6 @@ import CertificateRegistry from './components/CertificateRegistry.jsx';
 import DeleteCertificateDialog from './components/DeleteCertificateDialog.jsx';
 import PhotoCropper from './components/PhotoCropper.jsx';
 import styles from './CertificatesPage.module.css';
-import CertificateBackups from './components/CertificateBackups.jsx';
 
 const MAX_PRINT_SHEET_CARDS = 4;
 const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
@@ -169,9 +169,11 @@ function CertificatesPage() {
   const statusSummary = useMemo(() => {
     return records.reduce(
       (summary, record) => {
-        const { tone } = getCertificateStatus(record.validUntil);
+        const { tone } = getCertificateStatus(record.validUntil, record.status);
 
-        if (tone === 'active') {
+        if (tone === 'draft') {
+          summary.draft += 1;
+        } else if (tone === 'active') {
           summary.active += 1;
         } else if (tone === 'soon') {
           summary.soon += 1;
@@ -183,7 +185,7 @@ function CertificatesPage() {
 
         return summary;
       },
-      { active: 0, soon: 0, expired: 0, muted: 0 },
+      { draft: 0, active: 0, soon: 0, expired: 0, muted: 0 },
     );
   }, [records]);
 
@@ -474,7 +476,9 @@ function CertificatesPage() {
     if (hasValidationErrors(nextErrors)) {
       showNotice(
         'error',
-        "Заповніть обов'язкові поля та завантажте фотографію.",
+        form.status === 'draft'
+          ? "Перевірте обов'язкові поля чернетки."
+          : "Заповніть обов'язкові поля та завантажте фотографію.",
       );
       return;
     }
@@ -490,7 +494,7 @@ function CertificatesPage() {
 
       setRecords((currentRecords) => upsertRecord(currentRecords, savedRecord));
       setCleanForm(nextForm);
-      showNotice('success', 'Посвідчення збережено.');
+      showNotice('success', savedRecord.status === 'draft' ? 'Чернетку збережено.' : 'Посвідчення збережено.');
     } catch (error) {
       showNotice(
         'error',
@@ -510,8 +514,39 @@ function CertificatesPage() {
     showNotice,
   ]);
 
+  const activateCurrentDraft = useCallback(async () => {
+    if (isAnyActionRunning || !form.id || form.status !== 'draft') {
+      return;
+    }
+
+    if (isDirty) {
+      showNotice('warning', 'Збережіть зміни перед оформленням посвідчення.');
+      return;
+    }
+
+    const nextErrors = validateCertificateForm(form, { forActivation: true });
+    setErrors(nextErrors);
+
+    if (hasValidationErrors(nextErrors)) {
+      showNotice('error', "Для оформлення заповніть обов'язкові поля та завантажте фотографію.");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const activeRecord = await activateCertificate(form.id);
+      setRecords((currentRecords) => upsertRecord(currentRecords, activeRecord));
+      setCleanForm(createFormFromRecord(activeRecord));
+      showNotice('success', 'Посвідчення оформлено.');
+    } catch (error) {
+      showNotice('error', getErrorMessage(error, 'Не вдалося оформити посвідчення.'));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [form, isAnyActionRunning, isDirty, setCleanForm, showNotice]);
+
   const renewCurrentForm = useCallback(() => {
-    if (isAnyActionRunning) {
+    if (isAnyActionRunning || form.status === 'draft') {
       return;
     }
 
@@ -520,10 +555,10 @@ function CertificatesPage() {
       validUntil: addOneYear(currentForm.validUntil),
     }));
     showNotice('info', 'Дату подовжено на один рік. Збережіть зміни.');
-  }, [isAnyActionRunning, showNotice]);
+  }, [form.status, isAnyActionRunning, showNotice]);
 
   const renewRecord = useCallback(async (record) => {
-    if (isAnyActionRunning) {
+    if (isAnyActionRunning || record.status === 'draft') {
       return;
     }
 
@@ -571,7 +606,7 @@ function CertificatesPage() {
   }, [openRecord]);
 
   const exportRecord = useCallback(async (record, format) => {
-    if (isAnyActionRunning) {
+    if (isAnyActionRunning || record.status === 'draft') {
       return;
     }
 
@@ -679,6 +714,11 @@ function CertificatesPage() {
       return;
     }
 
+    if (selectedRecord.status === 'draft') {
+      showNotice('warning', 'Оформіть посвідчення перед експортом.');
+      return;
+    }
+
     if (isDirty) {
       showNotice('warning', 'Збережіть зміни перед експортом.');
       return;
@@ -714,7 +754,7 @@ function CertificatesPage() {
 
   useEffect(() => {
     setPrintSelection((currentSelection) => {
-      const availableIds = new Set(records.map((record) => record.id));
+      const availableIds = new Set(records.filter((record) => record.status !== 'draft').map((record) => record.id));
       const nextSelection = currentSelection.filter((id) => availableIds.has(id));
 
       return nextSelection.length === currentSelection.length
@@ -724,6 +764,9 @@ function CertificatesPage() {
   }, [records]);
 
   const togglePrintSelection = useCallback((record) => {
+    if (record.status === 'draft') {
+      return;
+    }
     setPrintSelection((currentSelection) => {
       if (currentSelection.includes(record.id)) {
         return currentSelection.filter((id) => id !== record.id);
@@ -815,8 +858,6 @@ function CertificatesPage() {
         </div>
       </header>
 
-      <CertificateBackups />
-
       <section className={styles.statsGrid} aria-label="Статистика реєстру">
         <div className={styles.statItem}>
           <span>Всього</span>
@@ -825,6 +866,10 @@ function CertificatesPage() {
         <div className={styles.statItem}>
           <span>Активні</span>
           <strong>{statusSummary.active}</strong>
+        </div>
+        <div className={styles.statItem}>
+          <span>Чернетки</span>
+          <strong>{statusSummary.draft}</strong>
         </div>
         <div className={styles.statItem}>
           <span>Незабаром спливають</span>
@@ -894,6 +939,7 @@ function CertificatesPage() {
             onChange={updateField}
             onRenew={renewCurrentForm}
             onSave={saveForm}
+            onActivate={activateCurrentDraft}
             onReset={startNewRecord}
           />
 
@@ -915,6 +961,7 @@ function CertificatesPage() {
           imageUrl={previewImageUrl}
           isExportDisabled={
             !selectedRecord
+            || selectedRecord.status === 'draft'
             || isDirty
             || isAnyActionRunning
           }

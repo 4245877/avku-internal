@@ -107,6 +107,7 @@ function hasPhotoFile(payload) {
 }
 
 function appendCertificateFields(formData, payload) {
+  formData.append('status', payload.status || 'active');
   formData.append('fullName', payload.fullName ?? '');
   formData.append('firstNameEn', payload.firstNameEn ?? '');
   formData.append('lastNameEn', payload.lastNameEn ?? '');
@@ -141,6 +142,7 @@ function buildCertificateRequestOptions(method, payload) {
 function normalizeRecord(record) {
   return {
     ...record,
+    status: record.status || 'active',
     templateId: normalizeTemplateId(record.templateId),
     photoUrl: resolveStorageUrl(record.photoUrl),
     exportUrls: {
@@ -293,6 +295,14 @@ export async function updateCertificate(id, payload) {
 export async function renewCertificate(id) {
   return normalizeRecord(
     await requestJson(`/certificates/${encodeURIComponent(id)}/renew`, {
+      method: 'PATCH',
+    }),
+  );
+}
+
+export async function activateCertificate(id) {
+  return normalizeRecord(
+    await requestJson(`/certificates/${encodeURIComponent(id)}/activate`, {
       method: 'PATCH',
     }),
   );

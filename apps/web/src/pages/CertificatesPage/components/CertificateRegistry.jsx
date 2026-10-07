@@ -27,6 +27,7 @@ function CertificateRegistry({
   onDelete,
 }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const printSelectionSet = useMemo(
     () => new Set(printSelection),
     [printSelection],
@@ -36,11 +37,10 @@ function CertificateRegistry({
   const filteredRecords = useMemo(() => {
     const query = normalizeWhitespace(searchQuery).toLowerCase();
 
-    if (!query) {
-      return records;
-    }
-
     return records.filter((record) =>
+      (statusFilter === 'all' || (statusFilter === 'draft'
+        ? record.status === 'draft'
+        : record.status !== 'draft')) &&
       [
         record.fullName,
         record.certificateNumber,
@@ -51,7 +51,7 @@ function CertificateRegistry({
         .toLowerCase()
         .includes(query),
     );
-  }, [records, searchQuery]);
+  }, [records, searchQuery, statusFilter]);
 
   return (
     <aside className={styles.registryPane} aria-label="Реєстр посвідчень">
@@ -101,6 +101,15 @@ function CertificateRegistry({
         />
       </label>
 
+      <label className={styles.searchLabel}>
+        <span>Стан запису</span>
+        <select className={styles.input} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          <option value="all">Усі записи</option>
+          <option value="draft">Чернетки</option>
+          <option value="active">Оформлені посвідчення</option>
+        </select>
+      </label>
+
       <div className={styles.recordList}>
         {loading ? <div className={styles.emptyRegistry}>Завантаження реєстру…</div> : null}
 
@@ -120,11 +129,12 @@ function CertificateRegistry({
 
         {!loading && !loadError
           ? filteredRecords.map((record) => {
-            const status = getCertificateStatus(record.validUntil);
+            const isDraft = record.status === 'draft';
+            const status = getCertificateStatus(record.validUntil, record.status);
             const isBusy = actionState?.id === record.id;
             const isChecked = printSelectionSet.has(record.id);
             const isSelectDisabled =
-              isPrinting || (!isChecked && selectedCount >= maxPrintCards);
+              isDraft || isPrinting || (!isChecked && selectedCount >= maxPrintCards);
 
             return (
               <article
@@ -163,16 +173,16 @@ function CertificateRegistry({
                     <button className={styles.linkButton} type="button" onClick={() => onOpen(record)}>
                       Відкрити
                     </button>
-                    <button className={styles.linkButton} type="button" onClick={() => onRenew(record)} disabled={isBusy}>
+                    <button className={styles.linkButton} type="button" onClick={() => onRenew(record)} disabled={isBusy || isDraft}>
                       {isBusy && actionState.type === 'renew' ? '…' : 'Подовжити'}
                     </button>
                     <button className={styles.linkButton} type="button" onClick={() => onReplacePhoto(record)}>
                       Фото
                     </button>
-                    <button className={styles.linkButton} type="button" onClick={() => onExport(record, 'png')} disabled={isBusy}>
+                    <button className={styles.linkButton} type="button" onClick={() => onExport(record, 'png')} disabled={isBusy || isDraft}>
                       {isBusy && actionState.type === 'png' ? '…' : 'PNG'}
                     </button>
-                    <button className={styles.linkButton} type="button" onClick={() => onExport(record, 'pdf')} disabled={isBusy}>
+                    <button className={styles.linkButton} type="button" onClick={() => onExport(record, 'pdf')} disabled={isBusy || isDraft}>
                       {isBusy && actionState.type === 'pdf' ? '…' : 'PDF'}
                     </button>
                     <button

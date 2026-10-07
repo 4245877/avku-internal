@@ -11,8 +11,8 @@ function toDisplayValue(value) {
  * `31,12,2027`, `31122027`) while keeping the native calendar one click away.
  * The typed text lives in local state so a half-finished date is not thrown
  * away mid-keystroke; the parsed `yyyy-mm-dd` value is what reaches the form.
- * Text that does not parse leaves the form value empty, so validation reports
- * it instead of the field silently keeping an older date.
+ * Keep incomplete text in the form until it can be parsed. This lets draft
+ * validation distinguish a genuinely empty optional date from an invalid one.
  */
 function DateField({ label, value, error, onChange }) {
   const [text, setText] = useState(() => toDisplayValue(value));
@@ -36,7 +36,7 @@ function DateField({ label, value, error, onChange }) {
     const nextText = event.target.value;
 
     applyText(nextText);
-    onChange(parseFlexibleDate(nextText));
+    onChange(parseFlexibleDate(nextText) || nextText.trim());
   };
 
   const handleBlur = () => {
@@ -65,6 +65,7 @@ function DateField({ label, value, error, onChange }) {
           inputMode="numeric"
           autoComplete="off"
           aria-invalid={Boolean(error)}
+          aria-label={label}
         />
 
         <button
@@ -80,7 +81,7 @@ function DateField({ label, value, error, onChange }) {
           className={styles.dateFieldPicker}
           ref={pickerRef}
           type="date"
-          value={value || ''}
+          value={parseFlexibleDate(value) || ''}
           onChange={(event) => {
             applyText(toDisplayValue(event.target.value));
             onChange(event.target.value);

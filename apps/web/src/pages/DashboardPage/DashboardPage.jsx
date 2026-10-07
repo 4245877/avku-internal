@@ -7,6 +7,7 @@ import React, {
 import { Link } from 'react-router';
 
 import styles from './DashboardPage.module.css';
+import CertificateBackups from './components/CertificateBackups.jsx';
 import { exportAsJson, exportAsCsv } from '../../features/export/exportRecords';
 import { fetchCertificates } from '../../features/certificates/certificateApi.js';
 import { getCertificateStatus } from '../../features/certificates/certificateUtils.js';
@@ -573,6 +574,7 @@ function DashboardPage() {
           </article>
         </aside>
       </section>
+      <CertificateBackups />
     </main>
   );
 }

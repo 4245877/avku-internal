@@ -35,6 +35,33 @@ docker-compose.yml        local Docker composition
 docker-compose.prod.yml   production-oriented Docker composition
 ```
 
+## Certificates: drafts and activation
+
+Certificate records have a lifecycle state, `draft` or `active`. Existing records
+remain finalized (`active`); this state does not override their expiry dates.
+A draft requires a holder name and a unique certificate number. Its photo,
+issue date and expiry date may be absent. Supplied dates and photos still pass
+normal validation. Unknown dates/photos are stored as SQL `NULL`, never invented.
+
+The certificate editor creates drafts with empty dates, displays **Чернетка**, and
+allows **Зберегти чернетку**. Open a draft, add its real photograph and dates,
+save it, then use **Оформити посвідчення**. Saving alone keeps it a draft.
+An incomplete draft cannot be finalized. Drafts cannot be exported, renewed,
+printed, or included in expiry-based active counts.
+
+API clients create a draft with `POST /api/certificates` and `status: "draft"`.
+Omitting status retains the legacy strict finalized-record creation contract.
+`PUT /api/certificates/:id` preserves the record's lifecycle state;
+`PATCH /api/certificates/:id/activate` explicitly finalizes a complete draft.
+Activation validates required dates, date order, template and the stored real
+photo. Active records keep all existing required-field checks.
+
+On first use, the certificate repository transactionally rebuilds only its table
+when needed, preserving every legacy field, UUID, timestamp, photo filename and
+index, and assigns the formerly finalized records `active`. It records SQLite
+`user_version=4`. The migration is idempotent and rolls back on failure. Uploaded
+photo files are not rewritten. Take a SQLite backup before deploying this change.
+
 ## Requirements
 
 - Node.js 22.
