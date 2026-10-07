@@ -418,6 +418,11 @@ export async function handleCertificateRequest(
       return;
     }
 
+    if (request.method === "PATCH" && action === "activate") {
+      sendJson(response, 200, await repository.activate(id));
+      return;
+    }
+
     if (request.method === "PATCH" && action === "renew") {
       sendJson(
         response,

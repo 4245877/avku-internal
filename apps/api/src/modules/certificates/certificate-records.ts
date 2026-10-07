@@ -64,7 +64,7 @@ const MIN_CROP_ZOOM = 1;
 const MAX_CROP_ZOOM = 10;
 /**
  * Single definition of the table body, shared by the initial CREATE and by the
- * rebuild in `relaxPhotoZoomConstraint`, so the two can never drift apart.
+ * transactional schema migration, so the two can never drift apart.
  */
 const CERTIFICATE_RECORDS_COLUMNS = `
         id TEXT PRIMARY KEY NOT NULL,
@@ -73,14 +73,16 @@ const CERTIFICATE_RECORDS_COLUMNS = `
         last_name_en TEXT NOT NULL DEFAULT '',
         certificate_number TEXT NOT NULL COLLATE NOCASE UNIQUE
           CHECK (length(trim(certificate_number)) > 0),
-        issued_at TEXT NOT NULL
-          CHECK (issued_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
-        valid_until TEXT NOT NULL
+        issued_at TEXT
+          CHECK (issued_at IS NULL OR issued_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        valid_until TEXT
           CHECK (
-            valid_until GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND
-            valid_until >= issued_at
+            valid_until IS NULL OR (
+              valid_until GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND
+              (issued_at IS NULL OR valid_until >= issued_at)
+            )
           ),
-        photo_file_name TEXT NOT NULL CHECK (length(trim(photo_file_name)) > 0),
+        photo_file_name TEXT CHECK (photo_file_name IS NULL OR length(trim(photo_file_name)) > 0),
         photo_crop_zoom REAL NOT NULL DEFAULT 1
           CHECK (
             photo_crop_zoom >= ${MIN_CROP_ZOOM} AND
@@ -92,7 +94,13 @@ const CERTIFICATE_RECORDS_COLUMNS = `
           CHECK (photo_crop_rotation >= -180 AND photo_crop_rotation <= 180),
         template_id TEXT NOT NULL CHECK (length(trim(template_id)) > 0),
         created_at TEXT NOT NULL CHECK (length(trim(created_at)) > 0),
-        updated_at TEXT NOT NULL CHECK (length(trim(updated_at)) > 0)
+        updated_at TEXT NOT NULL CHECK (length(trim(updated_at)) > 0),
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'active')),
+        CHECK (
+          status = 'draft' OR (
+            issued_at IS NOT NULL AND valid_until IS NOT NULL AND photo_file_name IS NOT NULL
+          )
+        )
 `.trim();
 const CERTIFICATE_RECORDS_COLUMN_NAMES = [
   "id",
@@ -110,6 +118,7 @@ const CERTIFICATE_RECORDS_COLUMN_NAMES = [
   "template_id",
   "created_at",
   "updated_at",
+  "status",
 ].join(", ");
 const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
 /**
@@ -136,15 +145,18 @@ const IMAGE_DATA_URL_PATTERN =
   /^data:(image\/(?:png|jpe?g|webp));base64,([a-z0-9+/=\r\n]+)$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+export type CertificateStatus = "draft" | "active";
+
 export interface CertificateRecord {
+  status: CertificateStatus;
   id: string;
   fullName: string;
   firstNameEn: string;
   lastNameEn: string;
   certificateNumber: string;
-  issuedAt: string;
-  validUntil: string;
-  photoFileName: string;
+  issuedAt: string | null;
+  validUntil: string | null;
+  photoFileName: string | null;
   photoCrop: CertificatePhotoCrop;
   templateId: string;
   createdAt: string;
@@ -161,6 +173,7 @@ export interface CertificateRecordResponse extends CertificateRecord {
 }
 
 export interface CertificatePayload {
+  status?: unknown;
   fullName?: unknown;
   firstNameEn?: unknown;
   lastNameEn?: unknown;
@@ -223,12 +236,13 @@ export interface CertificateTemplateDefinition {
 }
 
 interface NormalizedCertificatePayload {
+  status: CertificateStatus;
   fullName: string;
   firstNameEn: string;
   lastNameEn: string;
   certificateNumber: string;
-  issuedAt: string;
-  validUntil: string;
+  issuedAt: string | null;
+  validUntil: string | null;
   templateId: string;
   photoCrop: CertificatePhotoCrop;
 }
@@ -306,6 +320,42 @@ function normalizeDate(value: unknown): string {
   }
 
   return value;
+}
+
+function normalizeStatus(value: unknown, fallback: CertificateStatus): CertificateStatus {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value !== "draft" && value !== "active") {
+    throw new Error("Статус посвідчення має бути draft або active.");
+  }
+  return value;
+}
+
+function normalizeDraftDate(value: unknown): string | null {
+  return value === undefined || value === null || value === ""
+    ? null
+    : normalizeDate(value);
+}
+
+function hasPhotoInput(payload: CertificatePayload): boolean {
+  return payload.photoFile !== undefined || (
+    payload.photoDataUrl !== undefined && payload.photoDataUrl !== null && payload.photoDataUrl !== ""
+  );
+}
+
+function assertActiveRecord(record: CertificateRecord): asserts record is CertificateRecord & {
+  status: "active";
+  issuedAt: string;
+  validUntil: string;
+  photoFileName: string;
+} {
+  if (record.status !== "active") {
+    throw new Error("Чернетка не є оформленим посвідченням. Спочатку заповніть дані та активуйте її.");
+  }
+  if (!record.issuedAt || !record.validUntil || !record.photoFileName) {
+    throw new Error("Оформлене посвідчення потребує дати видачі, строку дії та фотографії.");
+  }
 }
 
 function assertDateRange(
@@ -543,6 +593,7 @@ function normalizeCertificatePayload(
   payload: CertificatePayload,
   fallbackCrop: CertificatePhotoCrop = DEFAULT_CROP,
   fallbackTemplateId = DEFAULT_CERTIFICATE_TEMPLATE_ID,
+  status: CertificateStatus = "active",
   fallbackEnglishName: Pick<
     CertificateRecord,
     "firstNameEn" | "lastNameEn"
@@ -559,15 +610,15 @@ function normalizeCertificatePayload(
     payload.certificateNumber,
     "Номер посвідчення",
   );
-  const issuedAt = normalizeDate(payload.issuedAt);
-  const validUntil = normalizeDate(payload.validUntil);
+  const issuedAt = status === "draft" ? normalizeDraftDate(payload.issuedAt) : normalizeDate(payload.issuedAt);
+  const validUntil = status === "draft" ? normalizeDraftDate(payload.validUntil) : normalizeDate(payload.validUntil);
 
-  assertDateRange(
-    issuedAt,
-    validUntil,
-  );
+  if (issuedAt && validUntil) {
+    assertDateRange(issuedAt, validUntil);
+  }
 
   return {
+    status,
     fullName,
     firstNameEn: normalizeOptionalText(
       payload.firstNameEn,
@@ -619,13 +670,14 @@ function toRepositoryError(error: unknown): Error {
 function rowToRecord(row: Record<string, unknown>): CertificateRecord {
   return {
     id: String(row.id ?? ""),
+    status: row.status === "draft" ? "draft" : "active",
     fullName: String(row.full_name ?? ""),
     firstNameEn: String(row.first_name_en ?? ""),
     lastNameEn: String(row.last_name_en ?? ""),
     certificateNumber: String(row.certificate_number ?? ""),
-    issuedAt: String(row.issued_at ?? ""),
-    validUntil: String(row.valid_until ?? ""),
-    photoFileName: String(row.photo_file_name ?? ""),
+    issuedAt: row.issued_at == null ? null : String(row.issued_at),
+    validUntil: row.valid_until == null ? null : String(row.valid_until),
+    photoFileName: row.photo_file_name == null ? null : String(row.photo_file_name),
     photoCrop: normalizeCrop({
       zoom: row.photo_crop_zoom,
       offsetX: row.photo_crop_offset_x,
@@ -666,17 +718,17 @@ export function toCertificateResponse(
   record: CertificateRecord,
 ): CertificateRecordResponse {
   const encodedId = encodeURIComponent(record.id);
-  const encodedPhoto = encodeURIComponent(record.photoFileName);
+  const encodedPhoto = record.photoFileName ? encodeURIComponent(record.photoFileName) : "";
 
   return {
     ...record,
     fullNameEn: [record.firstNameEn, record.lastNameEn]
       .filter(Boolean)
       .join(" "),
-    photoUrl: `/api/certificates/photos/${encodedPhoto}`,
+    photoUrl: encodedPhoto ? `/api/certificates/photos/${encodedPhoto}` : "",
     exportUrls: {
-      png: `/api/certificates/${encodedId}/export.png`,
-      pdf: `/api/certificates/${encodedId}/export.pdf`,
+      png: record.status === "active" ? `/api/certificates/${encodedId}/export.png` : "",
+      pdf: record.status === "active" ? `/api/certificates/${encodedId}/export.pdf` : "",
     },
   };
 }
@@ -896,16 +948,16 @@ export class CertificateRepository {
   ): Promise<CertificateRecordResponse> {
     const now = new Date().toISOString();
     const id = randomUUID();
-    const normalizedPayload = normalizeCertificatePayload(payload);
+    const status = normalizeStatus(payload.status, "active");
+    const normalizedPayload = normalizeCertificatePayload(payload, DEFAULT_CROP, this.defaultTemplateId, status);
     await this.assertTemplateExists(normalizedPayload.templateId);
-    const pendingPhoto = await this.savePhotoToTemporary(
-      id,
-      payload,
-    );
+    const pendingPhoto = status === "active" || hasPhotoInput(payload)
+      ? await this.savePhotoToTemporary(id, payload)
+      : null;
     const record: CertificateRecord = {
       id,
       ...normalizedPayload,
-      photoFileName: pendingPhoto.photoFileName,
+      photoFileName: pendingPhoto?.photoFileName ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -915,10 +967,9 @@ export class CertificateRepository {
       await runInTransaction(
         database,
         async () => {
-          await rename(
-            pendingPhoto.temporaryPath,
-            pendingPhoto.finalPath,
-          );
+          if (pendingPhoto) {
+            await rename(pendingPhoto.temporaryPath, pendingPhoto.finalPath);
+          }
           this.insertRecord(
             database,
             record,
@@ -926,10 +977,9 @@ export class CertificateRepository {
         },
       );
     } catch (error) {
-      await this.cleanupFiles([
-        pendingPhoto.temporaryPath,
-        pendingPhoto.finalPath,
-      ]);
+      if (pendingPhoto) {
+        await this.cleanupFiles([pendingPhoto.temporaryPath, pendingPhoto.finalPath]);
+      }
       throw toRepositoryError(error);
     }
 
@@ -945,16 +995,18 @@ export class CertificateRepository {
       database,
       id,
     );
+    if (normalizeStatus(payload.status, existingRecord.status) !== existingRecord.status) {
+      throw new Error("Статус не можна змінити через редагування. Для оформлення чернетки використайте активацію.");
+    }
     const normalizedPayload = normalizeCertificatePayload(
       payload,
       existingRecord.photoCrop,
       existingRecord.templateId,
+      existingRecord.status,
       existingRecord,
     );
     await this.assertTemplateExists(normalizedPayload.templateId);
-    const shouldReplacePhoto =
-      Boolean(payload.photoFile) ||
-      (typeof payload.photoDataUrl === "string" && Boolean(payload.photoDataUrl));
+    const shouldReplacePhoto = hasPhotoInput(payload);
     const pendingPhoto = shouldReplacePhoto
       ? await this.savePhotoToTemporary(
         id,
@@ -972,6 +1024,9 @@ export class CertificateRepository {
       await runInTransaction(
         database,
         async () => {
+          if (this.findRecordInDatabase(database, id).status !== existingRecord.status) {
+            throw new Error("Статус посвідчення змінився. Оновіть сторінку перед збереженням.");
+          }
           if (pendingPhoto) {
             await rename(
               pendingPhoto.temporaryPath,
@@ -997,6 +1052,7 @@ export class CertificateRepository {
 
     if (
       pendingPhoto &&
+      existingRecord.photoFileName &&
       existingRecord.photoFileName !== updatedRecord.photoFileName
     ) {
       await this.cleanupFiles([
@@ -1008,6 +1064,36 @@ export class CertificateRepository {
     return toCertificateResponse(updatedRecord);
   }
 
+  async activate(id: string): Promise<CertificateRecordResponse> {
+    const database = await this.getDatabase();
+    const record = await runInTransaction(database, async () => {
+      const existing = this.findRecordInDatabase(database, id);
+      if (existing.status === "active") {
+        return existing;
+      }
+      const normalized = normalizeCertificatePayload(
+        existing, existing.photoCrop, existing.templateId, "active", existing,
+      );
+      await this.assertTemplateExists(normalized.templateId);
+      if (!existing.photoFileName) {
+        throw new Error("Фотографія обов'язкова для активації посвідчення.");
+      }
+      let photo: Buffer;
+      try {
+        photo = await readFile(this.getPhotoPath(existing.photoFileName));
+      } catch {
+        throw new Error("Фотографія відсутня або недоступна. Додайте фотографію перед активацією.");
+      }
+      await validatePhotoBuffer(photo);
+      const activated: CertificateRecord = {
+        ...existing, ...normalized, updatedAt: new Date().toISOString(),
+      };
+      this.updateRecord(database, activated);
+      return activated;
+    });
+    return toCertificateResponse(record);
+  }
+
   async renew(id: string): Promise<CertificateRecordResponse> {
     const database = await this.getDatabase();
     const updatedRecord = await runInTransaction(
@@ -1017,6 +1103,7 @@ export class CertificateRepository {
           database,
           id,
         );
+        assertActiveRecord(record);
         const updated: CertificateRecord = {
           ...record,
           validUntil: addOneYear(record.validUntil),
@@ -1055,7 +1142,7 @@ export class CertificateRepository {
 
     if (removedRecord) {
       await this.cleanupFiles([
-        this.getPhotoPath(removedRecord.photoFileName),
+        ...(removedRecord.photoFileName ? [this.getPhotoPath(removedRecord.photoFileName)] : []),
         this.getGeneratedPath(removedRecord.id),
       ]);
     }
@@ -1095,6 +1182,7 @@ export class CertificateRepository {
       database,
       id,
     );
+    assertActiveRecord(record);
     const selectedTemplateId = normalizeTemplateId(
       templateId,
       record.templateId,
@@ -1370,86 +1458,57 @@ export class CertificateRepository {
   }
 
   private migrateDatabase(database: DatabaseSync): void {
-    database.exec(`
-      CREATE TABLE IF NOT EXISTS certificate_records (
-        ${CERTIFICATE_RECORDS_COLUMNS}
-      );
-    `);
-
-    const columns = new Set(
-      (database.prepare("PRAGMA table_info(certificate_records)").all() as
-        Record<string, unknown>[])
-        .map((column) => String(column.name ?? "")),
-    );
-
-    if (!columns.has("first_name_en")) {
-      database.exec(
-        "ALTER TABLE certificate_records " +
-        "ADD COLUMN first_name_en TEXT NOT NULL DEFAULT ''",
-      );
-    }
-
-    if (!columns.has("last_name_en")) {
-      database.exec(
-        "ALTER TABLE certificate_records " +
-        "ADD COLUMN last_name_en TEXT NOT NULL DEFAULT ''",
-      );
-    }
-
-    if (!columns.has("photo_crop_rotation")) {
-      database.exec(
-        "ALTER TABLE certificate_records " +
-        "ADD COLUMN photo_crop_rotation REAL NOT NULL DEFAULT 0",
-      );
-    }
-
-    this.relaxPhotoZoomConstraint(database);
-
-    // Recreated after the rebuild below, which drops the old table's indexes.
-    database.exec(`
-      CREATE INDEX IF NOT EXISTS idx_certificate_records_updated_at
-        ON certificate_records(updated_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_certificate_records_valid_until
-        ON certificate_records(valid_until);
-    `);
-
-    database.exec("PRAGMA user_version = 3");
-  }
-
-  /**
-   * Databases created before the zoom range was widened carry a table-level
-   * `CHECK (photo_crop_zoom <= 3)` that would reject the new crops. SQLite
-   * cannot alter a CHECK in place, so the table is rebuilt — but only when the
-   * stored schema still shows the old bound, which keeps this a no-op for
-   * fresh and already-migrated databases.
-   */
-  private relaxPhotoZoomConstraint(database: DatabaseSync): void {
-    const schema = database.prepare(`
-      SELECT sql FROM sqlite_master
-      WHERE type = 'table' AND name = 'certificate_records'
-    `).get() as Record<string, unknown> | undefined;
-
-    if (!String(schema?.sql ?? "").includes(`<= ${MAX_CROP_ZOOM}`)) {
+    // Rebuild only the certificates table. All migration steps, old-field copies,
+    // preserved index definitions and the version marker commit atomically.
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      database.exec(`CREATE TABLE IF NOT EXISTS certificate_records (${CERTIFICATE_RECORDS_COLUMNS})`);
+      let columns = database.prepare("PRAGMA table_info(certificate_records)").all() as Record<string, unknown>[];
+      const names = new Set(columns.map((column) => String(column.name)));
+      for (const [name, definition] of [
+        ["first_name_en", "TEXT NOT NULL DEFAULT ''"],
+        ["last_name_en", "TEXT NOT NULL DEFAULT ''"],
+        ["photo_crop_rotation", "REAL NOT NULL DEFAULT 0"],
+      ]) {
+        if (!names.has(name)) {
+          database.exec(`ALTER TABLE certificate_records ADD COLUMN ${name} ${definition}`);
+        }
+      }
+      columns = database.prepare("PRAGMA table_info(certificate_records)").all() as Record<string, unknown>[];
+      const schema = database.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'certificate_records'",
+      ).get() as Record<string, unknown>;
+      const requiresRebuild = !names.has("status") ||
+        !String(schema.sql).includes(`<= ${MAX_CROP_ZOOM}`) ||
+        columns.some((column) => ["issued_at", "valid_until", "photo_file_name"].includes(String(column.name)) && column.notnull === 1);
+      if (requiresRebuild) {
+        const dependentSql = (database.prepare(
+          "SELECT sql FROM sqlite_master WHERE tbl_name = 'certificate_records' AND type IN ('index', 'trigger') AND sql IS NOT NULL",
+        ).all() as Record<string, unknown>[]).map((entry) => String(entry.sql));
+        database.exec(`CREATE TABLE certificate_records_migrated (${CERTIFICATE_RECORDS_COLUMNS})`);
+        const sourceColumns = CERTIFICATE_RECORDS_COLUMN_NAMES.replace(/status$/, names.has("status") ? "status" : "'active'");
+        database.exec(`
+          INSERT INTO certificate_records_migrated (${CERTIFICATE_RECORDS_COLUMN_NAMES})
+          SELECT ${sourceColumns} FROM certificate_records;
+          DROP TABLE certificate_records;
+          ALTER TABLE certificate_records_migrated RENAME TO certificate_records;
+        `);
+        for (const sql of dependentSql) {
+          database.exec(sql);
+        }
+      }
       database.exec(`
-        BEGIN;
-
-        CREATE TABLE certificate_records_migrated (
-          ${CERTIFICATE_RECORDS_COLUMNS}
-        );
-
-        INSERT INTO certificate_records_migrated (
-          ${CERTIFICATE_RECORDS_COLUMN_NAMES}
-        )
-        SELECT ${CERTIFICATE_RECORDS_COLUMN_NAMES}
-        FROM certificate_records;
-
-        DROP TABLE certificate_records;
-
-        ALTER TABLE certificate_records_migrated
-          RENAME TO certificate_records;
-
-        COMMIT;
+        CREATE INDEX IF NOT EXISTS idx_certificate_records_updated_at ON certificate_records(updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_certificate_records_valid_until ON certificate_records(valid_until);
       `);
+      const version = database.prepare("PRAGMA user_version").get() as Record<string, unknown>;
+      if (Number(version.user_version) < 4) {
+        database.exec("PRAGMA user_version = 4");
+      }
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
     }
   }
 
@@ -1529,6 +1588,7 @@ export class CertificateRepository {
     );
 
     return {
+      status: "active",
       id: normalizeRequiredText(
         source.id,
         "ID",
@@ -1586,9 +1646,10 @@ export class CertificateRepository {
         photo_crop_rotation,
         template_id,
         created_at,
-        updated_at
+        updated_at,
+        status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.fullName,
@@ -1605,6 +1666,7 @@ export class CertificateRepository {
       record.templateId,
       record.createdAt,
       record.updatedAt,
+      record.status,
     );
   }
 
@@ -1627,7 +1689,8 @@ export class CertificateRepository {
         photo_crop_offset_y = ?,
         photo_crop_rotation = ?,
         template_id = ?,
-        updated_at = ?
+        updated_at = ?,
+        status = ?
       WHERE id = ?
     `).run(
       record.fullName,
@@ -1643,6 +1706,7 @@ export class CertificateRepository {
       record.photoCrop.rotation,
       record.templateId,
       record.updatedAt,
+      record.status,
       record.id,
     );
   }
