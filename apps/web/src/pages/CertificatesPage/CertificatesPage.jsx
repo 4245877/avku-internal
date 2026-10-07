@@ -29,6 +29,7 @@ import CertificateRegistry from './components/CertificateRegistry.jsx';
 import DeleteCertificateDialog from './components/DeleteCertificateDialog.jsx';
 import PhotoCropper from './components/PhotoCropper.jsx';
 import styles from './CertificatesPage.module.css';
+import CertificateBackups from './components/CertificateBackups.jsx';
 
 const MAX_PRINT_SHEET_CARDS = 4;
 const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
@@ -813,6 +814,8 @@ function CertificatesPage() {
           </button>
         </div>
       </header>
+
+      <CertificateBackups />
 
       <section className={styles.statsGrid} aria-label="Статистика реєстру">
         <div className={styles.statItem}>

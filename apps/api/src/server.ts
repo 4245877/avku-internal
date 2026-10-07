@@ -29,12 +29,15 @@ import {
   sendError,
 } from "./http/responses";
 import { sanitizeError } from "./http/errors";
+import { BackupService } from "./modules/certificate-backups/service";
+import { handleCertificateBackupRequest } from "./routes/certificate-backups";
 
 async function dispatchRequest(
   request: IncomingMessage,
   response: ServerResponse,
   repositories: CertificateApiRepositories,
   authenticator: AccessAuthenticator,
+  backupService?: BackupService,
 ): Promise<void> {
   if (request.method === "OPTIONS") {
     response.writeHead(204);
@@ -53,6 +56,10 @@ async function dispatchRequest(
   // When an Access identity is present it is recorded (JIT provisioning +
   // last_seen) so the API knows who is acting.
   const identity = await authenticator.authenticate(request);
+  if (pathname === "/api/certificates/backups" || pathname.startsWith("/api/certificates/backups/")) {
+    handleCertificateBackupRequest(request, response, pathname, identity, backupService);
+    return;
+  }
   const employee = identity
     ? await repositories.employeeRepository.recordSeen(identity.email)
     : null;
@@ -127,6 +134,7 @@ export interface CertificateApiRepositories {
 export interface CertificateApiServerOptions {
   /** Overrides the env-derived Cloudflare Access authenticator (for tests). */
   authenticator?: AccessAuthenticator;
+  backupService?: BackupService;
 }
 
 export function createCertificateApiServer(
@@ -149,6 +157,8 @@ export function createCertificateApiServer(
   };
   const authenticator =
     options?.authenticator ?? createAccessAuthenticatorFromEnv();
+  const backupService = options?.backupService ?? (process.env.CERTIFICATE_BACKUP_ENABLED === "true"
+    ? new BackupService(resolvedRepositories.certificateRepository) : undefined);
 
   return http.createServer((request, response) => {
     applyCors(
@@ -161,6 +171,7 @@ export function createCertificateApiServer(
       response,
       resolvedRepositories,
       authenticator,
+      backupService,
     ).catch((error: unknown) => {
       const sanitized = sanitizeError(error);
 

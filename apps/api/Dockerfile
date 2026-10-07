@@ -27,7 +27,9 @@ COPY apps/api/package.json apps/api/pnpm-lock.yaml apps/api/pnpm-workspace.yaml 
 RUN pnpm install --frozen-lockfile --prod=false
 
 # --- Runtime ---
-FROM base AS runtime
+FROM base AS app-runtime
+ARG AVKU_RELEASE_ID=unversioned-build
+ENV AVKU_RELEASE_ID=$AVKU_RELEASE_ID
 WORKDIR /app/apps/api
 ENV NODE_ENV=production
 ENV DATA_ROOT=/data
@@ -46,8 +48,19 @@ ENV NODE_OPTIONS=--no-warnings=ExperimentalWarning
 # does not exist on a fresh volume, making the one-time migration a no-op). To
 # bootstrap-migrate an old registry.json, mount it and set that variable.
 COPY --from=deps /app/apps/api/node_modules ./node_modules
-COPY apps/api/package.json apps/api/pnpm-workspace.yaml apps/api/tsconfig.json ./
+COPY apps/api/package.json apps/api/pnpm-lock.yaml apps/api/pnpm-workspace.yaml apps/api/tsconfig.json ./
 COPY apps/api/src ./src
+COPY apps/web/src /app/recovery/web/src
+COPY apps/web/public /app/recovery/web/public
+COPY apps/web/package.json apps/web/pnpm-lock.yaml apps/web/vite.config.js apps/web/index.html /app/recovery/web/
+COPY apps/api/Dockerfile /app/recovery/deployment/api.Dockerfile
+COPY apps/web/Dockerfile /app/recovery/deployment/web.Dockerfile
+COPY infra/node/fonts.conf /app/recovery/deployment/fonts.conf
+COPY infra/nginx/app.conf infra/nginx/web.conf /app/recovery/deployment/nginx/
+COPY apps/api/docker-entrypoint.sh /app/recovery/deployment/api-entrypoint.sh
+COPY .dockerignore /app/recovery/deployment/dockerignore
+COPY infra/certificate-backup/extract.py /app/recovery/deployment/extract.py
+COPY infra/certificate-backup/extract.py /app/infra/certificate-backup/extract.py
 COPY storage/certificates/templates /app/storage/certificates/templates
 COPY apps/api/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # Make the entrypoint executable and hand the app tree to the unprivileged
@@ -66,3 +79,15 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 # npm registry to fetch a package manager), keeping start-up offline and free of
 # extra supply-chain surface. Matches the loader used by the test script.
 CMD ["node", "--import", "tsx", "src/main.ts"]
+
+# Long operations run separately, with no production data volume or Docker socket.
+FROM app-runtime AS backup-worker
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client python3 util-linux \
+  && rm -rf /var/lib/apt/lists/*
+USER node
+ENTRYPOINT ["flock", "-n", "/jobs/worker.lock"]
+CMD ["node", "--import", "tsx", "src/modules/certificate-backups/worker.ts"]
+
+# Preserve the API as the default target for existing direct Docker builds.
+FROM app-runtime AS runtime

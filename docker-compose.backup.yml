@@ -1,0 +1,51 @@
+# Production override. Secrets and mutable state live outside the repository.
+services:
+  api:
+    env_file:
+      - /home/hpelitdesk/.config/avku-certificate-backup/runtime.env
+    volumes:
+      - /home/hpelitdesk/.local/share/avku-certificate-backups/jobs:/jobs
+      - /home/hpelitdesk/.local/share/avku-certificate-backups/staging:/staging
+  backup-worker:
+    image: avku-internal-backup-worker:latest
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: backup-worker
+      args:
+        AVKU_RELEASE_ID: ${AVKU_RELEASE_ID:-unversioned-build}
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('fs');process.exit(fs.readdirSync('/proc').some(p=>{try{return fs.readFileSync('/proc/'+p+'/cmdline','utf8').split('\\0').includes('src/modules/certificate-backups/worker.ts')}catch{return false}})?0:1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    env_file:
+      - /home/hpelitdesk/.config/avku-certificate-backup/runtime.env
+    environment:
+      CERTIFICATE_BACKUP_SSH_KEY: /run/secrets/ssh_key
+      CERTIFICATE_BACKUP_KNOWN_HOSTS: /run/secrets/known_hosts
+    volumes:
+      - /home/hpelitdesk/.local/share/avku-certificate-backups/jobs:/jobs
+      - /home/hpelitdesk/.local/share/avku-certificate-backups/staging:/staging
+      - /home/hpelitdesk/.config/avku-certificate-backup/id_ed25519:/run/secrets/ssh_key:ro
+      - /home/hpelitdesk/.config/avku-certificate-backup/known_hosts:/run/secrets/known_hosts:ro
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+    depends_on:
+      api: {condition: service_healthy}
+    networks: [avku_backup_transport]
+
+networks:
+  avku_backup_transport:
+    driver: bridge

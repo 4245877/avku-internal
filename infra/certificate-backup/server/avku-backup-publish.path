@@ -1,0 +1,11 @@
+[Unit]
+Description=Finish AVKU backups only when a manually uploaded ready marker arrives
+After=zfs-mount.service
+RequiresMountsFor=/srv/backup/avku-internal
+
+[Path]
+PathExistsGlob=/srv/backup/avku-internal/sftp/incoming/*.ready
+Unit=avku-backup-publish.service
+
+[Install]
+WantedBy=multi-user.target

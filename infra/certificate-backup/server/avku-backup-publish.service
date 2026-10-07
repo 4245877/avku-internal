@@ -1,0 +1,18 @@
+[Unit]
+Description=Publish manually uploaded AVKU certificate backup candidates
+After=zfs-mount.service
+RequiresMountsFor=/srv/backup/avku-internal
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -B /usr/local/lib/avku-backup/publisher.py
+User=root
+Group=avku-backup
+UMask=0027
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/backup/avku-internal
+RestrictAddressFamilies=AF_UNIX
+TimeoutStartSec=1800

@@ -1,0 +1,8 @@
+# Required for a verified backup deployment. Floating latest tags are never used.
+services:
+  api:
+    image: avku-internal-api:${AVKU_BACKUP_RELEASE:?Set the verified backup release}
+  web:
+    image: avku-internal-web:${AVKU_BACKUP_RELEASE:?Set the verified backup release}
+  backup-worker:
+    image: avku-internal-backup-worker:${AVKU_BACKUP_RELEASE:?Set the verified backup release}

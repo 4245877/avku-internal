@@ -4,6 +4,9 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      target: runtime
+      args:
+        AVKU_RELEASE_ID: ${AVKU_RELEASE_ID:-unversioned-build}
     init: true
     security_opt:
       - no-new-privileges:true

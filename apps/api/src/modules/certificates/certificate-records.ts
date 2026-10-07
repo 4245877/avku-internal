@@ -18,6 +18,7 @@ import {
 } from "../../db/sqlite";
 
 import { renderCertificate } from "./certificate-renderer";
+import { captureDatabaseAndFiles, type CaptureInfo } from "../certificate-backups/capture";
 import {
   buildPdfFromImages,
   createPdfFromPng,
@@ -750,6 +751,41 @@ export class CertificateRepository {
 
   private database: DatabaseSync | null = null;
 
+  // Includes the complete mutation lifecycle: SQL, photo rename, and old-file cleanup.
+  // A capture queues behind mutations and holds this same gate until every referenced
+  // photo and template has been copied. Packaging never holds this gate.
+  private captureTail: Promise<unknown> = Promise.resolve();
+
+  private withCaptureGate<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.captureTail.then(operation, operation);
+    this.captureTail = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  captureBackup(target: string): Promise<CaptureInfo> {
+    return this.withCaptureGate(async () => {
+      if (this.singleTemplateDirectory) throw new Error("BACKUP_REQUIRES_TEMPLATE_CATALOGUE");
+      return captureDatabaseAndFiles(await this.getDatabase(), this.photosDirectory, this.templatesDirectory, target);
+    });
+  }
+
+  create(payload: CertificatePayload): Promise<CertificateRecordResponse> {
+    return this.withCaptureGate(() => this.createWithoutCaptureGate(payload));
+  }
+  update(id: string, payload: CertificatePayload): Promise<CertificateRecordResponse> {
+    return this.withCaptureGate(() => this.updateWithoutCaptureGate(id, payload));
+  }
+  activate(id: string): Promise<CertificateRecordResponse> {
+    return this.withCaptureGate(() => this.activateWithoutCaptureGate(id));
+  }
+  renew(id: string): Promise<CertificateRecordResponse> {
+    return this.withCaptureGate(() => this.renewWithoutCaptureGate(id));
+  }
+  remove(id: string): Promise<void> {
+    return this.withCaptureGate(() => this.removeWithoutCaptureGate(id));
+  }
+
+
   constructor(options: CertificateRepositoryOptions) {
     this.databasePath = path.join(
       options.storageRoot,
@@ -943,7 +979,7 @@ export class CertificateRepository {
     );
   }
 
-  async create(
+  private async createWithoutCaptureGate(
     payload: CertificatePayload,
   ): Promise<CertificateRecordResponse> {
     const now = new Date().toISOString();
@@ -986,7 +1022,7 @@ export class CertificateRepository {
     return toCertificateResponse(record);
   }
 
-  async update(
+  private async updateWithoutCaptureGate(
     id: string,
     payload: CertificatePayload,
   ): Promise<CertificateRecordResponse> {
@@ -1064,7 +1100,7 @@ export class CertificateRepository {
     return toCertificateResponse(updatedRecord);
   }
 
-  async activate(id: string): Promise<CertificateRecordResponse> {
+  private async activateWithoutCaptureGate(id: string): Promise<CertificateRecordResponse> {
     const database = await this.getDatabase();
     const record = await runInTransaction(database, async () => {
       const existing = this.findRecordInDatabase(database, id);
@@ -1094,7 +1130,7 @@ export class CertificateRepository {
     return toCertificateResponse(record);
   }
 
-  async renew(id: string): Promise<CertificateRecordResponse> {
+  private async renewWithoutCaptureGate(id: string): Promise<CertificateRecordResponse> {
     const database = await this.getDatabase();
     const updatedRecord = await runInTransaction(
       database,
@@ -1122,7 +1158,7 @@ export class CertificateRepository {
     return toCertificateResponse(updatedRecord);
   }
 
-  async remove(id: string): Promise<void> {
+  private async removeWithoutCaptureGate(id: string): Promise<void> {
     const database = await this.getDatabase();
     const removedRecord = await runInTransaction(
       database,
