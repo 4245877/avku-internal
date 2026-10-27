@@ -1,43 +1,55 @@
-# Build-context excludes. The repository root is the Docker build context for
-# both infra/node/Dockerfile and apps/api/Dockerfile (see docker-compose*.yml).
-# Nothing here is needed inside an image: the API Dockerfile only copies
-# apps/api/{src,package.json,pnpm-*,tsconfig.json} and storage/certificates/templates.
+# Explicitly allow only versioned build resources. Runtime data, private imports,
+# credentials, Git history and local tools never enter the build context.
+**
+!apps/
+apps/*
+!apps/api/
+apps/api/*
+!apps/api/Dockerfile
+!apps/api/docker-entrypoint.sh
+!apps/api/package.json
+!apps/api/pnpm-lock.yaml
+!apps/api/pnpm-workspace.yaml
+!apps/api/tsconfig.json
+!apps/api/src/
+!apps/api/src/**
+!apps/web/
+apps/web/*
+!apps/web/Dockerfile
+!apps/web/package.json
+!apps/web/pnpm-lock.yaml
+!apps/web/vite.config.js
+!apps/web/index.html
+!apps/web/src/
+!apps/web/src/**
+!apps/web/public/
+!apps/web/public/**
+!infra/
+infra/*
+!infra/node/
+infra/node/*
+!infra/node/Dockerfile
+!infra/node/fonts.conf
+!infra/nginx/
+infra/nginx/*
+!infra/nginx/*.conf
+!infra/certificate-backup/
+infra/certificate-backup/*
+!infra/certificate-backup/extract.py
+!storage/
+storage/*
+!storage/certificates/
+storage/certificates/*
+!storage/certificates/templates/
+!storage/certificates/templates/**
+!.dockerignore
 
-# Dependencies are installed inside the image, never copied in.
+# Defense in depth even under an explicitly included source directory.
 **/node_modules
-
-# Version control & local tooling.
-.git
-.github
-.agents
-.tools
-
-# Design sources — not used at runtime (see design/certificates/README.md).
-design
-
-# Frontend build artifacts.
-**/dist
-**/.vite
-apps/web/.vite-cert-check
-apps/web/*.log
-apps/web/certificates-screenshot.png
-
-# Personal / runtime certificate data must never be baked into an image.
-storage/certificates/*.sqlite
-storage/certificates/*.sqlite-*
-storage/certificates/photos
-storage/certificates/generated
-storage/warehouse/*.sqlite
-storage/warehouse/*.sqlite-*
-storage/logistics/*.sqlite
-storage/logistics/*.sqlite-*
-storage/backups
-storage/certificates/import-reports
-/*.docx
-runtime
-
-# Local environment files.
-.env
-.env.*
-
-.pnpm-store
+**/.git
+**/.env
+**/.env.*
+**/*.sqlite*
+**/*.docx
+**/__pycache__
+**/*.pyc

@@ -69,7 +69,13 @@ done
 [ -n "$(find "$STAGING" -type f -print -quit)" ] ||
   fail "the backup produced no files — decryption may have failed"
 
-# 2. Verify every database before anything is put in place.
+# 2. Validate every compressed archive before anything is put in place. A bad
+# photo/attachment archive must not be discovered after databases were replaced.
+find "$STAGING" -type f -name '*.tar.gz' -print | while IFS= read -r archive; do
+  tar -tzf "$archive" >/dev/null || fail "invalid archive: $archive"
+done
+
+# 3. Verify every database before anything is put in place.
 find "$STAGING" -type f -name '*.sqlite' -print | while IFS= read -r database; do
   result=$(VERIFY_PATH="$database" node -e '
     const { DatabaseSync } = require("node:sqlite");
@@ -85,7 +91,7 @@ find "$STAGING" -type f -name '*.sqlite' -print | while IFS= read -r database; d
   echo "Verified $(basename "$database")"
 done
 
-# 3. Put it in place.
+# 4. Put it in place.
 mkdir -p "$RESTORE_ROOT" || fail "could not create $RESTORE_ROOT"
 
 find "$STAGING" -type f -print | while IFS= read -r staged; do

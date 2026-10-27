@@ -1,0 +1,9 @@
+# This diagnostic image needs only the real, non-secret SSH policy.
+**
+!infra/
+infra/*
+!infra/certificate-backup/
+infra/certificate-backup/*
+!infra/certificate-backup/server/
+infra/certificate-backup/server/*
+!infra/certificate-backup/server/70-avku-backup.conf

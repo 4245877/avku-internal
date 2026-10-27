@@ -1,0 +1,18 @@
+# Verified source-built release. Use after prod.yml and backup.yml.
+# Update all image tags/build arguments together after isolated validation.
+services:
+  api:
+    image: avku-internal-api:audit-20261027
+    pull_policy: never
+    build:
+      args:
+        AVKU_RELEASE_ID: audit-20261027
+  web:
+    image: avku-internal-web:audit-20261027
+    pull_policy: never
+  backup-worker:
+    image: avku-internal-backup-worker:audit-20261027
+    pull_policy: never
+    build:
+      args:
+        AVKU_RELEASE_ID: audit-20261027

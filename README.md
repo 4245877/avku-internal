@@ -1,666 +1,165 @@
-docker compose -f docker-compose.prod.yml down
-docker compose -f docker-compose.prod.yml up -d --build
+# AVKU Internal
 
+Внутреннее приложение: удостоверения, склад помощи, логистика, работа по домам
+«Вибори», панель мониторинга. API — Node.js 22/TypeScript с `node:sqlite`,
+интерфейс — React/Vite. SMM пока хранит данные в localStorage браузера.
 
+## Структура
 
-# avku-internal
+- `apps/api/src/`: HTTP API, репозитории и встроенные транзакционные миграции SQLite.
+- `apps/web/src/`: интерфейс, API-клиенты и тесты; `public/data/elections` — OSM snapshot.
+- `storage/certificates/templates/`: версионируемые UK/EN PNG/JSON-шаблоны.
+- `design/`: исходники печатного дизайна; в Docker не копируются.
+- `infra/nginx/`: внешний proxy и статический web server.
+- `infra/systemd/`: подготовленное определение запуска/остановки с Docker.
+- `infra/scripts/`: полное резервирование/восстановление данных, опциональное шифрование.
+- `infra/certificate-backup/`: ручные копии удостоверений, SFTP receiver и проверки восстановления.
+- `scripts/`: обновление OSM snapshot и безопасный импорт телефонов из DOCX.
+- `docs/`: [эксплуатация](docs/operations.md), [конфигурация](docs/configuration.md),
+  [доступ](docs/cloudflare-access-setup.md), [«Вибори»](docs/elections.md),
+  [диагностика фотографий](docs/certificates-photo-switching-investigation.md).
 
-Internal AVKU monorepo for operational modules: certificates, warehouse aid and logistics transfers. The API is a Node.js/TypeScript HTTP server without Express; the frontend is a React/Vite application.
+## Локальная разработка
 
-## Project Structure
+Нужны Node.js **22.23.1** и pnpm **11.9.0**. На сервере системный Node 20;
+для проверок используйте Node 22 в Docker. Два приложения имеют независимые
+lockfiles; корневого pnpm workspace нет.
 
-```text
-apps/
-  api/                    Node.js 22 + TypeScript API
-    src/
-      db/                 shared SQLite helpers
-      http/               request/response helpers
-      modules/            certificates, warehouse, logistics domain code
-      routes/             API route handlers
-      __tests__/          node:test checks
-  web/                    React + Vite frontend
-    src/
-      features/           API clients and feature helpers
-      layouts/            shared application layout
-      pages/              dashboard and module pages
-infra/
-  nginx/                  reverse proxy config for Docker
-  node/                   shared Node image with fonts for rendering
-  scripts/backup-db.sh    runtime data backup script
-storage/
-  certificates/
-    templates/            versioned certificate templates
-design/                   design sources for certificate templates
-docker-compose.yml        local Docker composition
-docker-compose.prod.yml   production-oriented Docker composition
+```bash
+corepack enable
+corepack prepare pnpm@11.9.0 --activate
+pnpm --dir apps/api install --frozen-lockfile
+pnpm --dir apps/web install --frozen-lockfile
+pnpm --dir apps/api start
+# В другом терминале:
+pnpm --dir apps/web dev
 ```
 
-## Certificates: drafts and activation
+API: `http://localhost:3001/api/health`; web: `http://localhost:5173`.
+Для локального Docker: `docker compose up --build`.
+Development использует отдельный named volume `app-data`, не production bind mount.
+Локальный proxy учитывает dev-порт web 5173.
 
-Certificate records have a lifecycle state, `draft` or `active`. Existing records
-remain finalized (`active`); this state does not override their expiry dates.
-A draft requires a holder name and a unique certificate number. Its photo,
-issue date and expiry date may be absent. Supplied dates and photos still pass
-normal validation. Unknown dates/photos are stored as SQL `NULL`, never invented.
+## Production
 
-The certificate editor creates drafts with empty dates, displays **Чернетка**, and
-allows **Зберегти чернетку**. Open a draft, add its real photograph and dates,
-save it, then use **Оформити посвідчення**. Saving alone keeps it a draft.
-An incomplete draft cannot be finalized. Drafts cannot be exported, renewed,
-printed, or included in expiry-based active counts.
+Единственная стандартная композиция для production включает API, статический
+web, nginx и изолированный backup worker:
 
-API clients create a draft with `POST /api/certificates` and `status: "draft"`.
-Omitting status retains the legacy strict finalized-record creation contract.
-`PUT /api/certificates/:id` preserves the record's lifecycle state;
-`PATCH /api/certificates/:id/activate` explicitly finalizes a complete draft.
-Activation validates required dates, date order, template and the stored real
-photo. Active records keep all existing required-field checks.
+```bash
+docker compose -p avku-internal \
+  -f docker-compose.prod.yml -f docker-compose.backup.yml \
+  -f docker-compose.release.yml config --quiet
+```
 
-On first use, the certificate repository transactionally rebuilds only its table
-when needed, preserving every legacy field, UUID, timestamp, photo filename and
-index, and assigns the formerly finalized records `active`. It records SQLite
-`user_version=4`. The migration is idempotent and rolls back on failure. Uploaded
-photo files are not rewritten. Take a SQLite backup before deploying this change.
+`docker-compose.release.yml` закрепляет проверенные версии всех трёх образов.
+Подробный порядок сборки, проверки, обновления и отката —
+[docs/operations.md](docs/operations.md). Перед обновлением создайте проверенную
+копию данных. Cloudflare Tunnel работает отдельным Compose-проектом.
 
-### Internal contact phone
+Production данные находятся в **`/var/lib/avku-internal/data`**, в API это `/data`:
+`certificates`, `warehouse`, `logistics`, `elections`, `employees`.
+Они сохраняются при пересоздании контейнеров. Репозиторный `storage/` не является
+рабочим production-хранилищем. Старые локальные базы/фото и backups сохранены;
+их нельзя удалять как build cache.
 
-`certificate_records.phone_number` is nullable SQLite `TEXT`, added idempotently
-by checking table columns. The base schema version stays at v4 for compatibility
-with the existing backup/restore protocol. The internal
-certificate management API uses `phoneNumber`, accepting a string or `null`.
-Blank strings become SQL `NULL`; omitting the property on update preserves the
-existing phone for older clients. JSON and multipart/photo uploads support it.
-The editor allows adding, changing and clearing the optional phone. Multiple
-source contacts are kept in this single string separated by `; `.
+API после подготовки прав запускается через `gosu node`. Web — статический nginx
+без репозитория, секретов и Node.js. Worker не имеет production `/data` или Docker
+socket; jobs/staging и SSH credentials находятся вне репозитория.
 
-Phone numbers are internal contact information. The management API uses the
-existing local-network/Cloudflare Access boundary. No public phone endpoint is
-added. The card preview, render input, PNG/PDF and A4 sheets contain only their
-existing explicit fields and never include phones. Recovery database backups
-remain internal and include the new column.
+## Удостоверения и телефоны
 
-Import from the issued-certificates DOCX without additional dependencies:
+Статус записи — `draft` или `active`, отдельно от срока действия. Черновику
+достаточно ФИО и уникального номера; даты и фото могут быть SQL `NULL`.
+Сохранение не активирует черновик: полную запись оформляют отдельной операцией
+`PATCH /api/certificates/:id/activate`. Черновики нельзя печатать, экспортировать
+или продлевать. Старые записи остаются `active`.
+
+Миграции находятся в репозиториях TypeScript и выполняются при открытии БД;
+удостоверения используют `PRAGMA user_version=4`. Совместимое необязательное
+`phone_number TEXT NULL` добавляется идемпотентно по наличию столбца без изменения
+базовой версии протокола резервирования. API-свойство — `phoneNumber`.
+JSON и multipart поддерживают добавление, изменение и очистку; пустая строка
+и `null` сохраняются как SQL `NULL`, пропущенное поле сохраняет прежний телефон.
+Телефоны доступны только во внутреннем редакторе; PNG/PDF/duplex A4 их не содержат.
+
+Импортёр не требует дополнительных Python-пакетов:
 
 ```bash
 python3 scripts/import-certificate-phones.py \
   --document 'список виданих посвідчень (2).docx' \
   --database /var/lib/avku-internal/data/certificates/certificates.sqlite
-# Review the private JSON report, then repeat with --apply to write.
-python3 -m unittest discover -s scripts -p 'test_import_certificate_phones.py'
 ```
 
-Dry run opens SQLite read-only. Apply first creates and validates an online
-backup (including committed WAL pages) in `storage/backups/certificate-phones/`,
-then adds the column and imports in one transaction. Stop certificate writes
-while applying to make the backup the exact pre-import state. The importer
-requires the existing draft schema (v4+), checks number and full name (or a
-unique surname/given-name pair if a patronymic is missing), and refuses duplicate
-source numbers, conflicting names, malformed/incomplete phones and overwriting
-existing phones. It never assigns an old certificate's phone to another number
-based on name alone. Every old field, including timestamps, is compared before
-commit. Detailed reports in `storage/certificates/import-reports/` are private,
-git-ignored and must not be published.
+Это read-only dry run. Для применения после проверки приватного отчёта нужен
+`--apply`; остановите записи на время импорта. Скрипт сначала создаёт и проверяет
+online backup, затем в одной транзакции добавляет столбец/телефоны и сравнивает
+все старые поля, включая timestamps. Он отказывается от неоднозначных ФИО/номеров,
+неполных телефонов и перезаписи существующих значений. Несколько контактов
+сохраняются через `; `. DOCX и отчёты приватны, в Git/Docker не включаются.
 
-## Requirements
+Контроль 27 октября 2026: **169 удостоверений, 88 телефонов, 81 NULL**.
+30 строк исходного документа требуют ручной сверки; автоматические исправления
+не выполнялись. Приватный отчёт:
+`storage/certificates/import-reports/REPORT-2026-10-27.md`.
 
-- Node.js 22.
-- Corepack/pnpm (`corepack enable`).
-- Docker and Docker Compose, if running containers.
-- `sqlite3` is optional for backups. If it is unavailable, the backup script copies SQLite files together with WAL/SHM files.
+## Резервирование и восстановление
 
-## Local Setup
-
-Install dependencies separately because the repository currently has independent lockfiles under `apps/api` and `apps/web`.
+Полный backup пяти БД, фото, generated cache и территории:
 
 ```bash
-cd apps/api
-corepack enable
-pnpm install --frozen-lockfile
-
-cd ../web
-corepack enable
-pnpm install --frozen-lockfile
+DATA_ROOT=/var/lib/avku-internal/data \
+BACKUP_ROOT=/var/backups/avku-internal ./infra/scripts/backup-db.sh
 ```
 
-## Environment Variables
-
-API variables:
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `PORT` | `3001` | HTTP port. |
-| `API_PORT` | unset | Legacy fallback for `PORT`. |
-| `DATA_ROOT` | `<repo>/storage` locally, required in production | Root for runtime data. Production must set this explicitly; Docker uses `/data`. |
-| `CERTIFICATES_STORAGE_ROOT` | `$DATA_ROOT/certificates` | Certificate SQLite DB, photos and generated files. |
-| `CERTIFICATES_TEMPLATES_DIRECTORY` | `<repo>/storage/certificates/templates` | Multi-template certificate catalog. |
-| `CERTIFICATES_DEFAULT_TEMPLATE_ID` | `volunteer-card-v1-uk` | Default certificate template. |
-| `CERTIFICATES_LEGACY_REGISTRY_PATH` | `$CERTIFICATES_STORAGE_ROOT/registry.json` | Optional legacy JSON registry for one-time migration into SQLite. |
-| `CERTIFICATES_LEGACY_SINGLE_TEMPLATE_DIR` | unset | Legacy single-template override. When set, only the default template is served. |
-| `CERTIFICATES_TEMPLATE_DIRECTORY` | unset | Deprecated alias for `CERTIFICATES_LEGACY_SINGLE_TEMPLATE_DIR`. |
-| `WAREHOUSE_STORAGE_ROOT` | `$DATA_ROOT/warehouse` | Warehouse SQLite DB location. |
-| `LOGISTICS_STORAGE_ROOT` | `$DATA_ROOT/logistics` | Logistics SQLite DB location. |
-| `NODE_OPTIONS` | unset | Docker sets `--no-warnings=ExperimentalWarning` because the API uses `node:sqlite`. |
-
-Frontend variables:
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `VITE_API_URL` | `/api` | Shared API base URL used by frontend API clients. |
-| `VITE_CERTIFICATES_API_URL` | `VITE_API_URL` or `/api` | Certificates API base URL override. |
-| `VITE_WAREHOUSE_API_URL` | `VITE_API_URL` or `/api` | Warehouse API base URL override. |
-| `VITE_LOGISTICS_API_URL` | `VITE_API_URL` or `/api` | Logistics API base URL override. |
-| `VITE_API_PROXY_TARGET` | `http://localhost:3001` | Vite dev-server proxy target for `/api`; Docker sets it to `http://api:3001`. |
-
-Elections map variables (all optional — the map works with no configuration):
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `VITE_ELECTIONS_SOURCE` | `backend` | Where houses come from: `backend` (the API — the source of truth), `snapshot` (the shipped OSM dataset, for working on the map with no API running), or `overpass` (a live OpenStreetMap query). |
-| `VITE_ELECTIONS_API_URL` | `/api/elections` | Base URL of the elections API. The default is correct for the normal same-origin deployment (Vite proxy in dev, nginx in prod); it is also where the working-area boundary is read from and saved to. |
-| `ELECTIONS_STORAGE_ROOT` | `<DATA_ROOT>/elections` | API-side directory holding the campaign database (`elections.sqlite`), the saved working-area boundary and uploaded attachments. |
-| `ELECTIONS_ADMIN_EMAILS` | unset | Comma-separated bootstrap admins for the elections module. Needed at least once: on a fresh database nobody has a role, so nobody could grant one. |
-| `ELECTIONS_DEV_AUTH` / `ELECTIONS_DEV_ROLE` | unset | Local development only. Both must be set to grant a role without an Access identity; ignored when `NODE_ENV=production`, logged at startup, and shown as a red badge in the UI. |
-| `VITE_MAP_MODE` | `streets` | Base layer selected on load: `streets` («Карта») or `satellite` («Супутник»). A mode picked in the UI is remembered per browser and wins over this. |
-| `VITE_MAP_PROVIDER` | auto | Forces the tile provider for **both** modes: `osm`, `maptiler` or `mapbox`. Unset means: a configured commercial token if there is one, otherwise the key-free set. |
-| `VITE_MAPTILER_KEY` | unset | MapTiler key. Moves both modes to MapTiler (Streets v2 + Satellite Hybrid). |
-| `VITE_MAPBOX_TOKEN` | unset | Mapbox token. Moves both modes to Mapbox (Streets v12 + Satellite Streets v12). |
-
-Tiles are third-party images loaded by the browser, so a host that is not in the
-`img-src` list of the Content-Security-Policy in `infra/nginx/app.conf` renders
-nothing at all — no error, just a blank base layer. Keep that list in step with
-`apps/web/src/features/elections/basemaps.js` when changing providers.
-
-## Run API Locally
+Нужен `sqlite3` либо Node 22 с `node:sqlite`; простой copy live SQLite недопустим.
+Каждая копия самодостаточна, WAL включён, `integrity_check` обязателен.
+Шифрование AES-256-GCM включается через `BACKUP_ENCRYPTION_KEY_FILE`;
+ключ хранится отдельно от данных и копий с режимом 0600.
 
 ```bash
-cd apps/api
-pnpm start
+# Сначала проверить восстановление в НОВЫЙ отдельный каталог:
+BACKUP_DIR=/var/backups/avku-internal/<UTC-stamp> \
+RESTORE_ROOT=/tmp/avku-restore-trial ./infra/scripts/restore-db.sh
 ```
 
-The API listens on `http://localhost:3001` by default. Health check:
+Для зашифрованной копии передайте тот же `BACKUP_ENCRYPTION_KEY_FILE`.
+Production restore требует остановки writers и сохранения текущего состояния;
+старые WAL/SHM не переносятся. См. [эксплуатацию](docs/operations.md).
+
+Кнопка на главной странице создаёт отдельный проверяемый архив **удостоверений**
+со снимком БД, referenced photos, templates/fonts и исходниками для восстановления.
+SFTP-приёмник сохраняет два slot; расписания нет. Это другой формат: используйте
+[специализированную инструкцию](infra/certificate-backup/README.md), а не `restore-db.sh`.
+
+## Проверки
 
 ```bash
-curl http://localhost:3001/api/health
+./infra/scripts/check-api.sh
+pnpm --dir apps/web test
+pnpm --dir apps/web build
+python3 -B -m unittest discover -s scripts -p 'test_import_certificate_phones.py'
+python3 -B -m unittest discover -s infra/certificate-backup -p 'test_extract.py'
+python3 -B -m unittest discover -s infra/certificate-backup/server -p 'test_publisher.py'
 ```
 
-Storage and template validation without starting the server:
-
-```bash
-cd apps/api
-pnpm check
-```
-
-## Run Web Locally
-
-Start the API first, then:
-
-```bash
-cd apps/web
-pnpm run dev
-```
-
-The Vite app is available at `http://localhost:5173`. In local mode `/api` is proxied to `VITE_API_PROXY_TARGET` or `http://localhost:3001`.
-
-Production build:
-
-```bash
-cd apps/web
-pnpm run build
-```
-
-There are no frontend `typecheck` or `lint` scripts at the moment, so CI only installs dependencies and runs the Vite build for the web app.
-
-## Run With Docker
-
-Local Docker composition:
-
-```bash
-docker compose up --build
-```
-
-Ports:
-
-- API: `http://localhost:3001`
-- Web dev server: `http://localhost:5173`
-- Nginx reverse proxy: `http://localhost:8080`
-
-Production-oriented composition:
-
-```bash
-docker compose -f docker-compose.prod.yml up --build -d
-```
-
-The production compose exposes Nginx on `AVKU_HTTP_PORT` (`18080` by default in `.env`). API runtime data is mounted from the host path `/var/lib/avku-internal/data` to `/data`; the API environment sets `DATA_ROOT=/data`.
-
-## Runtime Data
-
-Default local runtime data lives under `storage/`:
-
-```text
-storage/certificates/certificates.sqlite
-storage/certificates/photos/
-storage/certificates/generated/
-storage/warehouse/warehouse.sqlite
-storage/logistics/logistics.sqlite
-```
-
-SQLite WAL/SHM sidecar files may appear next to each database. Runtime databases, uploaded photos, generated certificate files and backups are ignored by git. Certificate templates under `storage/certificates/templates/` are versioned and are required by the API.
-
-Production runtime data must not live inside the repository. The host layout is:
-
-```text
-/var/lib/avku-internal/data/
-/var/lib/avku-internal/data/certificates/
-/var/lib/avku-internal/data/warehouse/
-/var/lib/avku-internal/data/logistics/
-/var/backups/avku-internal/
-```
-
-Inside the API container this same data root is `/data`. Certificate templates are not runtime data; they stay versioned under `storage/certificates/templates/` and are baked into the API image.
-
-Create production directories before starting the stack. The API image currently has no explicit `USER`, so standard Docker runs it as UID/GID `0:0`; if a future image sets `USER`, replace `0:0` with the value returned by the inspect command below.
-
-```bash
-docker image inspect avku-internal-api:latest --format '{{.Config.User}}'
-
-sudo install -d -o 0 -g 0 -m 0750 /var/lib/avku-internal/data
-sudo install -d -o 0 -g 0 -m 0750 /var/lib/avku-internal/data/certificates
-sudo install -d -o 0 -g 0 -m 0750 /var/lib/avku-internal/data/warehouse
-sudo install -d -o 0 -g 0 -m 0750 /var/lib/avku-internal/data/logistics
-sudo install -d -o 0 -g 0 -m 0700 /var/backups/avku-internal
-```
-
-Before migrating existing SQLite files, stop the API or use `sqlite3 .backup`. If copying files directly, copy the main database and any `-wal` and `-shm` files together. Do not delete the old `runtime/data` or `storage` directories until the new stack has started, health checks pass, records/photos/PNG/PDF export work, and data survives a container recreate.
-
-## Elections Map Data
-
-The "Вибори" map is backed by real OpenStreetMap data, not by generated
-geometry. Every building inside the working area is overlaid as its own
-interactive polygon carrying its OSM address, on top of one of two base layers:
-
-| Mode | Base | What it shows |
-| --- | --- | --- |
-| «Карта» | OpenStreetMap raster | Roads, street names, building outlines, house numbers from z18. |
-| «Супутник» | Esri World Imagery + CARTO Voyager labels | Orthophoto (real pixels to z19 over Kyiv, stretched beyond) with roads, street names and house numbers printed over it — a hybrid, not a bare photo. |
-
-Switching modes replaces the tile layers and nothing else: the zoom, the
-position, the selected house, the traced boundary and any open editor survive
-untouched, and the chosen mode is restored on the next visit.
-
-Licensing, in short: OpenStreetMap tiles are used under the [OSMF tile usage
-policy](https://operations.osmfoundation.org/policies/tiles/) (attribution, no
-bulk downloading, a real `Referer`); Esri World Imagery is a public ArcGIS
-Online service under the Esri Master License Agreement (attribution required,
-tile export for offline use is not); CARTO basemaps are free for non-commercial
-use with attribution. All three are keyless and rate-limited by fair use, which
-is why a single tenant with a real quota — `VITE_MAPTILER_KEY`, 100k tile
-requests/month on the free plan — is the recommended setup for sustained
-fieldwork. Google Maps tiles are deliberately not an option: their terms forbid
-loading them into a third-party renderer such as Leaflet.
-
-Campaign address: **вулиця Зодчих, 58А, Київ, 03170** (`50.4307636,
-30.3640481` — the OSM position of the building itself).
-
-### Working area boundary
-
-The territory is an arbitrary GeoJSON polygon in one file:
-
-```
-apps/web/src/features/elections/workspaceArea.geo.json
-```
-
-That file is the only definition of the district. The map fits its initial zoom
-to the polygon, dims and disables everything outside it, and a building is shown
-and clickable only when its footprint is inside the polygon or crosses its
-border. Replacing the file moves the whole district — no other change needed.
-
-**The file currently shipped is a placeholder**: an exact 3 km circle around the
-campaign address, i.e. the territory the module covered before it moved to
-polygons. Replace it with a boundary traced over the real map:
-
-1. Press **Редагувати межу** in the page header (the mode is also reachable
-   directly at `/elections?areaEdit=1`, which is what the button puts in the
-   address bar).
-2. Click along the border to drop vertices. Drag a filled handle to move a
-   vertex, drag a hollow midpoint handle to insert one between two neighbours,
-   right-click a vertex to delete it. `Ctrl+Z` undoes, `Backspace` drops the
-   last point. Panning and zooming are unrestricted in this mode, and the
-   satellite base layer is available for tracing over imagery.
-3. Press **Зберегти межу**. The boundary takes effect immediately — the map
-   re-fits to it, the dimming mask follows it and the dataset is re-cut to it —
-   and is written to the API at `PUT /api/elections/area`, which stores it under
-   `<DATA_ROOT>/elections/workspace-area.geo.json`. That is the permanent copy:
-   every browser reads it on load, and `scripts/fetch-osm-buildings.mjs` reads
-   it to decide what to download. `localStorage` (`avku-elections-area-v1`) is
-   only a cache, so the first paint opens on the right territory and the page
-   keeps working when the API is down. The confirmation banner says which of the
-   two actually happened.
-4. **Експортувати GeoJSON** is a separate action and saves nothing. It hands
-   back the same document as a file, for committing over
-   `apps/web/src/features/elections/workspaceArea.geo.json` so a fresh checkout
-   ships with it.
-
-An unfinished outline survives a reload on its own — it is kept in
-`localStorage` under `avku-elections-area-draft-v1` until it is saved. A saved
-boundary can always be taken back: reopen the editor and press **Початкова
-межа**, then **Зберегти межу**, which deletes the stored boundary
-(`DELETE /api/elections/area`) and returns the district to the file in the
-repository.
-
-The polygon is validated on both sides before it is stored: closed rings, at
-least three points, coordinates in `[longitude, latitude]` order and in range, a
-non-zero enclosed area, and no self-intersection (a figure-of-eight has no
-unambiguous inside, so the dimming mask and the house filter would disagree
-about which half is the district).
-
-Re-run the dataset script after moving or enlarging the boundary — see below.
-The map itself will say when that is needed: if the local snapshot does not
-reach the new territory, a banner reports it and offers a one-click live
-download from OpenStreetMap for the session.
-
-### Buildings dataset
-
-The dataset is a versioned snapshot at
-`apps/web/public/data/elections/houses.json`, built by querying the Overpass
-API. Regenerate it whenever the district should pick up newer OSM edits:
-
-```bash
-node scripts/fetch-osm-buildings.mjs
-# or, from apps/web:  pnpm run data:houses
-```
-
-The script downloads the **bounding box of whichever boundary is in force**,
-plus a 250 m margin — not a fixed circle around the campaign address. It resolves
-that boundary in order: `--area <file>`, then the API (the boundary saved from
-**Редагувати межу**, which is what users are actually looking at), then the
-shipped `workspaceArea.geo.json`. That order is what makes a re-traced district
-download its own ground rather than the old one's.
-
-Useful flags:
-
-```bash
-node scripts/fetch-osm-buildings.mjs --area ~/Downloads/workspaceArea.geo.json
-node scripts/fetch-osm-buildings.mjs --margin 400            # default 250 m of slack
-node scripts/fetch-osm-buildings.mjs --api http://localhost:3001/api
-node scripts/fetch-osm-buildings.mjs --no-server             # ignore the saved boundary
-node scripts/fetch-osm-buildings.mjs --out apps/web/public/data/elections/houses.json
-node scripts/fetch-osm-buildings.mjs --include-unaddressed   # also keep buildings with no addr:housenumber
-```
-
-The snapshot keeps the whole download and records the box it covers under
-`coverage.box`; the polygon is applied when the app loads it, so re-tracing the
-border inside the covered box does not require re-downloading OSM — and moving
-it outside that box is detected and reported instead of showing an empty map.
-
-The script walks several public Overpass mirrors and retries, because any single
-instance is regularly busy. It refuses to overwrite the snapshot with an empty
-result. Current snapshot: ~5 900 addressed buildings, ~4.7 MB (~0.65 MB gzipped —
-`infra/nginx/web.conf` compresses `/data/`), of which ~3 590 fall inside the
-shipped placeholder boundary. It is larger than the old circular download on
-purpose: covering the polygon's whole bounding box is what lets the boundary be
-re-traced anywhere inside it without another download.
-
-Attributes come straight from OSM tags: `addr:street`, `addr:housenumber`,
-`building`, `building:levels`, `start_date`. Anything OSM does not carry stays
-`null` and the UI renders it as "невідомо" rather than inventing a value.
-Entrance / apartment / resident counts shown before a survey are labelled
-"оціночно, за геометрією" and are derived from the real footprint area, its
-street frontage and the mapped storey count — they disappear as soon as a
-canvasser enters measured data.
-
-Map data © OpenStreetMap contributors, [ODbL 1.0](https://www.openstreetmap.org/copyright).
-
-### Elections: campaign data
-
-The OSM snapshot describes *buildings*. Everything a campaign records **about**
-those buildings lives in the API database at
-`<DATA_ROOT>/elections/elections.sqlite`, with uploaded photos under
-`<DATA_ROOT>/elections/attachments/`. Neither is in the repository: the database
-holds residents' contact details, and it is rebuilt from the snapshot by the
-importer below.
-
-A house has its own permanent id, and `osm_type`/`osm_id` are only matching
-attributes. That is what lets the snapshot be regenerated without orphaning
-anything anybody recorded — re-running the importer updates the OSM-derived
-columns and leaves the internal id, and therefore every action, issue, task and
-contact, exactly where it was.
-
-Load (or refresh) the houses table:
-
-```bash
-# First run: also creates the campaign everything hangs off.
-pnpm --filter @avku/api exec tsx src/scripts/import-osm-snapshot.ts \
-  --campaign "Кампанія 2026"
-
-# Later runs, after `pnpm --filter @avku/web data:houses`:
-pnpm --filter @avku/api exec tsx src/scripts/import-osm-snapshot.ts
-```
-
-It is idempotent and reports what it did (`створено / оновлено / без змін /
-зникло з OSM`). An OSM object that has disappeared is flagged
-`osm_status = 'missing'`, never deleted — the building is usually still there,
-and the work on it certainly is.
-
-#### Data entered before the backend existed
-
-Earlier versions kept survey data in one browser, in `localStorage` under
-`avku-elections-details-v1`. For some houses that entry is the only copy. The
-module detects it and shows a banner offering, in this order: **download the
-file**, then **send it to the server**, where it becomes a reviewable import
-batch. The original key is never removed automatically.
-
-The same file can be imported from the command line:
-
-```bash
-# Preview only — writes nothing.
-pnpm --filter @avku/api exec tsx src/scripts/import-local-overrides.ts export.json
-
-# Apply the rows that matched a house outright.
-pnpm --filter @avku/api exec tsx src/scripts/import-local-overrides.ts export.json --apply
-```
-
-Rows that cannot be matched are reported and left in the batch for a person to
-decide; nothing is dropped silently. Every created record is tagged
-`source = import:<batch_id>`, and the whole batch is reversible:
-
-```
-POST /api/elections/import/<batch_id>/rollback
-```
-
-Residents' political positions and age bands from the old data are **not**
-imported. They are dropped while the rows are being built, so they never reach
-storage; the report says how many values were removed and never what they were.
-
-#### Editing a house
-
-Clicking a building opens its card beside the map; **Редагувати** opens the
-full-screen editor over the page. The map underneath is never unmounted, so
-closing the editor returns to the same house, the same zoom and the same
-filters — nothing is restored, because nothing was thrown away.
-
-Ten sections, each loading its own records the first time it is opened:
-Основне, Характеристики будинку, Контактні особи, Відповідальні, Дії,
-Звернення, Завдання, Події, Файли, Історія. Switching house cancels whatever is
-still in flight, so clicking down a street cannot leave one building's actions
-under another building's address.
-
-The two form sections accumulate a draft and are written by **Зберегти**; the
-rest are independent records that save themselves. Every exit — the close
-button, `Esc`, the browser's back gesture, the next/previous house arrows —
-goes through the same guard and asks before discarding unsaved work.
-
-Concurrency is explicit. Both `PATCH /houses/:id` and `PATCH /houses/:id/state`
-accept `expectedUpdatedAt`, the `updatedAt` the editor loaded, and answer **409**
-when somebody else has written since; the editor then offers *Оновити дані* or
-*Зберегти мою версію* rather than silently rolling the other person's edit back.
-The field is optional, so scripts and the importer are unaffected.
-
-Fields and routes added for it (schema version 3, migrated in place):
-
-| Addition | Why |
-| --- | --- |
-| `houses.block` | Corpus or letter. Folding it into `number` breaks `address_normalized`, which is the duplicate-detection key; `building` already holds the OSM `building=*` tag. |
-| `house_campaign_state.next_step` | What is planned here next, in words. `next_action_at` only says *when*. |
-| `person_contacts.verified_at` / `verified_by` | When a phone was last confirmed to work, stamped by the server. Carried across a person edit by contact id, or a rename would reset every number to "never verified". |
-| `houses.source` on write | It was in the input type and the change-log field list, but no statement ever wrote it. |
-| `GET /houses/:id/events` | The campaign's events narrowed to one building. |
-| `PATCH /actions/:id` | Correct a logged action instead of deleting and re-entering it, which lost the original author and timestamp. |
-| `PATCH /person-links/:id` | Fix an entrance or flat number without re-making the link, which would claim the person moved in today. |
-| `DELETE /people/:id` | Remove a contact person and their phone numbers (manager only). Distinct from `DELETE /person-links/:id`, which only detaches them from this building. |
-| `GET /houses/:id/history` | Now returns the building's own edits **and** its campaign-state changes, which are journalled under `<campaignId>:<houseId>`. |
-
-Coordinates and the building outline are deliberately not editable through the
-form: they decide where the building is on everybody's map, and the outline is
-OpenStreetMap's. The section explains what to do instead and links to the OSM
-object.
-
-#### Roles
-
-Writing requires a role, held in the `employees` table
-(`agitator` → `coordinator` → `manager` → `admin`). Being on the LAN grants
-nothing: a request with no identity is refused.
-
-| Variable | Effect |
-|---|---|
-| `ELECTIONS_ADMIN_EMAILS` | Comma-separated bootstrap admins. Needed at least once — on a fresh database nobody has a role, so nobody could grant one. |
-| `ELECTIONS_DEV_AUTH=1` + `ELECTIONS_DEV_ROLE=<role>` | Local development only. Both are required, it is ignored when `NODE_ENV=production`, it logs a warning at startup, and the UI shows a red badge while it is active. |
-
-Roles are granted through `PUT /api/elections/roles/<email>` (admin only), or in
-the UI once an admin exists.
-
-## Backup And Restore
-
-Create a backup:
-
-```bash
-./infra/scripts/backup-db.sh
-```
-
-By default, backups are read from `DATA_ROOT=/var/lib/avku-internal/data` and written to `BACKUP_ROOT=/var/backups/avku-internal/<UTC timestamp>/`. The script backs up:
-
-- `certificates/certificates.sqlite`
-- `warehouse/warehouse.sqlite`
-- `logistics/logistics.sqlite`
-- `elections/elections.sqlite` — the campaign database
-- `employees/employees.sqlite` — the staff directory and their elections roles
-- `certificates/registry.json`, if present
-- certificate `photos/` and `generated/` archives, if present
-- `elections/workspace-area.geo.json` and the `elections/attachments/` archive, if present
-
-You can override paths:
-
-```bash
-DATA_ROOT=/path/to/data BACKUP_ROOT=/path/to/backups ./infra/scripts/backup-db.sh
-```
-
-Each SQLite database is captured as a single, self-contained snapshot (the WAL
-is folded in) using `sqlite3 .backup`, or `node:sqlite` VACUUM INTO when
-`sqlite3` is not installed, and is then verified with `PRAGMA integrity_check`
-before the backup is considered successful. This means a restored
-`*.sqlite` file never depends on `-wal`/`-shm` sidecars. If neither `sqlite3`
-nor `node` is available the script fails loudly instead of writing a fragile
-raw copy.
-
-### Encrypting a backup
-
-A backup holds every resident's name and phone number, the full change log and
-the field photographs, and it exists to be copied elsewhere. Encryption is
-**opt-in**: set `BACKUP_ENCRYPTION_KEY_FILE` and every artifact is written as
-`<name>.enc`; leave it unset and the script behaves exactly as before, so
-turning it on does not change an existing deployment until you choose to.
-
-```bash
-# once, outside DATA_ROOT and BACKUP_ROOT
-sudo install -d -o 0 -g 0 -m 0700 /etc/avku
-head -c 48 /dev/urandom | base64 | sudo tee /etc/avku/backup.key >/dev/null
-sudo chmod 600 /etc/avku/backup.key
-
-BACKUP_ENCRYPTION_KEY_FILE=/etc/avku/backup.key ./infra/scripts/backup-db.sh
-```
-
-AES-256-GCM with a per-file random salt and scrypt key derivation. Because the
-tag is authenticated, a modified archive fails to decrypt rather than restoring
-altered data. Encryption runs *after* each snapshot has passed its integrity
-check, so a corrupt database is still reported as a corrupt database.
-
-The key is never written into the archive and never stored in this repository.
-The helper refuses to run if the key file sits inside `BACKUP_ROOT` or
-`DATA_ROOT` (it would be copied along with the backup it protects), if it is
-readable by other users, or if it is shorter than 16 characters.
-
-**Keep the key somewhere the backup is not.** An encrypted backup whose key is
-lost is not a backup.
-
-### Restoring
-
-```bash
-BACKUP_DIR=/var/backups/avku-internal/20260803T074028Z \
-RESTORE_ROOT=/var/lib/avku-internal/data \
-BACKUP_ENCRYPTION_KEY_FILE=/etc/avku/backup.key \
-  ./infra/scripts/restore-db.sh
-```
-
-Stop the API first. The script decrypts into a temporary staging directory,
-verifies every database with `PRAGMA integrity_check`, and only then writes into
-`RESTORE_ROOT` — so a wrong key or a damaged archive leaves the existing data
-untouched instead of half-replacing it. `.tar.gz` archives (certificate photos,
-elections attachments) are extracted in place, and any stale `-wal`/`-shm`
-sidecars beside a restored database are removed so they cannot shadow it.
-Omit `BACKUP_ENCRYPTION_KEY_FILE` for an unencrypted backup.
-
-To restore by hand instead:
-
-1. Stop the API process or container.
-2. Copy each backed-up `*.sqlite` file back to its matching storage root under `/var/lib/avku-internal/data` (a single file per database — no sidecars), removing any `-wal`/`-shm` left beside it.
-3. If the backup contains `certificates/photos.tar.gz` or `certificates/generated.tar.gz`, extract them into `/var/lib/avku-internal/data/certificates`; likewise extract `elections/attachments.tar.gz` into `/var/lib/avku-internal/data/elections` and copy `elections/workspace-area.geo.json` back beside it.
-4. Start the API again and run `pnpm check` from `apps/api`, or check `/api/health`.
-
-For Docker production, the host paths above are the source of truth because `/data` is a bind mount, not a Docker named volume.
-
-## Access Control
-
-The API and web services perform **no application-level authentication** by
-design: access is controlled entirely at the network edge.
-
-- In production the stack is bound to the LAN address only
-  (`AVKU_BIND_IP`, e.g. `192.168.0.151:18080`); the `api` and `web` containers
-  are `expose`-only and never published to the host directly — all traffic goes
-  through nginx.
-- External access is expected to be fronted by **Cloudflare Access**
-  (see `docs/cloudflare-access-setup.md`).
-
-This is an accepted decision for an internal tool. If the service is ever
-exposed beyond the LAN/Cloudflare Access perimeter, add an authentication layer
-(e.g. nginx Basic Auth or an API token) before doing so.
-
-## Implemented Modules
-
-- Certificates: template catalog, record CRUD, photo upload, renewal, PNG/PDF export, SQLite persistence and legacy registry migration.
-- Warehouse: item CRUD, stock movements, CSV export, SQLite persistence and initial seed data.
-- Logistics: transfer CRUD, timeline events, CSV export, SQLite persistence and initial seed data.
-
-## Partially Ready Modules
-
-- Elections: a full multi-user field-work module. Buildings, addresses, house numbers, streets and yards come from OpenStreetMap (see below), and every building is a separate clickable object with its own card. **All campaign data lives in the API** (`<DATA_ROOT>/elections/elections.sqlite`): campaigns, houses, per-campaign house state, precincts, contact people, assignments, actions, issues, tasks, events, shifts, attachments, imports and a change journal. Clearing a browser's site data destroys nothing, and two people see the same card. The working area is a GeoJSON polygon (`workspaceArea.geo.json`) — the shipped one is still the placeholder circle until a boundary is traced with **Редагувати межу**; a boundary saved there applies at once and is persisted through `PUT /api/elections/area` (admin only), so it is the territory for everybody and for the dataset script (browser `localStorage` is only a cache). Data entered before the backend existed lived in `localStorage` under `avku-elections-details-v1`; the module detects it, offers an export, and imports it through the reviewed import pipeline — see [Elections: campaign data](#elections-campaign-data).
-- SMM: frontend prototype only. Data is kept in browser `localStorage` under `avku-smm-data-v1`; there is no API persistence yet.
-- Dashboard: uses static in-client data and export helpers; it is not connected to live aggregate API data yet.
-- Deploy automation: `infra/scripts/deploy.sh` exists but is empty. Current GitHub workflow is CI only.
-
-## Checks
-
-API:
-
-```bash
-cd apps/api
-pnpm typecheck
-pnpm test
-```
-
-Frontend:
-
-```bash
-cd apps/web
-pnpm run build
-```
-
-GitHub Actions workflow `.github/workflows/deploy.yml` runs API install/typecheck/tests and frontend install/build on pushes to `main` and pull requests.
+Полный API-набор использует шрифты и immutable recovery resources: скрипт
+создаёт изолированный test image и монтирует только read-only fixtures.
+CI использует тот же запуск. Отдельный быстрый typecheck при Node 22:
+`pnpm --dir apps/api typecheck`.
+
+Браузерные сценарии записи запускайте только на изолированном localhost API и
+тестовом DATA_ROOT: `playwright.drafts.config.js`. Проверки backup UI с mocks:
+`playwright.backups.config.js`. Диагностика фото и Cloudflare — отдельные read-only
+сценарии; [инструкция](docs/certificates-photo-switching-investigation.md).
+`.github/workflows/ci.yml` проверяет API, UI, сборку и Python-инструменты.
+
+## Приватность исходников
+
+Docker context использует allowlist исходников/шаблонов. Базы, документы, фото,
+backups, `.env`, ключи, Git history и локальные инструменты исключены.
+Gitignore не удаляет секреты из прежних коммитов. Токен туннеля, ранее попавший
+в `.env.cloudflare.example`, требуется ротировать в Cloudflare; история Git
+сохраняется и не переписывается этим аудитом. Закрытые audit/rollback материалы
+лежат в `storage/backups/project-audit-20261027/` (0700).
+
+Итог выполненного аудита и redeploy: [27 октября 2026](docs/AUDIT-2026-10-27.md).

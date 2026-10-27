@@ -2,11 +2,11 @@
 
 Production: `192.168.0.151`. Приёмник: `chieftec`, `192.168.0.137:22`.
 Единственное хранилище: ZFS `backup/avku-internal`, `/srv/backup/avku-internal`.
-Этот документ описывает реализованный код и установку. Он не подтверждает состоявшийся production rollout: см. итоговый отчёт и его verdict.
+Production использует source-built release из `docker-compose.release.yml`. Результаты аудита и ограничения — в `docs/AUDIT-2026-10-27.md`.
 
 ## Состав и согласованность
 
-Кнопка сохраняет весь реестр, включая active и draft. Сохранённый SQLite snapshot содержит все столбцы, индексы и ограничения; отдельно включаются только фотографии, на которые он ссылается. UK/EN layout/background/stamp, все установленные TTF resources, фактические font resolutions, восстановительный fontconfig, source API и Web, dependency lockfiles и несекретные Docker/nginx build resources входят в архив. Это сохраняет и production UI с черновиками из dirty worktree. Generated PNG — воспроизводимый cache; архив не включает его, старые backup, `.env`, ключи и токены.
+Кнопка сохраняет весь реестр, включая active и draft. Сохранённый SQLite snapshot содержит все столбцы, индексы и ограничения; отдельно включаются только фотографии, на которые он ссылается. UK/EN layout/background/stamp, все установленные TTF resources, фактические font resolutions, восстановительный fontconfig, source API и Web, dependency lockfiles и несекретные Docker/nginx build resources входят в архив. Сохраняются исходники интерфейса того же проверенного release. Generated PNG — воспроизводимый cache; архив не включает его, старые backup, `.env`, ключи и токены.
 
 Все create/update/activate/renew/remove проходят через один gate repository, включая SQL transaction, rename нового фото и удаление старого. Capture входит в тот же gate, делает `node:sqlite.backup()` и копирует фото из snapshot и templates. После capture gate освобождается. Fonts/source — immutable image resources, их можно копировать без блокирования реестра. Развёртывание поддерживает один экземпляр API; масштабирование API требует общего межпроцессного gate перед вводом второго writer.
 
@@ -96,8 +96,8 @@ Origin — точный URL browser origin, без trailing slash. Сущест�
 
 ```bash
 export AVKU_BACKUP_RELEASE=<проверенный-versioned-release>
-docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.backup.release.yml up -d --no-build --pull never --wait api backup-worker web
-docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.backup.release.yml exec nginx nginx -s reload
+docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.release.yml up -d --no-build --pull never --wait api backup-worker web
+docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.release.yml exec nginx nginx -s reload
 ```
 
 Проверить health, LAN registry/templates/photos, Cloudflare identity, доступный LAN backup, запрет анонимного внешнего backup, snapshot counts, PNG/PDF/duplex без production CRUD. Затем три ручных UI backup, реальные 2 slots, fault до commit и restore обеих versions. Rollout считается завершённым только после этих проверок.
@@ -136,11 +136,10 @@ Capture restart не продолжается из полусформирова�
 Для ручного reconcile существующего job остановить обычный worker, запустить одноразовый worker (тот же flock), затем вернуть обычный:
 
 ```bash
-export AVKU_BACKUP_RELEASE=<развёрнутый-проверенный-release>
-docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.backup.release.yml stop backup-worker
-docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.backup.release.yml run --rm --no-deps backup-worker \
+docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.release.yml stop backup-worker
+docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.release.yml run --rm --no-deps backup-worker \
   node --import tsx src/modules/certificate-backups/manage.ts reconcile <uuid>
-docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.backup.release.yml up -d --no-build --pull never backup-worker
+docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.release.yml up -d --no-build --pull never backup-worker
 ```
 
 Для remote cleanup error после устранения filesystem проблемы администратор вручную запускает `sudo systemctl start avku-backup-publish.service`; это не создаёт backup. Mount mismatch исправлять монтажом нужного dataset, а не созданием fallback directories. Только затем reconcile job.
@@ -149,7 +148,21 @@ docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.bac
 
 `test_publisher.py` — retention, corruption, partials, symlink, space, mount mismatch, ACK crash, generation/clock drift. `test_extract.py` — dangerous members. API backup tests — WAL/file gate, idempotency, auth/CSRF, keyless archive, missing photos, restart, SSH uncertainty, cleanup escape, restore. Web tests — manual/confirmation/disabled/reload/results.
 
-`certificate-backup-isolated-e2e.ts`, `isolated_receiver.py`, `browser-e2e.mjs` и `ssh-lab.Dockerfile` — **только synthetic tests**. Test receiver симулирует mount check и никогда не устанавливается как production publisher. Production install берёт исключительно `publisher.py` с fixed BASE и реальной mount/ownership проверкой.
+`certificate-backup-isolated-e2e.ts`, `isolated_receiver.py`, `browser-e2e.mjs` и `ssh-lab.Dockerfile` — **только synthetic tests**.
+SSH lab теперь сам создаёт временный ED25519 key и контейнер, использует только
+loopback listener и удаляет контейнер в finally; production key ему не нужен.
+Явный запуск на сервере с LAN адресом `.151` (нужен Docker access):
+
+```bash
+docker build -f infra/certificate-backup/server/ssh-lab.Dockerfile \
+  -t avku-backup-ssh-lab:audit-20261027 .
+python3 -B infra/certificate-backup/server/test_ssh_lab.py
+```
+
+У lab есть собственный Docker ignore с единственным несекретным SSH profile.
+Параметры `AVKU_SSH_LAB_IMAGE`/`AVKU_SSH_LAB_SOURCE` позволяют явно выбрать
+проверенный runtime и разрешённый source IP; production daemon не меняется.
+ Test receiver симулирует mount check и никогда не устанавливается как production publisher. Production install берёт исключительно `publisher.py` с fixed BASE и реальной mount/ownership проверкой.
 
 Нет новых cron, timers, Sanoid policies, периодического retry или startup job insertion. `.path` завершает только manually uploaded ready. Worker `fs.watch` реагирует на готовый capture; startup/restart однократно продолжает ранее принятый manual job. `needs_attention` после неопределённого результата требует явного reconcile или рестарта worker, без периодических попыток. SQL INSERT jobs доступен только POST handler. Перед закрытием проверять и существующие root/user cron и timers обоих серверов, Sanoid includes/recursive policy и snapshots dataset; не трогать LF.
 

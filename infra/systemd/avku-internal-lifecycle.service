@@ -1,0 +1,26 @@
+[Unit]
+Description=Drain AVKU ingress, API and certificate backup worker before Docker
+Requires=docker.service
+After=docker.service network.target network-online.target
+PartOf=docker.service
+
+[Service]
+# Keep ExecStop armed even when an application fails its startup health check.
+# Startup errors are recorded; container health remains the readiness check.
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/hpelitdesk/apps/avku-internal
+# The release override is the same one used by the documented deploy.
+# 'start' preserves current image IDs; this unit never rebuilds or recreates.
+ExecStart=-/usr/bin/docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.release.yml start --wait --wait-timeout 120
+ExecStart=-/usr/bin/docker start avku-cloudflared-cloudflared-1
+ExecStop=-/usr/bin/timeout --signal=TERM --kill-after=5s 45s /usr/bin/docker stop --timeout 35 avku-cloudflared-cloudflared-1
+ExecStop=-/usr/bin/timeout --signal=TERM --kill-after=5s 55s /usr/bin/docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.release.yml stop --timeout 20 nginx web
+ExecStop=-/usr/bin/timeout --signal=TERM --kill-after=5s 75s /usr/bin/docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.release.yml stop --timeout 60 api
+ExecStop=-/usr/bin/timeout --signal=TERM --kill-after=5s 615s /usr/bin/docker compose -p avku-internal -f docker-compose.prod.yml -f docker-compose.backup.yml -f docker-compose.release.yml stop --timeout 600 backup-worker
+TimeoutStartSec=180s
+TimeoutStopSec=660s
+TimeoutStopFailureMode=terminate
+
+[Install]
+WantedBy=docker.service

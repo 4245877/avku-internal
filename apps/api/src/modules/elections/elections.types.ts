@@ -8,7 +8,7 @@
  *
  * Two things are deliberately absent and must stay absent: a resident's
  * political position and their age band. They were removed from the module in
- * this change (see `docs/elections-audit-and-plan.md` §4.1) — a person is
+ * the domain model (see `docs/elections.md`) — a person is
  * recorded only as a contact with a working role.
  */
 

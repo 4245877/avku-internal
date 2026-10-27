@@ -158,8 +158,11 @@ backup_database() {
   mkdir -p "$target_directory" ||
     fail "failed to create backup directory: $target_directory"
 
-  snapshot_database "$database_path" "$target_path"
-  snapshot_status=$?
+  if snapshot_database "$database_path" "$target_path"; then
+    snapshot_status=0
+  else
+    snapshot_status=$?
+  fi
 
   if [ "$snapshot_status" -eq 0 ]; then
     verify_snapshot "$target_path" "$label"

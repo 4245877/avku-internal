@@ -1,5 +1,6 @@
 # Isolated security test only; no host volumes and no production SSH daemon.
-FROM avku-internal-backup-worker:latest
+ARG WORKER_IMAGE=avku-internal-backup-worker:audit-20261027
+FROM ${WORKER_IMAGE}
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-server \
     && rm -rf /var/lib/apt/lists/* \

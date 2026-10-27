@@ -8,7 +8,7 @@
 # network-facing container.
 
 # --- Build the static bundle ---
-FROM node:22-bookworm AS build
+FROM node:22-bookworm@sha256:a25c9934ff6382cd4f08b6bc26c82bf4ea69b1e6f8dabfb2ead457374127c365 AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
@@ -30,11 +30,13 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN pnpm install --frozen-lockfile
 # node_modules / dist / logs are excluded by .dockerignore, so this brings in
 # only the sources needed to build (index.html, vite.config.js, src/).
-COPY apps/web/ ./
+COPY apps/web/src ./src
+COPY apps/web/public ./public
+COPY apps/web/index.html apps/web/vite.config.js ./
 RUN pnpm run build
 
 # --- Serve the bundle (unprivileged, static only) ---
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.27-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0 AS runtime
 # The base image already runs as the non-root `nginx` user (uid 101) and listens
 # on 8080.
 COPY infra/nginx/web.conf /etc/nginx/conf.d/default.conf

@@ -44,10 +44,8 @@ storage/logistics/*.sqlite-*
 # staff emails and their elections roles)
 storage/employees/*.sqlite
 storage/employees/*.sqlite-*
-# Elections: the campaign database holds real contact details of residents, and
-# the attachments directory holds photographs taken in the field. Neither ever
-# belongs in the repository — the database is rebuilt with
-# `tsx src/scripts/import-osm-snapshot.ts`.
+# Elections holds contacts, work history and field photographs. The OSM importer
+# rebuilds only building geometry; it cannot recover campaign/user data.
 storage/elections/*.sqlite
 storage/elections/*.sqlite-*
 storage/elections/attachments/*
@@ -80,3 +78,15 @@ apps/web/draft-e2e-results/
 # Cloudflare Access session state. Never commit — it is a bearer credential.
 **/*.storageState.json
 apps/web/.auth/
+
+# Private source documents, all SQLite snapshots/sidecars and generated diagnostics.
+/*.docx
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite.bak*
+**/__pycache__/
+**/*.pyc
+**/coverage/
+**/test-results/
+**/playwright-report/
+docs/evidence/

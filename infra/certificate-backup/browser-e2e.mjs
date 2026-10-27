@@ -19,17 +19,17 @@ try {
     const response = await context.request.fetch(original.url().replace('127.0.0.1:18183', '127.0.0.1:18182'), { method: original.method(), headers, data: original.postDataBuffer() ?? undefined });
     await route.fulfill({ response });
   });
-  await page.goto('http://127.0.0.1:18183/certificates');
+  await page.goto('http://127.0.0.1:18183/');
   const panel = page.getByRole('region', { name: 'Резервне копіювання' });
   await panel.getByRole('button', { name: 'Створити резервну копію' }).waitFor();
   await page.waitForFunction(() => !document.querySelector('section[aria-label="Резервне копіювання"] button').disabled);
   assert.equal(started.length, 0, 'mount must never create a backup');
   for (let n = 1; n <= 3; n++) {
     await panel.getByRole('button', { name: 'Створити резервну копію' }).click();
-    await panel.getByRole('dialog').getByRole('button', { name: 'Створити', exact: true }).dblclick();
+    await panel.getByRole('group', { name: 'Підтвердити резервне копіювання' }).getByRole('button', { name: 'Створити', exact: true }).dblclick();
     if (n === 1) {
       await page.reload();
-      await panel.getByText(/Job ID:/).waitFor();
+      await panel.getByText(/Job ID:/).waitFor({ state: 'attached' });
     }
     await panel.getByText('Резервну копію створено і перевірено', { exact: true }).waitFor({ timeout: 120000 });
     await page.waitForFunction(() => !document.querySelector('section[aria-label="Резервне копіювання"] button').disabled);
