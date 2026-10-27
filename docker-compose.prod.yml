@@ -1,5 +1,6 @@
 services:
   api:
+    stop_grace_period: 60s
     image: avku-internal-api:latest
     build:
       context: .

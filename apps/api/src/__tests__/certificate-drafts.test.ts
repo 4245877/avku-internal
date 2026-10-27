@@ -136,6 +136,74 @@ test("draft HTTP lifecycle: create without photo/dates, read, edit, upload, fill
   assert.deepEqual((await api("GET", `/api/certificates/${draft.id}`)).json, active);
 });
 
+test("internal phone CRUD preserves strings, omitted fields and SQL NULL; multipart supports adding and clearing", async () => {
+  const payload = draftPayload();
+  const created = await api("POST", "/api/certificates", payload);
+  const record = created.json as CertificateRecordResponse;
+  const id = record.id;
+  assert.equal(record.phoneNumber, null);
+  const update = async (extra: Record<string, unknown>) => {
+    const response = await api("PUT", `/api/certificates/${id}`, { ...payload, ...extra });
+    return { ...response, json: response.json as CertificateRecordResponse };
+  };
+  assert.equal((await update({ phoneNumber: "  +380 (067) 001-02-03; 0033123456789  " })).json.phoneNumber,
+    "+380 (067) 001-02-03; 0033123456789");
+  assert.equal((await update({})).json.phoneNumber, "+380 (067) 001-02-03; 0033123456789", "legacy clients preserve the phone");
+  assert.equal((await update({ phoneNumber: 380670010203 })).status, 400, "numeric input must not lose formatting");
+  for (const empty of [null, "", "  \t "]) {
+    assert.equal((await update({ phoneNumber: "+380670010203" })).status, 200);
+    assert.equal((await update({ phoneNumber: empty })).json.phoneNumber, null);
+  }
+  for (const phone of ["0670010203", ""]) {
+    const form = new FormData();
+    form.set("status", "draft");
+    form.set("fullName", String(payload.fullName));
+    form.set("certificateNumber", String(payload.certificateNumber));
+    form.set("phoneNumber", phone);
+    const response = await fetch(`${baseUrl}/api/certificates/${id}`, { method: "PUT", body: form });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json() as CertificateRecordResponse).phoneNumber, phone || null);
+  }
+  const db = new DatabaseSync(path.join(dataRoot, "certificates/certificates.sqlite"));
+  assert.equal(db.prepare("SELECT phone_number FROM certificate_records WHERE id = ?").get(id)?.phone_number, null);
+  db.close();
+  assert.equal((await api("DELETE", `/api/certificates/${id}`)).status, 200);
+  assert.equal((await api("GET", `/api/certificates/${id}`)).status, 404);
+});
+
+test("internal phone never changes exported PNG, PDF or print sheets; activation and renewal preserve it", async () => {
+  const payload = draftPayload({
+    issuedAt: "2026-10-05", validUntil: "2027-12-31", photoDataUrl,
+    firstNameEn: "Test", lastNameEn: "Volunteer", phoneNumber: "+380670010203",
+  });
+  const created = await api("POST", "/api/certificates", payload);
+  const activated = await api("PATCH", `/api/certificates/${(created.json as CertificateRecordResponse).id}/activate`);
+  const record = activated.json as CertificateRecordResponse;
+  assert.equal(record.phoneNumber, payload.phoneNumber);
+  const exportBytes = async () => {
+    const buffers = [];
+    for (const suffix of ["export.png", "export.pdf"]) {
+      const response = await fetch(`${baseUrl}/api/certificates/${record.id}/${suffix}`);
+      assert.equal(response.status, 200);
+      buffers.push(Buffer.from(await response.arrayBuffer()));
+    }
+    const sheet = await fetch(`${baseUrl}/api/certificates/print-sheet`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [record.id] }),
+    });
+    assert.equal(sheet.status, 200);
+    buffers.push(Buffer.from(await sheet.arrayBuffer()));
+    return buffers;
+  };
+  const before = await exportBytes();
+  const saved = await api("PUT", `/api/certificates/${record.id}`, {
+    ...payload, status: "active", photoDataUrl: undefined, phoneNumber: "+380990099009",
+  });
+  assert.equal(saved.status, 200);
+  const after = await exportBytes();
+  assert.deepEqual(after, before, "all document bytes are independent of internal contact data");
+  assert.equal(((await api("PATCH", `/api/certificates/${record.id}/renew`)).json as CertificateRecordResponse).phoneNumber, "+380990099009");
+});
+
 test("draft create via multipart supports missing dates and photo; deletion needs no photo", async () => {
   const form = new FormData();
   const payload = draftPayload();
@@ -256,6 +324,8 @@ test("transactional draft migration preserves all 15 old columns and existing ph
     const after = { ...migratedDb.prepare("SELECT * FROM certificate_records").get() };
     assert.equal(after.status, "active");
     delete after.status;
+    assert.equal(after.phone_number, null);
+    delete after.phone_number;
     assert.deepEqual(after, before, "every previous field is preserved byte-for-byte");
     assert.ok(migratedDb.prepare("SELECT name FROM sqlite_master WHERE name = 'old_certificate_name_index'").get());
     assert.equal(migratedDb.prepare("PRAGMA user_version").get()?.user_version, 4);

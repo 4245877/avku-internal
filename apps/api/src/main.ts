@@ -9,7 +9,7 @@ import {
   createLogisticsRepository,
   createWarehouseRepository,
 } from "./config";
-import { createCertificateApiServer } from "./server";
+import { createCertificateApiServer, type CertificateApiServer } from "./server";
 
 async function main(): Promise<void> {
   const certificateRepository = createCertificateRepository();
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
  *    the process exits deliberately) rather than crashing with an opaque
  *    default trace.
  */
-function installProcessSafetyNets(server: import("node:http").Server): void {
+export function installProcessSafetyNets(server: CertificateApiServer): void {
   let shuttingDown = false;
 
   const shutdown = (signal: NodeJS.Signals): void => {
@@ -75,20 +75,28 @@ function installProcessSafetyNets(server: import("node:http").Server): void {
     console.log(`Received ${signal}, shutting down gracefully…`);
 
     // Stop accepting new connections and let active ones finish.
-    server.close((error) => {
+    server.close(async (error) => {
       if (error) {
         console.error("Error during server shutdown:", error);
         process.exit(1);
       }
 
-      process.exit(0);
+      try {
+        // HTTP 202 backup captures continue after their response has finished.
+        await server.drainBackgroundOperations();
+        console.info("API shutdown complete.");
+        process.exit(0);
+      } catch {
+        console.error("Background operation shutdown failed.");
+        process.exit(1);
+      }
     });
 
     // Failsafe: don't hang forever if a connection refuses to close.
     const forceExit = setTimeout(() => {
       console.error("Graceful shutdown timed out, forcing exit.");
       process.exit(1);
-    }, 10_000);
+    }, 50_000);
 
     forceExit.unref();
   };

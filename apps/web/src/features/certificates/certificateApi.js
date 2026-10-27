@@ -109,6 +109,9 @@ function hasPhotoFile(payload) {
 function appendCertificateFields(formData, payload) {
   formData.append('status', payload.status || 'active');
   formData.append('fullName', payload.fullName ?? '');
+  if (payload.phoneNumber !== undefined) {
+    formData.append('phoneNumber', payload.phoneNumber ?? '');
+  }
   formData.append('firstNameEn', payload.firstNameEn ?? '');
   formData.append('lastNameEn', payload.lastNameEn ?? '');
   formData.append('certificateNumber', payload.certificateNumber ?? '');

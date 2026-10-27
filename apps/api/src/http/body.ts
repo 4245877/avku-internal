@@ -76,6 +76,7 @@ function multipartPartsToPayload(parts: MultipartPart[]): CertificatePayload {
   return {
     status: fields.get("status"),
     fullName: fields.get("fullName"),
+    phoneNumber: fields.get("phoneNumber"),
     firstNameEn: fields.get("firstNameEn"),
     lastNameEn: fields.get("lastNameEn"),
     certificateNumber: fields.get("certificateNumber"),

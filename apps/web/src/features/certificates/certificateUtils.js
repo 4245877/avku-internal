@@ -74,6 +74,7 @@ export function getEmptyCertificateForm(templateId = DEFAULT_CERTIFICATE_TEMPLAT
     id: '',
     status: 'draft',
     fullName: '',
+    phoneNumber: '',
     firstNameEn: '',
     lastNameEn: '',
     certificateNumber: '',
@@ -96,6 +97,7 @@ export function createFormFromRecord(record) {
     id: record.id,
     status: record.status || 'active',
     fullName: record.fullName,
+    phoneNumber: record.phoneNumber || '',
     firstNameEn: record.firstNameEn || '',
     lastNameEn: record.lastNameEn || '',
     certificateNumber: record.certificateNumber,
@@ -292,6 +294,7 @@ export function buildCertificatePayload(form) {
   return {
     status: form.status || 'active',
     fullName: normalizeWhitespace(form.fullName),
+    phoneNumber: normalizeWhitespace(form.phoneNumber) || null,
     firstNameEn: normalizeWhitespace(form.firstNameEn),
     lastNameEn: normalizeWhitespace(form.lastNameEn),
     certificateNumber: normalizeWhitespace(form.certificateNumber),

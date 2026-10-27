@@ -15,12 +15,15 @@ services:
       args:
         AVKU_RELEASE_ID: ${AVKU_RELEASE_ID:-unversioned-build}
     init: true
+    # Keep the lock while delivering SIGTERM directly to the worker.
+    entrypoint: ["flock", "-n", "-F", "/jobs/worker.lock"]
+    command: ["node", "--import", "tsx", "src/modules/certificate-backups/worker.ts"]
     user: "1000:1000"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
-    stop_grace_period: 30s
+    stop_grace_period: 600s
     healthcheck:
       test: ["CMD", "node", "-e", "const fs=require('fs');process.exit(fs.readdirSync('/proc').some(p=>{try{return fs.readFileSync('/proc/'+p+'/cmdline','utf8').split('\\0').includes('src/modules/certificate-backups/worker.ts')}catch{return false}})?0:1)"]
       interval: 15s

@@ -53,6 +53,8 @@ storage/elections/*.sqlite-*
 storage/elections/attachments/*
 !storage/elections/attachments/.gitkeep
 storage/backups/
+storage/certificates/import-reports/
+scripts/__pycache__/
 runtime/
 
 

@@ -165,6 +165,27 @@ describe('CertificatesPage draft workflow', () => {
   const saveDraft = () => fireEvent.click(within(editor()).getByRole('button', { name: 'Зберегти чернетку' }));
   const activateDraft = () => fireEvent.click(within(editor()).getByRole('button', { name: 'Оформити посвідчення' }));
 
+  it('loads, edits and clears an internal phone without adding it to the card preview', async () => {
+    const phone = '+380670010203';
+    certificateApi.fetchCertificates.mockResolvedValue([{ ...draft, phoneNumber: phone }]);
+    certificateApi.updateCertificate.mockImplementation(async (id, payload) => ({ ...draft, ...payload, id }));
+    render(<CertificatesPage />);
+    await flush();
+    await openRecord('Чернетко');
+    expect(screen.getByLabelText('Номер телефону').value).toBe(phone);
+    expect(screen.queryByText(phone)).toBeNull();
+    fireEvent.change(screen.getByLabelText('Номер телефону'), { target: { value: '0670010203' } });
+    saveDraft();
+    await waitFor(() => expect(certificateApi.updateCertificate).toHaveBeenCalledTimes(1));
+    expect(certificateApi.updateCertificate.mock.calls[0][1].phoneNumber).toBe('0670010203');
+    await waitFor(() => expect(screen.getByText('Чернетку збережено.')).toBeTruthy());
+    fireEvent.change(screen.getByLabelText('Номер телефону'), { target: { value: '' } });
+    saveDraft();
+    await waitFor(() => expect(certificateApi.updateCertificate).toHaveBeenCalledTimes(2));
+    expect(certificateApi.updateCertificate.mock.calls[1][1].phoneNumber).toBeNull();
+    await waitFor(() => expect(screen.getByLabelText('Номер телефону').value).toBe(''));
+  });
+
   it('creates a draft without photo or issued date through the editor', async () => {
     certificateApi.createCertificate.mockImplementation(async (payload) => ({
       ...draft, ...payload, issuedAt: null, validUntil: null,

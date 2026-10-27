@@ -70,6 +70,7 @@ const MAX_CROP_ZOOM = 10;
 const CERTIFICATE_RECORDS_COLUMNS = `
         id TEXT PRIMARY KEY NOT NULL,
         full_name TEXT NOT NULL CHECK (length(trim(full_name)) > 0),
+        phone_number TEXT,
         first_name_en TEXT NOT NULL DEFAULT '',
         last_name_en TEXT NOT NULL DEFAULT '',
         certificate_number TEXT NOT NULL COLLATE NOCASE UNIQUE
@@ -106,6 +107,7 @@ const CERTIFICATE_RECORDS_COLUMNS = `
 const CERTIFICATE_RECORDS_COLUMN_NAMES = [
   "id",
   "full_name",
+  "phone_number",
   "first_name_en",
   "last_name_en",
   "certificate_number",
@@ -152,6 +154,8 @@ export interface CertificateRecord {
   status: CertificateStatus;
   id: string;
   fullName: string;
+  /** Internal contact information; never passed to the document renderer. */
+  phoneNumber: string | null;
   firstNameEn: string;
   lastNameEn: string;
   certificateNumber: string;
@@ -176,6 +180,7 @@ export interface CertificateRecordResponse extends CertificateRecord {
 export interface CertificatePayload {
   status?: unknown;
   fullName?: unknown;
+  phoneNumber?: unknown;
   firstNameEn?: unknown;
   lastNameEn?: unknown;
   certificateNumber?: unknown;
@@ -239,6 +244,7 @@ export interface CertificateTemplateDefinition {
 interface NormalizedCertificatePayload {
   status: CertificateStatus;
   fullName: string;
+  phoneNumber: string | null;
   firstNameEn: string;
   lastNameEn: string;
   certificateNumber: string;
@@ -258,6 +264,15 @@ function normalizeWhitespace(value: string): string {
   return value
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function normalizePhoneNumber(value: unknown, fallback: string | null = null): string | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new Error("Номер телефону має бути рядком.");
+  }
+  return normalizeWhitespace(value) || null;
 }
 
 function canonicalizeTemplateId(value: string): string {
@@ -595,12 +610,13 @@ function normalizeCertificatePayload(
   fallbackCrop: CertificatePhotoCrop = DEFAULT_CROP,
   fallbackTemplateId = DEFAULT_CERTIFICATE_TEMPLATE_ID,
   status: CertificateStatus = "active",
-  fallbackEnglishName: Pick<
+  fallbackFields: Pick<
     CertificateRecord,
-    "firstNameEn" | "lastNameEn"
+    "firstNameEn" | "lastNameEn" | "phoneNumber"
   > = {
     firstNameEn: "",
     lastNameEn: "",
+    phoneNumber: null,
   },
 ): NormalizedCertificatePayload {
   const fullName = normalizeRequiredText(
@@ -621,15 +637,16 @@ function normalizeCertificatePayload(
   return {
     status,
     fullName,
+    phoneNumber: normalizePhoneNumber(payload.phoneNumber, fallbackFields.phoneNumber),
     firstNameEn: normalizeOptionalText(
       payload.firstNameEn,
       "Ім'я англійською",
-      fallbackEnglishName.firstNameEn,
+      fallbackFields.firstNameEn,
     ),
     lastNameEn: normalizeOptionalText(
       payload.lastNameEn,
       "Прізвище англійською",
-      fallbackEnglishName.lastNameEn,
+      fallbackFields.lastNameEn,
     ),
     certificateNumber,
     issuedAt,
@@ -673,6 +690,7 @@ function rowToRecord(row: Record<string, unknown>): CertificateRecord {
     id: String(row.id ?? ""),
     status: row.status === "draft" ? "draft" : "active",
     fullName: String(row.full_name ?? ""),
+    phoneNumber: row.phone_number == null ? null : String(row.phone_number),
     firstNameEn: String(row.first_name_en ?? ""),
     lastNameEn: String(row.last_name_en ?? ""),
     certificateNumber: String(row.certificate_number ?? ""),
@@ -1505,6 +1523,7 @@ export class CertificateRepository {
         ["first_name_en", "TEXT NOT NULL DEFAULT ''"],
         ["last_name_en", "TEXT NOT NULL DEFAULT ''"],
         ["photo_crop_rotation", "REAL NOT NULL DEFAULT 0"],
+        ["phone_number", "TEXT"],
       ]) {
         if (!names.has(name)) {
           database.exec(`ALTER TABLE certificate_records ADD COLUMN ${name} ${definition}`);
@@ -1538,6 +1557,8 @@ export class CertificateRepository {
         CREATE INDEX IF NOT EXISTS idx_certificate_records_valid_until ON certificate_records(valid_until);
       `);
       const version = database.prepare("PRAGMA user_version").get() as Record<string, unknown>;
+      // The optional phone column is an additive extension of v4, detected by
+      // table_info above. Retain v4 for existing backup/restore protocol readers.
       if (Number(version.user_version) < 4) {
         database.exec("PRAGMA user_version = 4");
       }
@@ -1625,6 +1646,7 @@ export class CertificateRepository {
 
     return {
       status: "active",
+      phoneNumber: null,
       id: normalizeRequiredText(
         source.id,
         "ID",
@@ -1670,6 +1692,7 @@ export class CertificateRepository {
       INSERT INTO certificate_records (
         id,
         full_name,
+        phone_number,
         first_name_en,
         last_name_en,
         certificate_number,
@@ -1685,10 +1708,11 @@ export class CertificateRepository {
         updated_at,
         status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.fullName,
+      record.phoneNumber,
       record.firstNameEn,
       record.lastNameEn,
       record.certificateNumber,
@@ -1714,6 +1738,7 @@ export class CertificateRepository {
       UPDATE certificate_records
       SET
         full_name = ?,
+        phone_number = ?,
         first_name_en = ?,
         last_name_en = ?,
         certificate_number = ?,
@@ -1730,6 +1755,7 @@ export class CertificateRepository {
       WHERE id = ?
     `).run(
       record.fullName,
+      record.phoneNumber,
       record.firstNameEn,
       record.lastNameEn,
       record.certificateNumber,

@@ -62,6 +62,45 @@ index, and assigns the formerly finalized records `active`. It records SQLite
 `user_version=4`. The migration is idempotent and rolls back on failure. Uploaded
 photo files are not rewritten. Take a SQLite backup before deploying this change.
 
+### Internal contact phone
+
+`certificate_records.phone_number` is nullable SQLite `TEXT`, added idempotently
+by checking table columns. The base schema version stays at v4 for compatibility
+with the existing backup/restore protocol. The internal
+certificate management API uses `phoneNumber`, accepting a string or `null`.
+Blank strings become SQL `NULL`; omitting the property on update preserves the
+existing phone for older clients. JSON and multipart/photo uploads support it.
+The editor allows adding, changing and clearing the optional phone. Multiple
+source contacts are kept in this single string separated by `; `.
+
+Phone numbers are internal contact information. The management API uses the
+existing local-network/Cloudflare Access boundary. No public phone endpoint is
+added. The card preview, render input, PNG/PDF and A4 sheets contain only their
+existing explicit fields and never include phones. Recovery database backups
+remain internal and include the new column.
+
+Import from the issued-certificates DOCX without additional dependencies:
+
+```bash
+python3 scripts/import-certificate-phones.py \
+  --document 'список виданих посвідчень (2).docx' \
+  --database /var/lib/avku-internal/data/certificates/certificates.sqlite
+# Review the private JSON report, then repeat with --apply to write.
+python3 -m unittest discover -s scripts -p 'test_import_certificate_phones.py'
+```
+
+Dry run opens SQLite read-only. Apply first creates and validates an online
+backup (including committed WAL pages) in `storage/backups/certificate-phones/`,
+then adds the column and imports in one transaction. Stop certificate writes
+while applying to make the backup the exact pre-import state. The importer
+requires the existing draft schema (v4+), checks number and full name (or a
+unique surname/given-name pair if a patronymic is missing), and refuses duplicate
+source numbers, conflicting names, malformed/incomplete phones and overwriting
+existing phones. It never assigns an old certificate's phone to another number
+based on name alone. Every old field, including timestamps, is compared before
+commit. Detailed reports in `storage/certificates/import-reports/` are private,
+git-ignored and must not be published.
+
 ## Requirements
 
 - Node.js 22.

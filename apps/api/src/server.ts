@@ -137,10 +137,12 @@ export interface CertificateApiServerOptions {
   backupService?: BackupService;
 }
 
+export type CertificateApiServer = http.Server & { drainBackgroundOperations(): Promise<void> };
+
 export function createCertificateApiServer(
   repositories?: Partial<CertificateApiRepositories>,
   options?: CertificateApiServerOptions,
-): http.Server {
+): CertificateApiServer {
   const resolvedRepositories: CertificateApiRepositories = {
     certificateRepository:
       repositories?.certificateRepository ?? createCertificateRepository(),
@@ -160,7 +162,7 @@ export function createCertificateApiServer(
   const backupService = options?.backupService ?? (process.env.CERTIFICATE_BACKUP_ENABLED === "true"
     ? new BackupService(resolvedRepositories.certificateRepository) : undefined);
 
-  return http.createServer((request, response) => {
+  const server = http.createServer((request, response) => {
     applyCors(
       request,
       response,
@@ -190,5 +192,8 @@ export function createCertificateApiServer(
         sanitized.message,
       );
     });
+  });
+  return Object.assign(server, {
+    drainBackgroundOperations: () => backupService?.drain() ?? Promise.resolve(),
   });
 }

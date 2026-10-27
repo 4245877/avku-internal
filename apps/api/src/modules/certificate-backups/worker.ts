@@ -126,6 +126,26 @@ export class BackupWorker {
   }
 }
 
+export function installWorkerShutdown(close: () => void, drain: () => Promise<void>): () => boolean {
+  let stopping = false;
+  const shutdown = (signal: string) => {
+    if (stopping) return;
+    stopping = true;
+    close();
+    console.info(`certificate_backup_worker_shutdown ${signal}`);
+    void drain().then(() => {
+      console.info('certificate_backup_worker_shutdown_complete');
+      process.exit(0);
+    }, () => {
+      console.error('certificate_backup_worker_shutdown_failed');
+      process.exit(1);
+    });
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  return () => stopping;
+}
+
 async function main(): Promise<void> {
   const root = process.env.CERTIFICATE_BACKUP_STATE, staging = process.env.CERTIFICATE_BACKUP_STAGING;
   if (!root || !staging) throw new Error("BACKUP_CONFIG_MISSING");
@@ -133,18 +153,22 @@ async function main(): Promise<void> {
   const store = new BackupStore(root);
   const worker = new BackupWorker(store, staging, "/app/infra/certificate-backup/extract.py");
   let running = false;
+  let activeRun: Promise<void> | undefined;
+  let isStopping = () => false;
   const drain = async (resumeAttention = false) => {
-    if (running) return;
+    if (running || isStopping()) return;
     const job = store.active();
     if (!job || ["accepted", "capturing"].includes(job.status)) return;
     if (job.status === "needs_attention" && !resumeAttention) return;
     running = true;
     try {
       if (job.status === "needs_attention" && !job.attemptedUpload) return;
-      await worker.execute(job);
-    } finally { running = false; }
+      activeRun = worker.execute(job);
+      await activeRun;
+    } finally { running = false; activeRun = undefined; }
   };
-  watch(root, () => void drain().catch(() => console.error('certificate_backup_worker_state_error')));
+  const watcher = watch(root, () => void drain().catch(() => console.error('certificate_backup_worker_state_error')));
+  isStopping = installWorkerShutdown(() => watcher.close(), async () => { await activeRun; });
   // Startup/restart can resume a previously accepted job once. Further uncertain
   // failures require an explicit reconciliation; no periodic retry is scheduled.
   await drain(true);

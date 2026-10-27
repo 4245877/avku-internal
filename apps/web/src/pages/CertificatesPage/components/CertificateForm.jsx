@@ -117,6 +117,21 @@ function CertificateForm({
           ) : null}
         </label>
 
+        <div className={styles.field}>
+          <span><label htmlFor="certificate-phone">Номер телефону</label></span>
+          <input
+            id="certificate-phone"
+            className={styles.input}
+            type="tel"
+            autoComplete="tel"
+            value={form.phoneNumber}
+            onChange={(event) => onChange('phoneNumber', event.target.value)}
+            placeholder="+380…"
+            aria-describedby="certificate-phone-hint"
+          />
+          <small id="certificate-phone-hint">Необов'язково. Лише для внутрішнього зв'язку.</small>
+        </div>
+
         <DateField
           label="Дата видачі"
           value={form.issuedAt}

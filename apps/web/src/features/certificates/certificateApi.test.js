@@ -44,7 +44,7 @@ describe('certificate draft API transport', () => {
     const photoFile = new File(['real photograph bytes'], 'portrait.png', { type: 'image/png' });
     await updateCertificate(DRAFT.id, {
       status: 'draft', fullName: DRAFT.fullName, certificateNumber: DRAFT.certificateNumber,
-      issuedAt: '2026-02-01', validUntil: DRAFT.validUntil, photoFile,
+      issuedAt: '2026-02-01', validUntil: DRAFT.validUntil, photoFile, phoneNumber: '+380670010203',
     });
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/certificates/draft-1');
@@ -52,6 +52,7 @@ describe('certificate draft API transport', () => {
     expect(options.body).toBeInstanceOf(FormData);
     expect(options.body.get('status')).toBe('draft');
     expect(options.body.get('issuedAt')).toBe('2026-02-01');
+    expect(options.body.get('phoneNumber')).toBe('+380670010203');
     expect(options.body.get('photo').name).toBe('portrait.png');
     expect(options.headers).not.toHaveProperty('Content-Type');
   });

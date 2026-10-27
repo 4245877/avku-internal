@@ -10,6 +10,7 @@ export class BackupService {
   readonly store: BackupStore;
   readonly origins: Set<string>;
   readonly staging: string;
+  private readonly captures = new Set<Promise<void>>();
   constructor(readonly repository: CertificateRepository, readonly env = process.env) {
     if (!env.CERTIFICATE_BACKUP_STATE || !env.CERTIFICATE_BACKUP_STAGING) throw new Error("BACKUP_CONFIG_MISSING");
     this.store = new BackupStore(env.CERTIFICATE_BACKUP_STATE);
@@ -26,8 +27,16 @@ export class BackupService {
   }
   accept(actor: string, idem: string): BackupJob {
     const { job, replay } = this.store.accept(actor, idem);
-    if (!replay) setImmediate(() => void this.capture(job));
+    if (!replay) {
+      // Track accepted work before setImmediate so shutdown cannot miss it.
+      const task = new Promise<void>(resolve => setImmediate(resolve)).then(() => this.capture(job));
+      this.captures.add(task);
+      void task.then(() => this.captures.delete(task), () => this.captures.delete(task));
+    }
     return job;
+  }
+  async drain(): Promise<void> {
+    await Promise.all([...this.captures]);
   }
   private async capture(job: BackupJob): Promise<void> {
     try {

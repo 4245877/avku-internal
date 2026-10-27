@@ -50,6 +50,7 @@ test('create a draft through the editor without photo or dates, reload and edit 
   expect(saved.validUntil).toBeNull();
   expect(saved.photoFileName).toBeNull();
   expect(saved.photoUrl).toBe('');
+  expect(saved.phoneNumber).toBeNull();
   await page.reload();
   await openRecord(page, saved);
   await page.getByPlaceholder("Прізвище Ім'я По батькові").fill('Тестовий Відредагований Чернетка');
@@ -59,6 +60,26 @@ test('create a draft through the editor without photo or dates, reload and edit 
   expect(edited.fullName).toBe('Тестовий Відредагований Чернетка');
   expect(edited.status).toBe('draft');
   expect(edited.issuedAt).toBeNull();
+});
+
+test('phone can be saved, reloaded, changed and cleared through the editor', async ({ page, request }) => {
+  const draft = await createDraft(request, 'PHONE', { phoneNumber: '+380670010203' });
+  await page.goto('/certificates');
+  await openRecord(page, draft);
+  await expect(page.getByLabel('Номер телефону', { exact: true })).toHaveValue('+380670010203');
+  const savePhone = async (value, stored) => {
+    await page.getByLabel('Номер телефону', { exact: true }).fill(value);
+    const response = page.waitForResponse(r => r.url().endsWith(`/api/certificates/${draft.id}`) && r.request().method() === 'PUT');
+    await page.getByRole('button', { name: /Зберегти чернетку/ }).click();
+    expect((await response).status()).toBe(200);
+    expect((await (await request.get(`/api/certificates/${draft.id}`)).json()).phoneNumber).toBe(stored);
+    await page.reload();
+    await openRecord(page, draft);
+    await expect(page.getByLabel('Номер телефону', { exact: true })).toHaveValue(stored || '');
+  };
+  await savePhone('0670010203', '0670010203');
+  await savePhone('', null);
+  await savePhone('+380990010203', '+380990010203');
 });
 
 test('existing incomplete draft opens; photo/date upload saves draft and explicit activation completes it', async ({ page, request }, testInfo) => {

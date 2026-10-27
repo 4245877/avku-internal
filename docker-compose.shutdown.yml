@@ -1,0 +1,11 @@
+services:
+  api:
+    image: avku-internal-api:phones-20261027
+    pull_policy: never
+  backup-worker:
+    image: shutdown-audit/avku-internal-backup-worker-1:20261010
+    pull_policy: never
+  web:
+    # Internal contact phone editor, based on the independently deployed web release.
+    image: avku-internal-web:phones-20261027
+    pull_policy: never
