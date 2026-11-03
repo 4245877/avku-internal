@@ -51,6 +51,8 @@ test('create a draft through the editor without photo or dates, reload and edit 
   expect(saved.photoFileName).toBeNull();
   expect(saved.photoUrl).toBe('');
   expect(saved.phoneNumber).toBeNull();
+  expect(saved.volunteerTeam).toBeNull();
+  expect(saved.position).toBeNull();
   await page.reload();
   await openRecord(page, saved);
   await page.getByPlaceholder("Прізвище Ім'я По батькові").fill('Тестовий Відредагований Чернетка');
@@ -60,6 +62,46 @@ test('create a draft through the editor without photo or dates, reload and edit 
   expect(edited.fullName).toBe('Тестовий Відредагований Чернетка');
   expect(edited.status).toBe('draft');
   expect(edited.issuedAt).toBeNull();
+});
+
+test('team and position can be created, reloaded, edited and independently cleared', async ({ page, request }, testInfo) => {
+  await page.goto('/certificates');
+  await page.getByLabel('ПІБ', { exact: true }).fill('Тестовий Волонтер Команда');
+  await page.getByPlaceholder('0001').fill(`${prefix}-TEAM`);
+  await page.getByLabel('Волонтерська команда', { exact: true }).fill('Команда Патріот');
+  await page.getByLabel('Посада', { exact: true }).fill('Керівник');
+  await page.getByRole('button', { name: /Зберегти чернетку/ }).click();
+  await expect(page.getByText(/Чернетку збережено/)).toBeVisible();
+  const [saved] = await (await request.get(`/api/certificates?search=${prefix}-TEAM`)).json();
+  expect(saved.volunteerTeam).toBe('Команда Патріот');
+  expect(saved.position).toBe('Керівник');
+  const saveDetails = async (volunteerTeam, position) => {
+    await page.getByLabel('Волонтерська команда', { exact: true }).fill(volunteerTeam);
+    await page.getByLabel('Посада', { exact: true }).fill(position);
+    const response = page.waitForResponse(r => r.url().endsWith(`/api/certificates/${saved.id}`) && r.request().method() === 'PUT');
+    await page.getByRole('button', { name: /Зберегти чернетку/ }).click();
+    expect((await response).status()).toBe(200);
+    const stored = await (await request.get(`/api/certificates/${saved.id}`)).json();
+    expect(stored.volunteerTeam).toBe(volunteerTeam || null);
+    expect(stored.position).toBe(position || null);
+    await page.reload();
+    const card = await openRecord(page, saved);
+    await expect(page.getByLabel('Волонтерська команда', { exact: true })).toHaveValue(volunteerTeam);
+    await expect(page.getByLabel('Посада', { exact: true })).toHaveValue(position);
+    if (volunteerTeam) await expect(card).toContainText(volunteerTeam);
+    if (position) await expect(card).toContainText(position);
+  };
+  await page.reload();
+  await openRecord(page, saved);
+  await expect(page.getByLabel('Волонтерська команда', { exact: true })).toHaveValue('Команда Патріот');
+  await expect(page.getByLabel('Посада', { exact: true })).toHaveValue('Керівник');
+  await page.screenshot({ path: testInfo.outputPath('team-editor-desktop.png'), fullPage: true });
+  await saveDetails('Київське Коло', 'Волонтер');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath('team-editor-mobile.png'), fullPage: true });
+  await saveDetails('', 'Координатор');
+  await saveDetails('Команда Патріот', '');
+  await saveDetails('', '');
 });
 
 test('phone can be saved, reloaded, changed and cleared through the editor', async ({ page, request }) => {

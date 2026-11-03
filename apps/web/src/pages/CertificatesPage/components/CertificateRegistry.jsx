@@ -44,6 +44,8 @@ function CertificateRegistry({
       [
         record.fullName,
         record.certificateNumber,
+        record.volunteerTeam,
+        record.position,
         formatDate(record.issuedAt),
         formatDate(record.validUntil),
       ]
@@ -97,7 +99,7 @@ function CertificateRegistry({
           type="search"
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="ПІБ, номер або дата"
+          placeholder="ПІБ, номер, команда, посада або дата"
         />
       </label>
 
@@ -159,6 +161,14 @@ function CertificateRegistry({
 
                 <button className={styles.recordOpenButton} type="button" onClick={() => onOpen(record)}>
                   <span className={styles.recordName}>{record.fullName}</span>
+                  {record.volunteerTeam || record.position ? (
+                    <span className={styles.recordMeta}>
+                      {[
+                        record.volunteerTeam && `Команда: ${record.volunteerTeam}`,
+                        record.position && `Посада: ${record.position}`,
+                      ].filter(Boolean).join(' · ')}
+                    </span>
+                  ) : null}
                   <span className={styles.recordMeta}>
                     № {record.certificateNumber} · видано {formatDate(record.issuedAt)} · до {formatDate(record.validUntil)}
                   </span>

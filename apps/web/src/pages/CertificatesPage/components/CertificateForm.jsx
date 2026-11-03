@@ -132,6 +132,32 @@ function CertificateForm({
           <small id="certificate-phone-hint">Необов'язково. Лише для внутрішнього зв'язку.</small>
         </div>
 
+        <div className={styles.field}>
+          <span><label htmlFor="certificate-team">Волонтерська команда</label></span>
+          <input
+            id="certificate-team"
+            className={styles.input}
+            value={form.volunteerTeam}
+            onChange={(event) => onChange('volunteerTeam', event.target.value)}
+            placeholder="Назва команди"
+            aria-describedby="certificate-team-hint"
+          />
+          <small id="certificate-team-hint">Необов'язково</small>
+        </div>
+
+        <div className={styles.field}>
+          <span><label htmlFor="certificate-position">Посада</label></span>
+          <input
+            id="certificate-position"
+            className={styles.input}
+            value={form.position}
+            onChange={(event) => onChange('position', event.target.value)}
+            placeholder="Посада або роль у команді"
+            aria-describedby="certificate-position-hint"
+          />
+          <small id="certificate-position-hint">Необов'язково</small>
+        </div>
+
         <DateField
           label="Дата видачі"
           value={form.issuedAt}

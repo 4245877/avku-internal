@@ -171,15 +171,18 @@ test("internal phone CRUD preserves strings, omitted fields and SQL NULL; multip
   assert.equal((await api("GET", `/api/certificates/${id}`)).status, 404);
 });
 
-test("internal phone never changes exported PNG, PDF or print sheets; activation and renewal preserve it", async () => {
+test("internal contact and team details do not change exports; activation and renewal preserve them", async () => {
   const payload = draftPayload({
     issuedAt: "2026-10-05", validUntil: "2027-12-31", photoDataUrl,
     firstNameEn: "Test", lastNameEn: "Volunteer", phoneNumber: "+380670010203",
+    volunteerTeam: "Команда Патріот", position: "Керівник",
   });
   const created = await api("POST", "/api/certificates", payload);
   const activated = await api("PATCH", `/api/certificates/${(created.json as CertificateRecordResponse).id}/activate`);
   const record = activated.json as CertificateRecordResponse;
   assert.equal(record.phoneNumber, payload.phoneNumber);
+  assert.equal(record.volunteerTeam, payload.volunteerTeam);
+  assert.equal(record.position, payload.position);
   const exportBytes = async () => {
     const buffers = [];
     for (const suffix of ["export.png", "export.pdf"]) {
@@ -197,11 +200,16 @@ test("internal phone never changes exported PNG, PDF or print sheets; activation
   const before = await exportBytes();
   const saved = await api("PUT", `/api/certificates/${record.id}`, {
     ...payload, status: "active", photoDataUrl: undefined, phoneNumber: "+380990099009",
+    volunteerTeam: "Київське Коло", position: "Волонтер",
   });
   assert.equal(saved.status, 200);
   const after = await exportBytes();
   assert.deepEqual(after, before, "all document bytes are independent of internal contact data");
-  assert.equal(((await api("PATCH", `/api/certificates/${record.id}/renew`)).json as CertificateRecordResponse).phoneNumber, "+380990099009");
+  const renewed = await api("PATCH", `/api/certificates/${record.id}/renew`);
+  const renewedRecord = renewed.json as CertificateRecordResponse;
+  assert.equal(renewedRecord.volunteerTeam, "Київське Коло");
+  assert.equal(renewedRecord.position, "Волонтер");
+  assert.equal(renewedRecord.phoneNumber, "+380990099009");
 });
 
 test("draft create via multipart supports missing dates and photo; deletion needs no photo", async () => {
@@ -324,8 +332,10 @@ test("transactional draft migration preserves all 15 old columns and existing ph
     const after = { ...migratedDb.prepare("SELECT * FROM certificate_records").get() };
     assert.equal(after.status, "active");
     delete after.status;
-    assert.equal(after.phone_number, null);
-    delete after.phone_number;
+    for (const column of ["phone_number", "volunteer_team", "position"]) {
+      assert.equal(after[column], null);
+      delete after[column];
+    }
     assert.deepEqual(after, before, "every previous field is preserved byte-for-byte");
     assert.ok(migratedDb.prepare("SELECT name FROM sqlite_master WHERE name = 'old_certificate_name_index'").get());
     assert.equal(migratedDb.prepare("PRAGMA user_version").get()?.user_version, 4);
@@ -367,6 +377,112 @@ test("failed migration rolls back the schema, rows, indexes and version marker t
     assert.deepEqual(reopened.prepare("SELECT * FROM certificate_records").all(), dataBefore);
     assert.equal(reopened.prepare("PRAGMA user_version").get()?.user_version, 3);
     reopened.close();
+  } finally {
+    await rm(storageRoot, { recursive: true, force: true });
+  }
+});
+
+test("optional team and position support JSON/multipart create, read, update, omission and clearing", async () => {
+  for (const status of ["draft", "active"]) {
+    for (const multipart of [false, true]) {
+      const payload = draftPayload({ status, issuedAt: "2026-01-01", validUntil: "2028-12-31" });
+      const send = async (method: string, url: string, extra: Record<string, unknown> = {}) => {
+        if (!multipart) {
+          const response = await api(method, url, { ...payload, ...extra, photoDataUrl });
+          return { ...response, json: response.json as CertificateRecordResponse };
+        }
+        const form = new FormData();
+        for (const [key, value] of Object.entries({ ...payload, ...extra })) {
+          if (value !== undefined) form.set(key, value === null ? "" : String(value));
+        }
+        form.set("photo", new Blob([new Uint8Array(photoBuffer)], { type: "image/png" }), "test.png");
+        const response = await fetch(`${baseUrl}${url}`, { method, body: form });
+        return { status: response.status, json: await response.json() as CertificateRecordResponse };
+      };
+      const empty = await send("POST", "/api/certificates");
+      assert.equal(empty.status, 201);
+      assert.equal(empty.json.volunteerTeam, null);
+      assert.equal(empty.json.position, null);
+      const created = await send("POST", "/api/certificates", {
+        certificateNumber: `TEAM-${++number}`, volunteerTeam: "  Команда  Патріот  ", position: "  Керівник  команди ",
+      });
+      assert.equal(created.status, 201);
+      const url = `/api/certificates/${created.json.id}`;
+      const save = (extra: Record<string, unknown>) => send("PUT", url, { certificateNumber: created.json.certificateNumber, ...extra });
+      assert.equal(created.json.volunteerTeam, "Команда Патріот");
+      assert.equal(created.json.position, "Керівник команди");
+      assert.deepEqual((await api("GET", url)).json, created.json);
+      const list = (await api("GET", "/api/certificates")).json as CertificateRecordResponse[];
+      assert.ok(list.some(r => r.id === created.json.id && r.position === "Керівник команди"));
+      const unchanged = await save({});
+      assert.equal(unchanged.json.volunteerTeam, "Команда Патріот");
+      assert.equal(unchanged.json.position, "Керівник команди");
+      const edited = await save({ volunteerTeam: "Київське Коло", position: "Волонтер" });
+      assert.equal(edited.status, 200);
+      assert.equal(edited.json.volunteerTeam, "Київське Коло");
+      assert.equal(edited.json.position, "Волонтер");
+      const teamOnly = await save({ position: null });
+      assert.equal(teamOnly.json.volunteerTeam, "Київське Коло");
+      assert.equal(teamOnly.json.position, null);
+      const positionOnly = await save({ volunteerTeam: "", position: "Координатор" });
+      assert.equal(positionOnly.json.volunteerTeam, null);
+      assert.equal(positionOnly.json.position, "Координатор");
+      for (const value of [null, "", " \t "]) {
+        const cleared = await save({ volunteerTeam: value, position: value });
+        assert.equal(cleared.status, 200);
+        assert.equal(cleared.json.volunteerTeam, null);
+        assert.equal(cleared.json.position, null);
+      }
+      const db = new DatabaseSync(path.join(dataRoot, "certificates/certificates.sqlite"));
+      const stored = db.prepare("SELECT volunteer_team, position FROM certificate_records WHERE id = ?").get(created.json.id);
+      assert.equal(stored?.volunteer_team, null);
+      assert.equal(stored?.position, null);
+      db.close();
+      assert.equal((await api("DELETE", url)).status, 200);
+      assert.equal((await api("DELETE", `/api/certificates/${empty.json.id}`)).status, 200);
+    }
+  }
+});
+
+test("invalid team and position types fail without changing the saved record", async () => {
+  const payload = draftPayload({ volunteerTeam: "Команда Патріот", position: "Волонтер" });
+  const created = await api("POST", "/api/certificates", payload);
+  assert.equal(created.status, 201);
+  const record = created.json as CertificateRecordResponse;
+  const url = `/api/certificates/${record.id}`;
+  for (const field of ["volunteerTeam", "position"]) {
+    for (const value of [42, false, {}, []]) {
+      assert.equal((await api("PUT", url, { ...payload, [field]: value })).status, 400);
+      assert.deepEqual((await api("GET", url)).json, created.json);
+    }
+  }
+});
+
+test("v4 additive migration preserves all old data and is idempotent", async () => {
+  const storageRoot = await mkdtemp(path.join(tmpdir(), "avku-team-migration-"));
+  try {
+    const original = new CertificateRepository({ storageRoot, templatesDirectory });
+    await original.create({ status: "draft", fullName: "Волонтер", certificateNumber: "TEAM-MIGRATION", phoneNumber: "+380670010203" });
+    const db = new DatabaseSync(path.join(storageRoot, "certificates.sqlite"));
+    db.exec("ALTER TABLE certificate_records DROP COLUMN volunteer_team; ALTER TABLE certificate_records DROP COLUMN position;");
+    const before = db.prepare("SELECT * FROM certificate_records").all().map(row => ({ ...row }));
+    db.close();
+    const reopened = new CertificateRepository({ storageRoot, templatesDirectory });
+    const records = await reopened.list();
+    assert.equal(records[0].volunteerTeam, null);
+    assert.equal(records[0].position, null);
+    const migratedDb = new DatabaseSync(path.join(storageRoot, "certificates.sqlite"));
+    const after = migratedDb.prepare("SELECT * FROM certificate_records").all().map(row => {
+      const { volunteer_team, position, ...oldFields } = row;
+      assert.equal(volunteer_team, null);
+      assert.equal(position, null);
+      return oldFields;
+    });
+    assert.deepEqual(after, before);
+    assert.equal(migratedDb.prepare("PRAGMA user_version").get()?.user_version, 4);
+    assert.equal(migratedDb.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok");
+    assert.deepEqual(await new CertificateRepository({ storageRoot, templatesDirectory }).list(), records);
+    migratedDb.close();
   } finally {
     await rm(storageRoot, { recursive: true, force: true });
   }

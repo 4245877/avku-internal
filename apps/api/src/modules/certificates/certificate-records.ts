@@ -71,6 +71,8 @@ const CERTIFICATE_RECORDS_COLUMNS = `
         id TEXT PRIMARY KEY NOT NULL,
         full_name TEXT NOT NULL CHECK (length(trim(full_name)) > 0),
         phone_number TEXT,
+        volunteer_team TEXT,
+        position TEXT,
         first_name_en TEXT NOT NULL DEFAULT '',
         last_name_en TEXT NOT NULL DEFAULT '',
         certificate_number TEXT NOT NULL COLLATE NOCASE UNIQUE
@@ -108,6 +110,8 @@ const CERTIFICATE_RECORDS_COLUMN_NAMES = [
   "id",
   "full_name",
   "phone_number",
+  "volunteer_team",
+  "position",
   "first_name_en",
   "last_name_en",
   "certificate_number",
@@ -156,6 +160,9 @@ export interface CertificateRecord {
   fullName: string;
   /** Internal contact information; never passed to the document renderer. */
   phoneNumber: string | null;
+  /** Optional registry details, independent of the printed certificate template. */
+  volunteerTeam: string | null;
+  position: string | null;
   firstNameEn: string;
   lastNameEn: string;
   certificateNumber: string;
@@ -181,6 +188,8 @@ export interface CertificatePayload {
   status?: unknown;
   fullName?: unknown;
   phoneNumber?: unknown;
+  volunteerTeam?: unknown;
+  position?: unknown;
   firstNameEn?: unknown;
   lastNameEn?: unknown;
   certificateNumber?: unknown;
@@ -245,6 +254,8 @@ interface NormalizedCertificatePayload {
   status: CertificateStatus;
   fullName: string;
   phoneNumber: string | null;
+  volunteerTeam: string | null;
+  position: string | null;
   firstNameEn: string;
   lastNameEn: string;
   certificateNumber: string;
@@ -266,11 +277,11 @@ function normalizeWhitespace(value: string): string {
     .replace(/\s+/g, " ");
 }
 
-function normalizePhoneNumber(value: unknown, fallback: string | null = null): string | null {
+function normalizeNullableText(value: unknown, errorMessage: string, fallback: string | null = null): string | null {
   if (value === undefined) return fallback;
   if (value === null) return null;
   if (typeof value !== "string") {
-    throw new Error("Номер телефону має бути рядком.");
+    throw new Error(errorMessage);
   }
   return normalizeWhitespace(value) || null;
 }
@@ -612,11 +623,13 @@ function normalizeCertificatePayload(
   status: CertificateStatus = "active",
   fallbackFields: Pick<
     CertificateRecord,
-    "firstNameEn" | "lastNameEn" | "phoneNumber"
+    "firstNameEn" | "lastNameEn" | "phoneNumber" | "volunteerTeam" | "position"
   > = {
     firstNameEn: "",
     lastNameEn: "",
     phoneNumber: null,
+    volunteerTeam: null,
+    position: null,
   },
 ): NormalizedCertificatePayload {
   const fullName = normalizeRequiredText(
@@ -637,7 +650,9 @@ function normalizeCertificatePayload(
   return {
     status,
     fullName,
-    phoneNumber: normalizePhoneNumber(payload.phoneNumber, fallbackFields.phoneNumber),
+    phoneNumber: normalizeNullableText(payload.phoneNumber, "Номер телефону має бути рядком.", fallbackFields.phoneNumber),
+    volunteerTeam: normalizeNullableText(payload.volunteerTeam, "Волонтерська команда: значення має бути текстом.", fallbackFields.volunteerTeam),
+    position: normalizeNullableText(payload.position, "Посада: значення має бути текстом.", fallbackFields.position),
     firstNameEn: normalizeOptionalText(
       payload.firstNameEn,
       "Ім'я англійською",
@@ -691,6 +706,8 @@ function rowToRecord(row: Record<string, unknown>): CertificateRecord {
     status: row.status === "draft" ? "draft" : "active",
     fullName: String(row.full_name ?? ""),
     phoneNumber: row.phone_number == null ? null : String(row.phone_number),
+    volunteerTeam: row.volunteer_team == null ? null : String(row.volunteer_team),
+    position: row.position == null ? null : String(row.position),
     firstNameEn: String(row.first_name_en ?? ""),
     lastNameEn: String(row.last_name_en ?? ""),
     certificateNumber: String(row.certificate_number ?? ""),
@@ -1524,6 +1541,8 @@ export class CertificateRepository {
         ["last_name_en", "TEXT NOT NULL DEFAULT ''"],
         ["photo_crop_rotation", "REAL NOT NULL DEFAULT 0"],
         ["phone_number", "TEXT"],
+        ["volunteer_team", "TEXT"],
+        ["position", "TEXT"],
       ]) {
         if (!names.has(name)) {
           database.exec(`ALTER TABLE certificate_records ADD COLUMN ${name} ${definition}`);
@@ -1557,7 +1576,7 @@ export class CertificateRepository {
         CREATE INDEX IF NOT EXISTS idx_certificate_records_valid_until ON certificate_records(valid_until);
       `);
       const version = database.prepare("PRAGMA user_version").get() as Record<string, unknown>;
-      // The optional phone column is an additive extension of v4, detected by
+      // Optional text columns are additive extensions of v4, detected by
       // table_info above. Retain v4 for existing backup/restore protocol readers.
       if (Number(version.user_version) < 4) {
         database.exec("PRAGMA user_version = 4");
@@ -1647,6 +1666,8 @@ export class CertificateRepository {
     return {
       status: "active",
       phoneNumber: null,
+      volunteerTeam: null,
+      position: null,
       id: normalizeRequiredText(
         source.id,
         "ID",
@@ -1693,6 +1714,8 @@ export class CertificateRepository {
         id,
         full_name,
         phone_number,
+        volunteer_team,
+        position,
         first_name_en,
         last_name_en,
         certificate_number,
@@ -1708,11 +1731,13 @@ export class CertificateRepository {
         updated_at,
         status
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.fullName,
       record.phoneNumber,
+      record.volunteerTeam,
+      record.position,
       record.firstNameEn,
       record.lastNameEn,
       record.certificateNumber,
@@ -1739,6 +1764,8 @@ export class CertificateRepository {
       SET
         full_name = ?,
         phone_number = ?,
+        volunteer_team = ?,
+        position = ?,
         first_name_en = ?,
         last_name_en = ?,
         certificate_number = ?,
@@ -1756,6 +1783,8 @@ export class CertificateRepository {
     `).run(
       record.fullName,
       record.phoneNumber,
+      record.volunteerTeam,
+      record.position,
       record.firstNameEn,
       record.lastNameEn,
       record.certificateNumber,

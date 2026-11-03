@@ -2,17 +2,17 @@
 # Update all image tags/build arguments together after isolated validation.
 services:
   api:
-    image: avku-internal-api:audit-20261027
+    image: avku-internal-api:teams-20261103
     pull_policy: never
     build:
       args:
-        AVKU_RELEASE_ID: audit-20261027
+        AVKU_RELEASE_ID: teams-20261103
   web:
-    image: avku-internal-web:audit-20261027
+    image: avku-internal-web:teams-20261103
     pull_policy: never
   backup-worker:
-    image: avku-internal-backup-worker:audit-20261027
+    image: avku-internal-backup-worker:teams-20261103
     pull_policy: never
     build:
       args:
-        AVKU_RELEASE_ID: audit-20261027
+        AVKU_RELEASE_ID: teams-20261103

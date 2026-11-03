@@ -112,6 +112,11 @@ function appendCertificateFields(formData, payload) {
   if (payload.phoneNumber !== undefined) {
     formData.append('phoneNumber', payload.phoneNumber ?? '');
   }
+  for (const field of ['volunteerTeam', 'position']) {
+    if (payload[field] !== undefined) {
+      formData.append(field, payload[field] ?? '');
+    }
+  }
   formData.append('firstNameEn', payload.firstNameEn ?? '');
   formData.append('lastNameEn', payload.lastNameEn ?? '');
   formData.append('certificateNumber', payload.certificateNumber ?? '');

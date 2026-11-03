@@ -165,6 +165,52 @@ describe('CertificatesPage draft workflow', () => {
   const saveDraft = () => fireEvent.click(within(editor()).getByRole('button', { name: 'Зберегти чернетку' }));
   const activateDraft = () => fireEvent.click(within(editor()).getByRole('button', { name: 'Оформити посвідчення' }));
 
+  it.each(['draft', 'active'])('edits, searches and clears optional team details on a %s record', async (status) => {
+    const record = { ...RECORD_A, status, volunteerTeam: 'Команда Патріот', position: 'Керівник' };
+    certificateApi.fetchCertificates.mockResolvedValue([record]);
+    certificateApi.updateCertificate.mockImplementation(async (id, payload) => ({ ...record, ...payload, id }));
+    render(<CertificatesPage />);
+    await flush();
+    await openRecord(record.fullName);
+    expect(screen.getByLabelText('Волонтерська команда').value).toBe(record.volunteerTeam);
+    expect(screen.getByLabelText('Посада').value).toBe(record.position);
+    const registry = screen.getByRole('complementary', { name: 'Реєстр посвідчень' });
+    for (const query of ['Патріот', 'Керівник']) {
+      fireEvent.change(within(registry).getByRole('searchbox'), { target: { value: query } });
+      expect(within(registry).getAllByRole('article')).toHaveLength(1);
+    }
+    fireEvent.change(within(registry).getByRole('searchbox'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Волонтерська команда'), { target: { value: '  Київське  Коло  ' } });
+    fireEvent.change(screen.getByLabelText('Посада'), { target: { value: 'Волонтер' } });
+    expect(within(editor()).getByText('Є незбережені зміни')).toBeTruthy();
+    const save = () => fireEvent.click(within(editor()).getByRole('button', { name: status === 'draft' ? 'Зберегти чернетку' : 'Зберегти зміни' }));
+    save();
+    await waitFor(() => expect(certificateApi.updateCertificate).toHaveBeenCalledTimes(1));
+    expect(certificateApi.updateCertificate.mock.calls[0][1]).toMatchObject({ volunteerTeam: 'Київське Коло', position: 'Волонтер' });
+    await waitFor(() => expect(screen.getByLabelText('Волонтерська команда').value).toBe('Київське Коло'));
+    expect(within(registry).getByText('Команда: Київське Коло · Посада: Волонтер')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Волонтерська команда'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Посада'), { target: { value: '' } });
+    save();
+    await waitFor(() => expect(certificateApi.updateCertificate).toHaveBeenCalledTimes(2));
+    expect(certificateApi.updateCertificate.mock.calls[1][1]).toMatchObject({ volunteerTeam: null, position: null });
+    await waitFor(() => expect(within(registry).queryByText(/Команда:/)).toBeNull());
+  });
+
+  it('creates a draft with optional team details', async () => {
+    certificateApi.createCertificate.mockImplementation(async (payload) => ({ ...draft, ...payload }));
+    render(<CertificatesPage />);
+    await flush();
+    fireEvent.change(screen.getByLabelText('ПІБ'), { target: { value: draft.fullName } });
+    fireEvent.change(screen.getByLabelText('Номер посвідчення'), { target: { value: draft.certificateNumber } });
+    fireEvent.change(screen.getByLabelText('Волонтерська команда'), { target: { value: 'Команда Патріот' } });
+    fireEvent.change(screen.getByLabelText('Посада'), { target: { value: 'Волонтер' } });
+    saveDraft();
+    await waitFor(() => expect(certificateApi.createCertificate).toHaveBeenCalledOnce());
+    expect(certificateApi.createCertificate.mock.calls[0][0]).toMatchObject({ volunteerTeam: 'Команда Патріот', position: 'Волонтер' });
+    await waitFor(() => expect(screen.getByText('Чернетку збережено.')).toBeTruthy());
+  });
+
   it('loads, edits and clears an internal phone without adding it to the card preview', async () => {
     const phone = '+380670010203';
     certificateApi.fetchCertificates.mockResolvedValue([{ ...draft, phoneNumber: phone }]);
@@ -201,6 +247,7 @@ describe('CertificatesPage draft workflow', () => {
     expect(certificateApi.createCertificate.mock.calls[0][0]).toMatchObject({
       status: 'draft', issuedAt: null, validUntil: null,
       photoFile: undefined, photoDataUrl: undefined,
+      volunteerTeam: null, position: null,
     });
     await waitFor(() => expect(screen.getByText('Чернетку збережено.')).toBeTruthy());
     expect(within(editor()).getByText('Чернетка')).toBeTruthy();
